@@ -1,0 +1,34 @@
+.\llama-server.exe `
+  -m "F:\LLM\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-UD-Q4_K_XL.gguf" `
+  --spec-draft-model "F:\LLM\Anbeeld\Qwen3.6-27B-DFlash-GGUF\Qwen3.6-27B-DFlash-Q5_K_M.gguf" `
+  --mmproj "F:\LLM\unsloth\Qwen3.6-27B-GGUF\mmproj-F32.gguf" `
+  --spec-dflash-cross-ctx 1024 `
+  --no-mmproj-offload `
+  --kv-unified `
+  --host 0.0.0.0 `
+  --port 8080 `
+  --gpu-layers all `
+  --fit on `
+  --spec-draft-ngl all `
+  --spec-type dflash `
+  --parallel 1 `
+  --cache-ram 0 `
+  --ctx-size 120000 `
+  --cache-type-k q4_0 `
+  --cache-type-v q4_0 `
+  --flash-attn on `
+  --batch-size 2048 `
+  --ubatch-size 1024 `
+  --no-mmap `
+  --mlock `
+  --jinja `
+  --temp 0.6 `
+  --min-p 0.0 `
+  --repeat-penalty 1.0 `
+  --presence-penalty 0.0 `
+  --chat-template-kwargs '{\"preserve_thinking\":true}' `
+  --metrics `
+  --slots `
+  --perf `
+  --reasoning on
+pause
