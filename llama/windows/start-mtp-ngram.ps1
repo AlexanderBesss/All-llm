@@ -1,0 +1,29 @@
+.\llama-server.exe `
+  -m "F:\LLM\unsloth\Qwen3.6-27B-MTP-GGUF\Qwen3.6-27B-UD-Q4_K_XL.gguf" `
+  --port 8080 `
+  --host 0.0.0.0 `
+  --gpu-layers all `
+  --fit on `
+  --spec-type draft-mtp,ngram-mod `
+  --spec-draft-n-max 3 `
+  --spec-ngram-mod-n-max 4 `
+  --gpu-layers-draft all `
+  --parallel 1 `
+  --cache-ram 0 `
+  --ctx-size 120000 `
+  --cache-type-k q4_0 `
+  --cache-type-v q4_0 `
+  --flash-attn on `
+  --batch-size 2048 `
+  --ubatch-size 1024 `
+  --no-mmap `
+  --jinja `
+  --temp 0.6 `
+  --top-p 0.95 `
+  --min-p 0.0 `
+  --repeat-penalty 1.0 `
+  --metrics `
+  --slots `
+  --perf `
+  --presence-penalty 0.0
+pause
