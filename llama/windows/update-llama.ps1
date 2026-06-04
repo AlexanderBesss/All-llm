@@ -4,11 +4,11 @@
 .DESCRIPTION
     Fetches the latest release from ggml-org/llama.cpp, downloads the
     Windows x64 (CUDA 13) zip, extracts it, and overwrites conflicting
-    files in the current folder.
-    If llama.cpp binaries are missing from the folder, this also performs
+    files in llama/windows/llama.
+    If llama.cpp binaries are missing from llama/windows/llama, this also performs
     the initial install.
-    Place this script inside your llama.cpp bin folder and run it.
-    All output is also saved to update-llama.log in the same folder.
+    Place this script inside llama/windows and run it.
+    All output is also saved to update-llama.log beside this script.
 #>
 
 $LogFile = Join-Path $PSScriptRoot 'update-llama.log'
@@ -23,6 +23,7 @@ $RepoName     = 'llama.cpp'
 $AssetPattern = '^llama-.*-bin-win-cuda-13.*-x64\.zip$'
 
 $ScriptDir = $PSScriptRoot
+$InstallDir = Join-Path $ScriptDir 'llama'
 $TempZip   = Join-Path $env:TEMP 'llama-update-latest.zip'
 $TempDir   = Join-Path $env:TEMP "llama-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
 
@@ -70,6 +71,10 @@ function Remove-PathQuietly {
 function Get-CurrentVersion {
     param([string]$Path)
 
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
     $Marker = Get-ChildItem -Path $Path -Filter 'VERSION-*' -File |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
@@ -81,10 +86,10 @@ function Get-CurrentVersion {
     return $null
 }
 
-$IsInstalled = Test-LlamaCppInstalled -Path $ScriptDir
-$CurrentVersion = Get-CurrentVersion -Path $ScriptDir
+$IsInstalled = Test-LlamaCppInstalled -Path $InstallDir
+$CurrentVersion = Get-CurrentVersion -Path $InstallDir
 if (-not $IsInstalled) {
-    Write-Host "No llama.cpp binaries found in this folder; running initial install." -ForegroundColor Yellow
+    Write-Host "No llama.cpp binaries found in '$InstallDir'; running initial install." -ForegroundColor Yellow
     Write-Host ""
 }
 
@@ -119,7 +124,7 @@ if ($CurrentVersion) {
 Write-Host "       Latest release : $TagName" -ForegroundColor Green
 
 # ---------- CHECK: Already up to date? ----------
-$CurrentVersionMarker = Join-Path $ScriptDir "VERSION-$TagName"
+$CurrentVersionMarker = Join-Path $InstallDir "VERSION-$TagName"
 if ($IsInstalled -and (Test-Path $CurrentVersionMarker)) {
     Write-Host ""
     Write-Host "Already on $TagName -- nothing to do." -ForegroundColor Yellow
@@ -188,7 +193,11 @@ try {
 }
 
 # ---------- STEP 5: Merge files ----------
-Write-Host '[5/5] Merging files into current folder...' -ForegroundColor Cyan
+Write-Host "[5/5] Merging files into '$InstallDir'..." -ForegroundColor Cyan
+
+if (-not (Test-Path -LiteralPath $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir | Out-Null
+}
 
 $SourceFiles = Get-ChildItem -Path $TempDir -File
 $Replaced = 0
@@ -196,7 +205,7 @@ $Added    = 0
 $Skipped  = 0
 
 foreach ($File in $SourceFiles) {
-    $Dest = Join-Path $ScriptDir $File.Name
+    $Dest = Join-Path $InstallDir $File.Name
 
     if (Test-Path $Dest) {
         $HashSrc = Get-FileHash $File.FullName -Algorithm MD5
@@ -220,14 +229,15 @@ Remove-PathQuietly -Path $TempZip | Out-Null
 Remove-PathQuietly -Path $TempDir -Recurse | Out-Null
 
 # Write version marker file (clean up old markers first)
-Get-ChildItem -Path $ScriptDir -Filter 'VERSION-*' -File | ForEach-Object {
+Get-ChildItem -Path $InstallDir -Filter 'VERSION-*' -File | ForEach-Object {
     Remove-PathQuietly -Path $_.FullName | Out-Null
 }
-$VersionMarker = Join-Path $ScriptDir "VERSION-$TagName"
+$VersionMarker = Join-Path $InstallDir "VERSION-$TagName"
 "$TagName" | Set-Content -Path $VersionMarker -NoNewline
 
 Write-Host ''
 Write-Host '=== Update Summary ===' -ForegroundColor Cyan
+Write-Host "  Install folder : $InstallDir" -ForegroundColor Cyan
 Write-Host "  Version marker : $VersionMarker" -ForegroundColor Cyan
 Write-Host "  New version    : $TagName ($ZipName)"
 Write-Host "  Files replaced : $Replaced" -ForegroundColor Yellow

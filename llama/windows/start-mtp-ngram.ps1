@@ -1,4 +1,4 @@
-.\llama-server.exe `
+& (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
   -m "F:\LLM\unsloth\Qwen3.6-27B-MTP-GGUF\Qwen3.6-27B-UD-Q4_K_XL.gguf" `
   --port 8080 `
   --host 0.0.0.0 `
