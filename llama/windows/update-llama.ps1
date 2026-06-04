@@ -5,7 +5,9 @@
     Fetches the latest release from ggml-org/llama.cpp, downloads the
     Windows x64 (CUDA 13) zip, extracts it, and overwrites conflicting
     files in the current folder.
-    Place this script inside your existing llama.cpp bin folder and run it.
+    If llama.cpp binaries are missing from the folder, this also performs
+    the initial install.
+    Place this script inside your llama.cpp bin folder and run it.
     All output is also saved to update-llama.log in the same folder.
 #>
 
@@ -25,6 +27,66 @@ $TempZip   = Join-Path $env:TEMP 'llama-update-latest.zip'
 $TempDir   = Join-Path $env:TEMP "llama-update-$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 $ErrorOccurred = $false
+
+function Test-LlamaCppInstalled {
+    param([string]$Path)
+
+    return (
+        (Test-Path (Join-Path $Path 'llama-server.exe')) -or
+        (Test-Path (Join-Path $Path 'llama-cli.exe')) -or
+        (Test-Path (Join-Path $Path 'main.exe'))
+    )
+}
+
+function Remove-PathQuietly {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [switch]$Recurse
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+    for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+        try {
+            if ($Recurse) {
+                Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+            } else {
+                Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            }
+            return $true
+        } catch {
+            if ($Attempt -lt 3) {
+                Start-Sleep -Milliseconds (250 * $Attempt)
+            } else {
+                Write-Host "WARNING: Could not remove '$Path'. It may still be in use: $($_.Exception.Message)" -ForegroundColor Yellow
+                return $false
+            }
+        }
+    }
+}
+
+function Get-CurrentVersion {
+    param([string]$Path)
+
+    $Marker = Get-ChildItem -Path $Path -Filter 'VERSION-*' -File |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
+    if ($Marker) {
+        return $Marker.Name.Substring('VERSION-'.Length)
+    }
+
+    return $null
+}
+
+$IsInstalled = Test-LlamaCppInstalled -Path $ScriptDir
+$CurrentVersion = Get-CurrentVersion -Path $ScriptDir
+if (-not $IsInstalled) {
+    Write-Host "No llama.cpp binaries found in this folder; running initial install." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # ---------- STEP 1: Fetch latest release ----------
 Write-Host '[1/5] Fetching latest release from GitHub...' -ForegroundColor Cyan
@@ -47,11 +109,18 @@ if ($ErrorOccurred) {
 }
 
 $TagName = $Release.tag_name
-Write-Host "       Latest release: $TagName" -ForegroundColor Green
+if ($CurrentVersion) {
+    Write-Host "       Current version: $CurrentVersion" -ForegroundColor Gray
+} elseif ($IsInstalled) {
+    Write-Host "       Current version: unknown (no VERSION-* marker found)" -ForegroundColor Yellow
+} else {
+    Write-Host "       Current version: not installed" -ForegroundColor Yellow
+}
+Write-Host "       Latest release : $TagName" -ForegroundColor Green
 
 # ---------- CHECK: Already up to date? ----------
 $CurrentVersionMarker = Join-Path $ScriptDir "VERSION-$TagName"
-if (Test-Path $CurrentVersionMarker) {
+if ($IsInstalled -and (Test-Path $CurrentVersionMarker)) {
     Write-Host ""
     Write-Host "Already on $TagName -- nothing to do." -ForegroundColor Yellow
     Write-Host ""
@@ -82,7 +151,7 @@ Write-Host "       Found: $ZipName" -ForegroundColor Green
 Write-Host "[3/5] Downloading ($([math]::Round($Asset.size / 1MB, 1)) MB)..." -ForegroundColor Cyan
 
 try {
-    if (Test-Path $TempZip) { Remove-Item $TempZip -Force }
+    if (Test-Path $TempZip) { Remove-PathQuietly -Path $TempZip | Out-Null }
     $null = curl.exe -sL -o $TempZip -H "User-Agent: llama-updater-pwsh" $DownloadUrl
     if (-not (Test-Path $TempZip)) { throw "curl.exe returned no file" }
     Write-Host '       Download complete.' -ForegroundColor Green
@@ -98,7 +167,7 @@ try {
 Write-Host '[4/5] Extracting to temp folder...' -ForegroundColor Cyan
 
 try {
-    if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force }
+    if (Test-Path $TempDir) { Remove-PathQuietly -Path $TempDir -Recurse | Out-Null }
     New-Item -ItemType Directory -Path $TempDir | Out-Null
     Expand-Archive -Path $TempZip -DestinationPath $TempDir -Force
 
@@ -107,7 +176,7 @@ try {
     if ($ExtractedItems.Count -eq 1 -and $ExtractedItems[0].PSIsContainer) {
         $InnerFolder = $ExtractedItems[0].FullName
         Get-ChildItem $InnerFolder | Move-Item -Destination $TempDir -Force
-        Remove-Item $InnerFolder -Force
+        Remove-PathQuietly -Path $InnerFolder -Recurse | Out-Null
         Write-Host "       Flattened inner folder." -ForegroundColor Gray
     }
 } catch {
@@ -147,11 +216,13 @@ foreach ($File in $SourceFiles) {
 }
 
 # Clean up temp files
-Remove-Item $TempZip -Force -ErrorAction SilentlyContinue
-Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-PathQuietly -Path $TempZip | Out-Null
+Remove-PathQuietly -Path $TempDir -Recurse | Out-Null
 
 # Write version marker file (clean up old markers first)
-Get-ChildItem -Path $ScriptDir -Filter 'VERSION-*' -File | Remove-Item -Force
+Get-ChildItem -Path $ScriptDir -Filter 'VERSION-*' -File | ForEach-Object {
+    Remove-PathQuietly -Path $_.FullName | Out-Null
+}
 $VersionMarker = Join-Path $ScriptDir "VERSION-$TagName"
 "$TagName" | Set-Content -Path $VersionMarker -NoNewline
 
