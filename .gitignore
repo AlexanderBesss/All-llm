@@ -1,2 +1,5 @@
-/llama/windows/llama/
-/llama/windows/*.log
+/llm-servers/llama/windows/llama/
+/llm-servers/llama/windows/*.log
+/llm-servers/beellama/bin/
+/llm-servers/beellama/*.log
+/models/**/*.gguf
