@@ -2,5 +2,10 @@
 /llm-servers/llama/windows/*.log
 /llm-servers/beellama/bin/
 /llm-servers/beellama/*.log
+/whisper-note/bin/
+/whisper-note/obj/
+/whisper-note/publish/
 /models/**/*.gguf
 /models
+*.log
+*.pdb
