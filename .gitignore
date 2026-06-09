@@ -3,3 +3,4 @@
 /llm-servers/beellama/bin/
 /llm-servers/beellama/*.log
 /models/**/*.gguf
+/models

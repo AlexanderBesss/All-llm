@@ -1,0 +1,22 @@
+& (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
+  -m "..\..\..\models\lmstudio-community\gemma-4-12B-it-QAT-GGUF\gemma-4-12B-it-QAT-Q4_0.gguf" `
+  --mmproj "..\..\..\models\lmstudio-community\gemma-4-12B-it-QAT-GGUF\mmproj-gemma-4-12B-it-QAT-BF16.gguf" `
+  --port 8080 `
+  --host 0.0.0.0 `
+  --gpu-layers all `
+  --ctx-size 32768 `
+  --cache-type-k q4_0 `
+  --cache-type-v q4_0 `
+  --flash-attn on `
+  --batch-size 2048 `
+  --ubatch-size 1024 `
+  --no-mmap `
+  --jinja `
+  --temp 0.7 `
+  --top-p 0.95 `
+  --min-p 0.05 `
+  --repeat-penalty 1.0 `
+  --metrics `
+  --slots `
+  --perf
+pause
