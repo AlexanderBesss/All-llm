@@ -10,3 +10,4 @@
 /open-webui-data/
 *.log
 *.pdb
+.venv
