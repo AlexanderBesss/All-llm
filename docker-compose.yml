@@ -1,0 +1,16 @@
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    # Workaround for Docker environments where bridge networking/veth is unsupported.
+    # Open WebUI will be available at http://localhost:3000 on the host.
+    network_mode: host
+    volumes:
+      - ./open-webui-data:/app/backend/data
+    environment:
+      PORT: "3000"
+      # Default local OpenAI-compatible backend, e.g. llama.cpp/vLLM started on host port 8080.
+      OPENAI_API_BASE_URLS: "http://localhost:8080/v1"
+      OPENAI_API_KEYS: "sk-local"
+
