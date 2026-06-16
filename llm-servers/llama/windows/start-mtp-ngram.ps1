@@ -11,9 +11,9 @@
   --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 120000 `
-  --cache-type-k q4_0 `
-  --cache-type-v q4_0 `
+  --ctx-size 100000 `
+  --cache-type-k q8_0 `
+  --cache-type-v q8_0 `
   --flash-attn on `
   --batch-size 2048 `
   --ubatch-size 1024 `
