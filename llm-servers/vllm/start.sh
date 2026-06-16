@@ -1,0 +1,1 @@
+./vllm serve Lorbus/Qwen3.6-27B-int4-AutoRound --dtype half --max-model-len 8000 --gpu-memory-utilization 0.92 --kv-cache-dtype turboquant_4bit_nc --max-num-seqs 1 --cpu-offload-gb 8 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --port 8080 --host 0.0.0.0 --trust-remote-code --compilation-config.cudagraph_mode none

@@ -7,5 +7,7 @@
 /whisper-note/publish/
 /models/**/*.gguf
 /models
+/open-webui-data/
 *.log
 *.pdb
+.venv
