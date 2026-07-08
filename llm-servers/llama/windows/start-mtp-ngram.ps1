@@ -1,7 +1,7 @@
 & (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
   -m "..\..\..\models\unsloth\Qwen3.6-27B-MTP-GGUF\Qwen3.6-27B-UD-Q4_K_XL.gguf" `
   --port 8080 `
-  --host 0.0.0.0 `
+  --host 127.0.0.1 `
   --gpu-layers all `
   --kv-unified `
   --fit on `
@@ -11,9 +11,9 @@
   --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 100000 `
-  --cache-type-k q8_0 `
-  --cache-type-v q8_0 `
+  --ctx-size 120000 `
+  --cache-type-k q4_0 `
+  --cache-type-v q4_0 `
   --flash-attn on `
   --batch-size 2048 `
   --ubatch-size 1024 `
