@@ -1,23 +1,19 @@
-param(
-    [ValidateSet('Q4_K_XL', 'Q5_K_S')]
-    [string]$MainQuant = 'Q4_K_XL'
-)
-
-$mainModel = "..\..\..\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-UD-$MainQuant.gguf"
-$mmproj = "..\..\..\models\unsloth\Qwen3.6-27B-GGUF\mmproj-F32.gguf"
-$draftModel = "..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf"
+$mainModel = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-Q2_g64.gguf"
+$mmproj = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-mmproj-BF16.gguf"
+$draftModel = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-dspark-Q4_1.gguf"
 
 & (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
     -m $mainModel `
-    --spec-draft-model $draftModel `
+    --mmproj $mmproj `
     --no-mmproj-offload `
+    --spec-draft-model $draftModel `
     --kv-unified `
     --host 0.0.0.0 `
     --port 8080 `
     --gpu-layers all `
     --fit on `
     --spec-draft-ngl all `
-    --spec-type draft-dflash,ngram-mod `
+    --spec-type draft-simple,ngram-mod `
     --spec-draft-n-max 6 `
     --spec-ngram-mod-n-max 4 `
     --spec-ngram-mod-n-match 24 `
