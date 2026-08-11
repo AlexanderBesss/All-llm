@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { adfToText } from "./jira.mjs";
 import { abortError, isAbortError } from "./git.mjs";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
 
@@ -36,40 +35,37 @@ async function sleep(ms, signal) {
   });
 }
 
-function normalizedText(value) {
-  return adfToText(value).replace(/\s+/g, " ").trim();
-}
-
-function subtaskSummaryIdentity(value) {
-  return normalizedText(value)
-    .replace(/^(?:[A-Z][A-Z0-9]+-\d+)\s*[-–—:]\s*/i, "")
-    .replace(/\s+(?:[-–—:]\s*)?(?:\(|\[)?[A-Z][A-Z0-9]+-\d+(?:\)|\])?\s*$/i, "")
-    .trim()
-    .toLocaleLowerCase();
-}
-
-function matchesSubtask(expected, issue, marker) {
-  const fields = issue.fields || {};
-  const summaryMatches = subtaskSummaryIdentity(fields.summary) === subtaskSummaryIdentity(expected.summary);
-  const description = normalizedText(fields.description);
-  return summaryMatches
-    && description.includes(normalizedText(marker));
-}
-
-function missingSubtasks(planned, found, marker) {
-  return planned.filter((expected) => !found.some((issue) => matchesSubtask(expected, issue, marker)));
-}
-
 function normalizePlan(plan) {
   if (!plan || typeof plan !== "object") throw new Error("Planner result must be an object.");
-  if (!Array.isArray(plan.subtasks)) throw new Error("Planner result must include a subtasks array.");
-  const directImplementation = typeof plan.directImplementation === "boolean"
-    ? plan.directImplementation
-    : plan.subtasks.length === 0;
-  if (directImplementation && plan.subtasks.length > 0) {
-    throw new Error("Planner marked the ticket for direct implementation but also returned subtasks.");
+  if (typeof plan.summary !== "string" || !plan.summary.trim()) throw new Error("Implementation plan must include a summary.");
+  if (!Array.isArray(plan.acceptanceCriteria) || plan.acceptanceCriteria.length === 0) {
+    throw new Error("Implementation plan must include acceptanceCriteria.");
   }
-  return { ...plan, directImplementation };
+  return {
+    summary: plan.summary,
+    acceptanceCriteria: plan.acceptanceCriteria,
+    risks: Array.isArray(plan.risks) ? plan.risks : [],
+    files: Array.isArray(plan.files) ? plan.files : [],
+    tests: Array.isArray(plan.tests) ? plan.tests : [],
+  };
+}
+
+function planDescription(plan, marker) {
+  return [
+    marker,
+    "",
+    "## Implementation plan",
+    plan.summary,
+    "",
+    "## Acceptance criteria",
+    ...plan.acceptanceCriteria.map((item) => `- ${item}`),
+    "",
+    "## Affected files",
+    ...(plan.files.length ? plan.files.map((item) => `- ${item}`) : ["- To be confirmed during implementation"]),
+    "",
+    "## Tests",
+    ...(plan.tests.length ? plan.tests.map((item) => `- ${item}`) : ["- Appropriate repository validation"]),
+  ].join("\n");
 }
 
 export class FactoryWorker {
@@ -170,7 +166,7 @@ export class FactoryWorker {
         issueKey,
         projectKey: issue.fields?.project?.key || this.config.jira.projectKey,
         issue,
-        stage: STAGES.PLANNING,
+        stage: STAGES.IMPLEMENTATION,
         leaseOwner: this.leaseOwner,
         leaseUntil,
       });
@@ -178,8 +174,7 @@ export class FactoryWorker {
         this.log("info", "issue:claim-skipped", { issueKey, runId });
         continue;
       }
-      this.log("info", "issue:claimed", { issueKey, runId, stage: STAGES.PLANNING, dryRun });
-      if (!dryRun) await this.transitionIfNeeded(issueKey, this.config.jira.statuses.planning);
+      this.log("info", "issue:claimed", { issueKey, runId, stage: STAGES.IMPLEMENTATION, dryRun });
       await this.advanceRun(claimed.run, { dryRun });
       return this.runResult("claimed", this.db.getRun(runId), issueKey);
     }
@@ -243,140 +238,33 @@ export class FactoryWorker {
   }
 
   async processRun(run, { dryRun = false } = {}) {
-    if (run.stage === STAGES.PLANNING) return this.processPlanning(run, { dryRun });
+    if (run.stage === STAGES.PLANNING) return this.migrateLegacyPlanning(run);
     if (run.stage === STAGES.IMPLEMENTATION) return this.processImplementation(run, { dryRun });
     if (run.stage === STAGES.PULL_REQUEST) return this.processPullRequest(run, { dryRun });
     return { stage: run.stage, status: run.status };
   }
 
-  async processPlanning(run, { dryRun }) {
-    this.throwIfStopping();
-    const marker = makeRunMarker(run.id);
-    this.log("info", "planning:start", { runId: run.id, issueKey: run.issue_key, dryRun });
-    const issue = await this.jira.getIssue(run.issue_key);
-    this.throwIfStopping();
-    this.log("info", "planning:issue-loaded", {
+  async migrateLegacyPlanning(run) {
+    const plan = run.plan_json ? normalizePlan(JSON.parse(run.plan_json)) : null;
+    this.log("info", "planning:legacy-migrated", {
       runId: run.id,
       issueKey: run.issue_key,
-      status: issue.fields?.status?.name || "",
-      summary: normalizedText(issue.fields?.summary || "").slice(0, 160),
+      hadPersistedPlan: Boolean(plan),
+      subtasksIgnored: true,
     });
-    const attempt = this.db.startStage(run.id, STAGES.PLANNING, hashInput({ issue, marker }));
-    this.log("info", "planning:attempt", { runId: run.id, attempt, marker });
-    try {
-      let plan;
-      let raw = null;
-      if (run.plan_json) {
-        plan = JSON.parse(run.plan_json);
-        this.log("info", "planning:reuse-plan", { runId: run.id, subtasks: plan.subtasks?.length || 0 });
-      } else {
-        if (dryRun) {
-          plan = {
-            summary: "Dry-run planning result",
-            acceptanceCriteria: ["Planning agent is configured and can produce structured output."],
-            risks: [],
-            files: [],
-            tests: [],
-            directImplementation: false,
-            subtasks: [{ summary: "Validate factory configuration", description: `${marker}\nValidate the factory configuration.`, dependsOn: [], files: [], tests: [] }],
-          };
-          this.log("info", "planning:dry-run-plan", { runId: run.id, subtasks: plan.subtasks.length });
-        } else {
-          this.log("info", "planning:agent-start", { runId: run.id });
-          ({ result: plan, raw } = await this.agent.plan({ issue, runId: run.id, marker }));
-          this.throwIfStopping();
-          this.log("info", "planning:agent-complete", {
-            runId: run.id,
-            summary: normalizedText(plan.summary || "").slice(0, 160),
-            subtasks: plan.subtasks?.length || 0,
-            acceptanceCriteria: plan.acceptanceCriteria?.length || 0,
-          });
-        }
-      }
-      plan = normalizePlan(plan);
-      this.db.updateRun(run.id, {
-        plan_json: JSON.stringify(plan),
-        issue_json: JSON.stringify(issue),
-        lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
-      });
-      this.log("info", "planning:plan-persisted", {
-        runId: run.id,
-        subtasks: plan.subtasks.length,
-        directImplementation: plan.directImplementation,
-      });
-      const subtasks = dryRun || plan.directImplementation
-        ? []
-        : await this.reconcileSubtasks(run.issue_key, marker, plan.subtasks);
-      if (!dryRun && plan.directImplementation) {
-        this.log("info", "planning:subtasks-skipped", {
-          runId: run.id,
-          issueKey: run.issue_key,
-          reason: "trivial-ticket",
-        });
-      }
-      this.log("info", "planning:subtasks-reconciled", {
-        runId: run.id,
-        expected: plan.subtasks.length,
-        found: subtasks.length,
-      });
-      if (!dryRun && subtasks.length < plan.subtasks.length) {
-        throw new Error(`Planning agent created ${subtasks.length}/${plan.subtasks.length} expected Jira subtasks for ${run.issue_key}.`);
-      }
-      if (!dryRun) {
-        const missing = missingSubtasks(plan.subtasks, subtasks, marker);
-        if (missing.length) {
-          throw new Error(`Jira subtasks did not match the plan identity for ${run.issue_key}: ${missing.map((item) => item.summary).join(", ")}.`);
-        }
-      }
-      this.db.finishStage(run.id, STAGES.PLANNING, attempt, { plan, agent: raw }, "completed");
-      this.db.updateRun(run.id, {
-        stage: STAGES.IMPLEMENTATION,
-        status: RUN_STATUSES.ACTIVE,
-        lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
-        last_error: null,
-        next_attempt_at: null,
-      });
-      this.log("info", "planning:complete", {
-        runId: run.id,
-        issueKey: run.issue_key,
-        nextStage: STAGES.IMPLEMENTATION,
-        subtasks: plan.subtasks.length,
-      });
-      return { stage: STAGES.PLANNING, plan };
-    } catch (error) {
-      return this.failStage(run, STAGES.PLANNING, attempt, error);
-    }
-  }
-
-  async reconcileSubtasks(parentKey, marker, expectedSubtasks) {
-    let found = [];
-    const maxChecks = Math.max(1, this.config.maxAttempts || 1);
-    for (let attempt = 0; attempt < maxChecks; attempt += 1) {
-      this.throwIfStopping();
-      this.log("info", "planning:subtasks-check", {
-        parentKey,
-        attempt: attempt + 1,
-        expected: expectedSubtasks.length,
-      });
-      found = await this.jira.findRunSubtasks(parentKey, marker);
-      this.log("info", "planning:subtasks-found", {
-        parentKey,
-        attempt: attempt + 1,
-        found: found.length,
-      });
-      if (found.length >= expectedSubtasks.length && missingSubtasks(expectedSubtasks, found, marker).length === 0) return found;
-      if (attempt + 1 < maxChecks) {
-        this.log("info", "planning:subtasks-wait", { parentKey, delayMs: 1_000 });
-        await sleep(1_000, this.signal);
-      }
-    }
-    return found;
+    this.db.updateRun(run.id, {
+      stage: STAGES.IMPLEMENTATION,
+      status: RUN_STATUSES.ACTIVE,
+      ...(plan ? { plan_json: JSON.stringify(plan) } : {}),
+      next_attempt_at: null,
+      lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
+    });
+    return { stage: STAGES.PLANNING, nextStage: STAGES.IMPLEMENTATION };
   }
 
   async processImplementation(run, { dryRun }) {
     this.throwIfStopping();
     const issue = JSON.parse(run.issue_json);
-    const plan = JSON.parse(run.plan_json);
     const branchName = run.branch_name || `${this.config.factory.branchPrefix}/${sanitizeBranchPart(run.issue_key)}`;
     const worktreePath = run.worktree_path || path.join(this.config.stateDir, "worktrees", run.id);
     this.log("info", "implementation:start", {
@@ -384,14 +272,22 @@ export class FactoryWorker {
       issueKey: run.issue_key,
       branchName,
       worktreePath,
-      subtasks: plan.subtasks?.length || 0,
       dryRun,
     });
-    const attempt = this.db.startStage(run.id, STAGES.IMPLEMENTATION, hashInput({ issue, plan, branchName }));
+    const previousPlan = run.plan_json ? normalizePlan(JSON.parse(run.plan_json)) : null;
+    const attempt = this.db.startStage(run.id, STAGES.IMPLEMENTATION, hashInput({ issue, previousPlan, branchName }));
     this.log("info", "implementation:attempt", { runId: run.id, attempt });
     try {
       if (dryRun) {
         this.log("info", "implementation:dry-run", { runId: run.id, branchName });
+        const plan = previousPlan || normalizePlan({
+          summary: "Dry-run factory execution",
+          acceptanceCriteria: ["The factory can execute one parent task without creating subtasks."],
+          risks: [],
+          files: [],
+          tests: [],
+        });
+        this.db.updateRun(run.id, { plan_json: JSON.stringify(plan), issue_json: JSON.stringify(issue) });
         this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, "completed");
         this.db.updateRun(run.id, { stage: STAGES.PULL_REQUEST, branch_name: branchName, worktree_path: worktreePath });
         return { stage: STAGES.IMPLEMENTATION, dryRun: true };
@@ -402,20 +298,19 @@ export class FactoryWorker {
         issueKey: run.issue_key,
         status: this.config.jira.statuses.implementation,
       });
-      await this.transitionSubtasksToImplementation(run, plan);
       this.log("info", "implementation:worktree-preparing", { runId: run.id, branchName });
       const worktree = await this.git.prepareWorktree(run.id, branchName);
       this.log("info", "implementation:worktree-ready", { runId: run.id, worktree });
       this.db.updateRun(run.id, { branch_name: branchName, worktree_path: worktree });
       this.log("info", "implementation:agent-start", { runId: run.id, branchName, worktree });
-      const result = await this.agent.implement({ issue, plan, runId: run.id, branchName, cwd: worktree });
+      const result = await this.agent.execute({ issue, runId: run.id, branchName, cwd: worktree, previousPlan });
       this.throwIfStopping();
+      const plan = normalizePlan(result.result?.plan);
       this.log("info", "implementation:agent-complete", {
         runId: run.id,
         committed: result.result?.committed === true,
         pushed: result.result?.pushed === true,
         tests: result.result?.tests?.length || 0,
-        subtasks: result.result?.subtasks?.length || 0,
         blockers: result.result?.blockers?.length || 0,
       });
       const commitSha = await this.git.headSha(worktree);
@@ -423,6 +318,14 @@ export class FactoryWorker {
       if (!result.result?.committed || !result.result?.pushed) {
         throw new Error("Implementation agent did not confirm both commit and push.");
       }
+      this.log("info", "implementation:plan-persisting", { runId: run.id });
+      this.db.updateRun(run.id, {
+        plan_json: JSON.stringify(plan),
+        issue_json: JSON.stringify(issue),
+        lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
+      });
+      this.log("info", "implementation:parent-description", { runId: run.id, issueKey: run.issue_key });
+      await this.jira.updateDescription(run.issue_key, planDescription(plan, makeRunMarker(run.id)));
       this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
       this.db.updateRun(run.id, {
         stage: STAGES.PULL_REQUEST,
@@ -446,49 +349,10 @@ export class FactoryWorker {
     }
   }
 
-  async transitionSubtasksToImplementation(run, plan) {
-    const expectedSubtasks = plan.subtasks || [];
-    if (expectedSubtasks.length === 0) {
-      this.log("info", "implementation:subtasks-none", { runId: run.id, issueKey: run.issue_key });
-      return;
-    }
-
-    const marker = makeRunMarker(run.id);
-    this.log("info", "implementation:subtasks-loading", {
-      runId: run.id,
-      issueKey: run.issue_key,
-      expected: expectedSubtasks.length,
-    });
-    const found = await this.jira.findRunSubtasks(run.issue_key, marker);
-    const missing = missingSubtasks(expectedSubtasks, found, marker);
-    if (missing.length) {
-      throw new Error(`Cannot start implementation because Jira subtasks are missing for ${run.issue_key}: ${missing.map((item) => item.summary).join(", ")}.`);
-    }
-
-    for (const expected of expectedSubtasks) {
-      this.throwIfStopping();
-      const subtask = found.find((issue) => matchesSubtask(expected, issue, marker));
-      this.log("info", "implementation:subtask-status-check", {
-        runId: run.id,
-        parentKey: run.issue_key,
-        subtaskKey: subtask.key,
-        summary: normalizedText(expected.summary),
-        targetStatus: this.config.jira.statuses.implementation,
-      });
-      await this.transitionIfNeeded(subtask.key, this.config.jira.statuses.implementation);
-      this.log("info", "implementation:subtask-status-ready", {
-        runId: run.id,
-        parentKey: run.issue_key,
-        subtaskKey: subtask.key,
-        status: this.config.jira.statuses.implementation,
-      });
-    }
-  }
-
   async processPullRequest(run, { dryRun }) {
     this.throwIfStopping();
     const issue = JSON.parse(run.issue_json);
-    const plan = JSON.parse(run.plan_json);
+    const plan = normalizePlan(JSON.parse(run.plan_json));
     const branchName = run.branch_name;
     this.log("info", "pull-request:start", {
       runId: run.id,

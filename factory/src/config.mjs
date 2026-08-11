@@ -17,9 +17,6 @@ export function defaultConfig(repoPath = process.cwd()) {
     retryBackoffMs: 30_000,
     factory: {
       branchPrefix: "factory",
-      preferredMaxSubtasks: 5,
-      agentOwnsMutations: true,
-      allowSupervisorMutationFallback: false,
     },
     jira: {
       adapter: process.env.FACTORY_JIRA_ADAPTER || "codex-mcp",
@@ -29,7 +26,6 @@ export function defaultConfig(repoPath = process.cwd()) {
       apiToken: process.env.JIRA_API_TOKEN || "",
       statuses: {
         ready: "Ready",
-        planning: "Planning",
         implementation: "In Progress",
         review: "In Review",
         done: "Done",
@@ -88,9 +84,6 @@ export function validateConfig(config, { live = true } = {}) {
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
   }
-  if (!Number.isInteger(config.factory?.preferredMaxSubtasks) || config.factory.preferredMaxSubtasks <= 0) {
-    errors.push("factory.preferredMaxSubtasks must be a positive integer");
-  }
   if (!config.git?.baseBranch) errors.push("git.baseBranch is required");
   if (!Number.isInteger(config.codex?.contextWindowTokens) || config.codex.contextWindowTokens <= 0) {
     errors.push("codex.contextWindowTokens must be a positive integer");
@@ -110,7 +103,7 @@ export function validateConfig(config, { live = true } = {}) {
       if (!config.jira?.email) errors.push("jira.email is required when jira.adapter=rest");
       if (!config.jira?.apiToken) errors.push("jira.apiToken is required when jira.adapter=rest");
     }
-    for (const statusName of ["ready", "planning", "implementation", "review", "done", "error"]) {
+    for (const statusName of ["ready", "implementation", "review", "done", "error"]) {
       if (!config.jira?.statuses?.[statusName]) errors.push(`jira.statuses.${statusName} is required`);
     }
     if (!config.github?.repositoryFullName) errors.push("github.repositoryFullName is required");

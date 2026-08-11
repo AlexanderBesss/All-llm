@@ -142,30 +142,12 @@ export class JiraRestAdapter {
     return this.updateIssue(issueKey, { description: textToAdf(description) });
   }
 
-  async createSubtask({ parentKey, summary, description, labels = [] }) {
-    const parent = await this.getIssue(parentKey);
-    const projectKey = parent?.fields?.project?.key || this.config.projectKey;
-    return this.request("POST", "/rest/api/3/issue", {
-      fields: {
-        project: { key: projectKey },
-        parent: { key: parentKey },
-        issuetype: { name: "Sub-task" },
-        summary,
-        description: textToAdf(description),
-        labels,
-      },
-    });
-  }
-
   async addComment(issueKey, body) {
     return this.request("POST", `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
       body: textToAdf(body),
     });
   }
 
-  async findRunSubtasks(parentKey, runMarker) {
-    return this.search(`parent = ${parentKey} AND text ~ "${runMarker.replace(/"/g, "\\\"")}"`);
-  }
 }
 
 export class InMemoryJiraAdapter {
@@ -200,29 +182,8 @@ export class InMemoryJiraAdapter {
     this.issues.set(key, issue);
   }
 
-  async createSubtask({ parentKey, summary, description, labels = [] }) {
-    const key = `${parentKey}-SUB${[...this.issues.keys()].length}`;
-    const issue = {
-      key,
-      fields: {
-        summary,
-        description,
-        labels,
-        parent: { key: parentKey },
-        status: { name: "To Do" },
-        project: { key: parentKey.split("-")[0] },
-      },
-    };
-    this.issues.set(key, issue);
-    return { key, fields: issue.fields };
-  }
-
   async addComment(issueKey, body) {
     this.comments.push({ issueKey, body });
   }
 
-  async findRunSubtasks(parentKey, marker) {
-    return [...this.issues.values()].filter((issue) => issue.fields?.parent?.key === parentKey
-      && JSON.stringify(issue).includes(marker));
-  }
 }

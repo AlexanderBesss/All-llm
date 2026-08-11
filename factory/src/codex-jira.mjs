@@ -75,15 +75,6 @@ export class CodexJiraAdapter {
     return result;
   }
 
-  async createSubtask({ parentKey, summary, description, labels = [] }) {
-    const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to create exactly one Jira subtask under parent ${parentKey}. Summary: ${summary}. Description: ${description}. Labels: ${JSON.stringify(labels)}. Return the created issue key in key and ok=true only after creation succeeds. Do not create duplicates if a subtask with the same parent, summary, and run marker already exists; return the existing key instead.`,
-      this.mutationSchema,
-    );
-    if (!result.ok || !result.key) throw new Error(`Codex Jira subtask creation failed for ${parentKey}: ${result.details || "unknown error"}`);
-    return { key: result.key, fields: { summary, description, labels, parent: { key: parentKey }, project: { key: this.config.projectKey } } };
-  }
-
   async addComment(issueKey, body) {
     const result = await this.structured(
       `Use Atlassian-Rovo-MCP to add exactly one comment to Jira issue ${issueKey} with this exact body:\n\n${body}\n\nReturn ok=true only after the comment succeeds. Do not change any other issue.`,
@@ -93,11 +84,4 @@ export class CodexJiraAdapter {
     return result;
   }
 
-  async findRunSubtasks(parentKey, runMarker) {
-    const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to find Jira subtasks whose parent is ${parentKey} and whose text contains the exact marker ${JSON.stringify(runMarker)}. Return only matching issues normalized to the requested JSON schema. Do not create or modify anything.`,
-      this.issuesSchema,
-    );
-    return (result.issues || []).map(normalizeIssue);
-  }
 }
