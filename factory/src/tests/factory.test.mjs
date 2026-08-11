@@ -14,14 +14,14 @@ import { RUN_STATUSES, STAGES } from "../types.mjs";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.mjs";
 import { CodexJiraAdapter } from "../codex-jira.mjs";
 
-async function fixture({ maxAttempts = 1 } = {}) {
+async function fixture({ maxAttempts = 1, description = "Implement the requested change." } = {}) {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-"));
   const db = await openStateDatabase(stateDir);
   const jira = new InMemoryJiraAdapter([{
     key: "FACT-1",
     fields: {
       summary: "Add factory coverage",
-      description: "Implement the requested change.",
+      description,
       project: { key: "FACT" },
       status: { name: "Ready" },
       issuetype: { name: "Task" },
@@ -303,7 +303,10 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.equal(fixtureData.github.pullRequests[0].title, "[FACT-1] Add factory coverage (Task)");
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
   assert.equal(fixtureData.jira.issues.size, 1);
-  assert.match((await fixtureData.jira.getIssue("FACT-1")).fields.description, /factory-run/);
+  const description = (await fixtureData.jira.getIssue("FACT-1")).fields.description;
+  assert.match(description, /^> Implement the requested change\./);
+  assert.ok(description.indexOf("[factory-run:") > description.indexOf("> Implement the requested change."));
+  assert.ok(description.indexOf("## Implementation plan") > description.indexOf("[factory-run:"));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
   assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
@@ -373,6 +376,28 @@ test("persists the returned plan before parent description reporting", async () 
   await worker.runOnce();
   assert.equal(previousPlan.summary, "Factory coverage");
   assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
+  assert.match((await fixtureData.jira.getIssue("FACT-1")).fields.description, /^> Implement the requested change\./);
+  fixtureData.db.close();
+});
+
+test("quotes every line of an ADF original description before implementation details", async () => {
+  const fixtureData = await fixture({
+    description: {
+      type: "doc",
+      version: 1,
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Keep the first requirement." }] },
+        { type: "paragraph", content: [{ type: "text", text: "Keep the second requirement." }] },
+      ],
+    },
+  });
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  await worker.runOnce();
+
+  const description = (await fixtureData.jira.getIssue("FACT-1")).fields.description;
+  assert.match(description, /^> Keep the first requirement\.\n> Keep the second requirement\./);
+  assert.ok(description.indexOf("## Implementation plan") > description.indexOf("> Keep the second requirement."));
   fixtureData.db.close();
 });
 
