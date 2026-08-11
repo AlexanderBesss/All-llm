@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { abortError, isAbortError } from "./git.mjs";
+import { buildPullRequestTitle } from "./pull-request-title.mjs";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
 
 function hashInput(value) {
@@ -364,11 +365,18 @@ export class FactoryWorker {
     const attempt = this.db.startStage(run.id, STAGES.PULL_REQUEST, hashInput({ branchName, commit: run.commit_sha }));
     this.log("info", "pull-request:attempt", { runId: run.id, attempt });
     try {
+      const taskNumber = run.issue_key;
+      const taskName = issue.fields?.summary;
+      const taskType = issue.fields?.issuetype?.name;
+      const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
       if (!dryRun) this.log("info", "pull-request:creating", { runId: run.id, branchName });
       const pr = dryRun
         ? { number: 0, html_url: "dry-run", head: { ref: branchName } }
         : await this.github.createPullRequest({
-          title: `[${run.issue_key}] ${plan.summary || issue.fields?.summary || "Factory change"}`,
+          title,
+          taskNumber,
+          taskName,
+          taskType,
           body: `${makeRunMarker(run.id)}\n\nJira: ${run.issue_key}\n\n${plan.summary || ""}\n\nAcceptance criteria:\n${(plan.acceptanceCriteria || []).map((item) => `- ${item}`).join("\n")}`,
           head: branchName,
           base: this.config.git.baseBranch,
