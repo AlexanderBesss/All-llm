@@ -95,6 +95,17 @@ export class GitAdapter {
     if (status) throw new Error(`Repository has tracked changes; refusing to start a factory worktree:\n${status}`);
   }
 
+  async syncBaseBranch() {
+    await this.assertRepositoryClean();
+    const baseBranch = this.config.baseBranch;
+    const remote = this.config.remote || "origin";
+    const currentBranch = await this.output(["branch", "--show-current"]);
+    const switched = currentBranch !== baseBranch;
+    if (switched) await this.git(["checkout", baseBranch]);
+    await this.git(["pull", "--ff-only", remote, baseBranch]);
+    return { previousBranch: currentBranch, branch: baseBranch, switched };
+  }
+
   async prepareWorktree(runId, branchName) {
     await this.assertRepositoryClean();
     const worktreePath = path.join(this.config.stateDir, "worktrees", runId);
@@ -130,6 +141,18 @@ export class GitAdapter {
 
   async hasChanges(worktreePath) {
     return Boolean(await this.output(["status", "--porcelain"], worktreePath));
+  }
+
+  async assertFileCommitted(worktreePath, relativePath) {
+    const root = path.resolve(worktreePath);
+    const target = path.resolve(root, relativePath);
+    const relative = path.relative(root, target);
+    if (!relative || path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+      throw new Error(`Refusing to verify a path outside the worktree: ${relativePath}`);
+    }
+    const status = await this.output(["status", "--porcelain", "--", relative], worktreePath);
+    if (status) throw new Error(`Required factory file has uncommitted changes: ${relativePath}`);
+    await this.git(["ls-files", "--error-unmatch", "--", relative], worktreePath);
   }
 
   async removeWorktree(worktreePath) {

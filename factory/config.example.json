@@ -4,6 +4,7 @@
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
   "maxAttempts": 1,
+  "continueFailedTasks": true,
   "retryBackoffMs": 30000,
   "factory": {
     "branchPrefix": "factory"
@@ -35,7 +36,7 @@
     "approvalPolicy": "never",
     "contextWindowTokens": 250000,
     "autoCompactTokenLimit": 225000,
-    "timeoutMs": 600000,
+    "timeoutMs": 1200000,
     "command": ""
   }
 }

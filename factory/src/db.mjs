@@ -103,7 +103,7 @@ export class StateDatabase {
     const result = this.db.prepare(`
       UPDATE runs
       SET lease_owner = ?, lease_until = ?, updated_at = ?
-      WHERE id = ? AND status IN ('active', 'retry_wait') AND (lease_owner IS NULL OR lease_owner = ? OR lease_until < ?)
+      WHERE id = ? AND status IN ('active', 'retry_wait', 'blocked') AND (lease_owner IS NULL OR lease_owner = ? OR lease_until < ?)
     `).run(leaseOwner, leaseUntil, nowIso(), id, leaseOwner, nowIso());
     return Number(result.changes || 0) === 1;
   }
@@ -167,6 +167,14 @@ export class StateDatabase {
     return Number(this.db.prepare(
       "SELECT COUNT(*) AS count FROM stage_runs WHERE run_id = ? AND stage = ?",
     ).get(runId, stage).count);
+  }
+
+  getLastFailedStage(runId) {
+    return this.db.prepare(`
+      SELECT stage FROM stage_runs
+      WHERE run_id = ? AND status = 'failed'
+      ORDER BY id DESC LIMIT 1
+    `).get(runId)?.stage || null;
   }
 
   recordArtifact(runId, kind, artifactKey, artifactValue) {

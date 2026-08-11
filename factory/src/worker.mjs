@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { abortError, isAbortError } from "./git.mjs";
+import { adfToText } from "./jira.mjs";
+import { buildPullRequestTitle } from "./pull-request-title.mjs";
+import { ensureSpecFile } from "./spec.mjs";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
 
 function hashInput(value) {
@@ -17,6 +20,10 @@ function isJiraIssueMissing(error) {
 
 function nextRetryAt(backoffMs, attempts) {
   return new Date(Date.now() + backoffMs * (2 ** Math.max(0, attempts - 1))).toISOString();
+}
+
+function resumableStage(stage) {
+  return stage === STAGES.IMPLEMENTATION || stage === STAGES.PULL_REQUEST;
 }
 
 async function sleep(ms, signal) {
@@ -50,10 +57,20 @@ function normalizePlan(plan) {
   };
 }
 
-function planDescription(plan, marker) {
+function quotedDescription(description) {
+  return adfToText(description)
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function planDescription(originalDescription, plan, marker, specPath = "") {
   return [
+    quotedDescription(originalDescription),
+    "",
     marker,
     "",
+    ...(specPath ? ["## Specification", `- \`${specPath}\` (committed on the factory branch)`, ""] : []),
     "## Implementation plan",
     plan.summary,
     "",
@@ -115,7 +132,11 @@ export class FactoryWorker {
       || (run.status === RUN_STATUSES.ACTIVE
         && (!run.lease_owner || run.lease_owner === this.leaseOwner)
         && run.stage !== STAGES.REVIEW
-        && run.stage !== STAGES.BLOCKED));
+        && run.stage !== STAGES.BLOCKED)
+      || (this.config.continueFailedTasks === true
+        && run.status === RUN_STATUSES.BLOCKED
+        && run.stage === STAGES.BLOCKED
+        && resumableStage(this.db.getLastFailedStage(run.id))));
     if (resumable) {
       this.throwIfStopping();
       this.log("info", "run:resume-found", {
@@ -136,7 +157,37 @@ export class FactoryWorker {
         this.log("info", "run:busy", { runId: resumable.id });
         return { action: "busy", runId: resumable.id };
       }
-      const leased = this.db.getRun(resumable.id);
+      let leased = this.db.getRun(resumable.id);
+      if (leased.status === RUN_STATUSES.BLOCKED) {
+        const failedStage = this.db.getLastFailedStage(leased.id);
+        if (!resumableStage(failedStage)) {
+          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+          this.log("warn", "run:resume-skipped", {
+            runId: leased.id,
+            issueKey: leased.issue_key,
+            reason: "No supported failed stage was recorded.",
+          });
+          return { action: "idle" };
+        }
+        try {
+          await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
+        } catch (error) {
+          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+          throw error;
+        }
+        leased = this.db.updateRun(leased.id, {
+          status: RUN_STATUSES.ACTIVE,
+          stage: failedStage,
+          next_attempt_at: null,
+          last_error: null,
+        });
+        this.log("info", "run:failed-task-continued", {
+          runId: leased.id,
+          issueKey: leased.issue_key,
+          stage: failedStage,
+          jiraStatus: this.config.jira.statuses.implementation,
+        });
+      }
       this.log("info", "run:resume", { runId: leased.id, stage: leased.stage });
       await this.advanceRun(leased, { dryRun });
       return this.runResult("resumed", this.db.getRun(leased.id), leased.issue_key);
@@ -302,8 +353,29 @@ export class FactoryWorker {
       const worktree = await this.git.prepareWorktree(run.id, branchName);
       this.log("info", "implementation:worktree-ready", { runId: run.id, worktree });
       this.db.updateRun(run.id, { branch_name: branchName, worktree_path: worktree });
+      const spec = await ensureSpecFile({
+        cwd: worktree,
+        issue,
+        runId: run.id,
+        branchName,
+        generatedAt: run.created_at || nowIso(),
+      });
+      this.db.recordArtifact(run.id, "spec", branchName, spec.relativePath);
+      this.log("info", "implementation:spec-ready", {
+        runId: run.id,
+        branchName,
+        specPath: spec.relativePath,
+        created: spec.created,
+      });
       this.log("info", "implementation:agent-start", { runId: run.id, branchName, worktree });
-      const result = await this.agent.execute({ issue, runId: run.id, branchName, cwd: worktree, previousPlan });
+      const result = await this.agent.execute({
+        issue,
+        runId: run.id,
+        branchName,
+        cwd: worktree,
+        previousPlan,
+        specPath: spec.relativePath,
+      });
       this.throwIfStopping();
       const plan = normalizePlan(result.result?.plan);
       this.log("info", "implementation:agent-complete", {
@@ -318,6 +390,9 @@ export class FactoryWorker {
       if (!result.result?.committed || !result.result?.pushed) {
         throw new Error("Implementation agent did not confirm both commit and push.");
       }
+      if (typeof this.git.assertFileCommitted === "function") {
+        await this.git.assertFileCommitted(worktree, spec.relativePath);
+      }
       this.log("info", "implementation:plan-persisting", { runId: run.id });
       this.db.updateRun(run.id, {
         plan_json: JSON.stringify(plan),
@@ -325,7 +400,12 @@ export class FactoryWorker {
         lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
       });
       this.log("info", "implementation:parent-description", { runId: run.id, issueKey: run.issue_key });
-      await this.jira.updateDescription(run.issue_key, planDescription(plan, makeRunMarker(run.id)));
+      await this.jira.updateDescription(run.issue_key, planDescription(
+        issue.fields?.description,
+        plan,
+        makeRunMarker(run.id),
+        spec.relativePath,
+      ));
       this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
       this.db.updateRun(run.id, {
         stage: STAGES.PULL_REQUEST,
@@ -364,11 +444,18 @@ export class FactoryWorker {
     const attempt = this.db.startStage(run.id, STAGES.PULL_REQUEST, hashInput({ branchName, commit: run.commit_sha }));
     this.log("info", "pull-request:attempt", { runId: run.id, attempt });
     try {
+      const taskNumber = run.issue_key;
+      const taskName = issue.fields?.summary;
+      const taskType = issue.fields?.issuetype?.name;
+      const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
       if (!dryRun) this.log("info", "pull-request:creating", { runId: run.id, branchName });
       const pr = dryRun
         ? { number: 0, html_url: "dry-run", head: { ref: branchName } }
         : await this.github.createPullRequest({
-          title: `[${run.issue_key}] ${plan.summary || issue.fields?.summary || "Factory change"}`,
+          title,
+          taskNumber,
+          taskName,
+          taskType,
           body: `${makeRunMarker(run.id)}\n\nJira: ${run.issue_key}\n\n${plan.summary || ""}\n\nAcceptance criteria:\n${(plan.acceptanceCriteria || []).map((item) => `- ${item}`).join("\n")}`,
           head: branchName,
           base: this.config.git.baseBranch,

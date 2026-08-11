@@ -85,7 +85,7 @@ reported on their task with `status: "error"`; other tasks continue.
 | `OPENCODE_COMMAND` | native installed executable | Override OpenCode executable path |
 | `OPENCODE_LOCAL_AGENT` | `build` | OpenCode agent with all tools |
 | `OPENCODE_LOCAL_BASE_URL` | `http://192.168.0.96:8080/v1` | Expected provider URL; must match `opencode.json` |
-| `OPENCODE_LOCAL_TIMEOUT_MS` | `600000` | Timeout for each OpenCode worker process |
+| `OPENCODE_LOCAL_TIMEOUT_MS` | `1200000` | Timeout for each OpenCode worker process |
 | `MAX_LOCAL_AGENTS` | `4` | Maximum tasks accepted in one sequential batch |
 | `LOCAL_LLM_MAX_CONTEXT_BYTES` | `100000` | File-context limit per task |
 

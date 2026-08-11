@@ -18,8 +18,31 @@ requests or writes to the default branch. Every request uses exactly one parent
 task, one agent, one branch, and one pull request. The factory never creates Jira
 subtasks or delegates child work.
 
+Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
+(Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
+type is normalized to one of those three supported values. A pull request is
+rejected if any required part is missing or if an existing open pull request has
+an invalid title.
+
 The factory root contains operational files and documentation. Runtime modules,
 schemas, and tests live under `factory/src/`.
+
+## Specification-driven runs
+
+Every live implementation run creates a Markdown specification in the root
+`specs/` directory inside its factory worktree before the implementation agent
+starts. The filename is derived from the Git branch: branch separators are
+flattened for portability, so `factory/KAN-20` becomes
+`specs/factory-KAN-20.md`; the exact branch remains in the file metadata.
+
+The generated spec records the Jira request as untrusted source data, then
+sets out the problem, goals, non-goals, functional requirements, testable
+acceptance criteria, constraints, risks, validation plan, and decision log.
+The unattended agent reads it, records useful implementation decisions, and
+must commit and push it with the rest of the parent change. A retry preserves
+an existing spec in the worktree so an earlier attempt's notes are not lost.
+The agent resolves ambiguity with documented assumptions and never pauses for
+user questions. Dry runs retain their existing no-worktree-mutation behavior.
 
 Factory log lines begin with an ISO-8601 UTC timestamp, for example
 `[2026-08-11T16:00:42.689Z] [factory] poll:start`.
@@ -49,6 +72,12 @@ The factory uses the authenticated `gh` CLI for pull-request creation and
 inspection. Local Git uses the `gh` credential helper for fetch, branch,
 commit, and push operations on this PC; no GitHub token is stored in the
 factory configuration.
+
+Before the worker starts processing runs, it verifies that the configured
+repository is clean, checks out the configured base branch (`main` by default),
+and runs `git pull --ff-only <remote> <baseBranch>`. A local change or Git
+failure stops startup so existing work is not overwritten and runs do not use
+an out-of-date base branch.
 
 Complete the Atlassian MCP OAuth login once for the same Windows user account
 that will run the scheduled task. Codex uses the existing
@@ -114,6 +143,13 @@ Jira comments, retries, and blocked runs.
 fails before the retry limit. It does not wait for the retry; use `npm start`
 for continuous polling and automatic continuation.
 
+To continue tasks that already reached the configured Jira `Error` status, set
+`continueFailedTasks` to `true` in the config (this is enabled by default). The worker finds the durable
+blocked run, resumes at its last failed stage, changes the Jira task back to
+the configured implementation status (normally `In Progress`), and continues
+using the existing branch and worktree. Set it to `false` when blocked tasks
+should remain terminal.
+
 Press `Ctrl+C` to request a graceful shutdown. The worker aborts active Codex,
 Git, GitHub CLI, Jira HTTP, and retry-wait operations, terminates their child
 processes, and closes the state database after cancellation completes.
@@ -136,12 +172,19 @@ restartable Windows Scheduled Task. State and logs belong under
   exists; if it was deleted, the run is marked cancelled and no agent, Git, or
   pull-request work is started.
 - The worker refuses to start a worktree when the tracked repository is dirty.
+- Each factory startup synchronizes the clean tracked repository to the latest
+  configured base branch before polling Jira.
 - A failed stage makes one attempt by default, then comments diagnostics and
   transitions the Jira issue to the configured `Error` status. Set
   `maxAttempts` in the config (or `FACTORY_MAX_ATTEMPTS`) to allow additional
   attempts. The durable SQLite run remains marked blocked after the limit. The
   Jira workflow must expose that exact Error status and the configured review
   status (the default is `In Review`).
+- When `continueFailedTasks` is enabled (the default), blocked runs are eligible for a new
+  continuation. The worker uses `stage_runs` to restart the implementation or
+  pull-request stage that failed, moves the Jira issue from `Error` to the
+  configured implementation status, and returns to `Error` if the continuation
+  fails again.
 - Codex health, including the `Atlassian-Rovo-MCP` registration, and GitHub CLI
   authentication are checked by `doctor` before live processing. If either
   fails, the worker remains disabled.
