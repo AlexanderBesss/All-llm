@@ -8,6 +8,7 @@ import { CodexJiraAdapter } from "./codex-jira.mjs";
 import { GitHubCliAdapter } from "./github.mjs";
 import { GitAdapter, isAbortError, runProcess } from "./git.mjs";
 import { CodexAgentExecutor } from "./codex.mjs";
+import { formatFactoryLog } from "./types.mjs";
 import { FactoryWorker, runLoop } from "./worker.mjs";
 
 function defaultRepoPath() {
@@ -294,7 +295,7 @@ export async function main(argv = process.argv.slice(2)) {
   const controller = new AbortController();
   const onShutdown = () => {
     if (controller.signal.aborted) return;
-    console.warn("[factory] shutdown requested; cancelling active operations...");
+    console.warn(formatFactoryLog("shutdown requested; cancelling active operations..."));
     controller.abort();
   };
   const shutdownSignals = ["SIGINT", "SIGTERM"];
@@ -316,11 +317,11 @@ export async function main(argv = process.argv.slice(2)) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((error) => {
     if (isAbortError(error)) {
-      console.log("[factory] shutdown complete.");
+      console.log(formatFactoryLog("shutdown complete."));
       process.exitCode = 0;
       return;
     }
-    console.error(error.stack || error.message || error);
+    console.error(formatFactoryLog(`fatal: ${error.stack || error.message || error}`));
     process.exitCode = 1;
   });
 }

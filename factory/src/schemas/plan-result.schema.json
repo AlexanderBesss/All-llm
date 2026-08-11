@@ -1,13 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["summary", "acceptanceCriteria", "risks", "files", "tests", "subtasks"],
+  "required": ["summary", "acceptanceCriteria", "risks", "files", "tests", "directImplementation", "subtasks"],
   "properties": {
     "summary": { "type": "string" },
     "acceptanceCriteria": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
     "risks": { "type": "array", "items": { "type": "string" } },
     "files": { "type": "array", "items": { "type": "string" } },
     "tests": { "type": "array", "items": { "type": "string" } },
+    "directImplementation": { "type": "boolean" },
     "subtasks": {
       "type": "array",
       "items": {

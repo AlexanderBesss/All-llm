@@ -3,7 +3,7 @@
   "stateDir": "C:/Users/REPLACE/AppData/Local/AllLlmFactory",
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
-  "maxAttempts": 3,
+  "maxAttempts": 1,
   "retryBackoffMs": 30000,
   "factory": {
     "branchPrefix": "factory",

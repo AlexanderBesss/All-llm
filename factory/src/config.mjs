@@ -13,7 +13,7 @@ export function defaultConfig(repoPath = process.cwd()) {
     stateDir,
     pollIntervalMs: 60_000,
     leaseMs: 15 * 60_000,
-    maxAttempts: 3,
+    maxAttempts: Number(process.env.FACTORY_MAX_ATTEMPTS || 1),
     retryBackoffMs: 30_000,
     factory: {
       branchPrefix: "factory",
@@ -85,6 +85,9 @@ export function validateConfig(config, { live = true } = {}) {
   const errors = [];
   if (!config.repoPath) errors.push("repoPath is required");
   if (!config.stateDir) errors.push("stateDir is required");
+  if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
+    errors.push("maxAttempts must be a positive integer");
+  }
   if (!Number.isInteger(config.factory?.preferredMaxSubtasks) || config.factory.preferredMaxSubtasks <= 0) {
     errors.push("factory.preferredMaxSubtasks must be a positive integer");
   }

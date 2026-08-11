@@ -21,8 +21,16 @@ vertical subtasks and normally stays within the configurable preferred maximum
 of five; tightly coupled work is kept together rather than split by file or
 technical layer.
 
+The planner explicitly classifies each ticket before Jira mutations. A trivial,
+narrowly scoped change is marked for direct implementation and produces no Jira
+subtasks. Subtasks are reserved for genuinely independent or coordinated
+deliverables.
+
 The factory root contains operational files and documentation. Runtime modules,
 schemas, and tests live under `factory/src/`.
+
+Factory log lines begin with an ISO-8601 UTC timestamp, for example
+`[2026-08-11T16:00:42.689Z] [factory] poll:start`.
 
 ## Configure
 
@@ -140,11 +148,13 @@ restartable Windows Scheduled Task. State and logs belong under
   exists; if it was deleted, the run is marked cancelled and no agent, Git, or
   pull-request work is started.
 - The worker refuses to start a worktree when the tracked repository is dirty.
-- A failed stage retries three times by default, then comments diagnostics and
-  transitions the Jira issue to the configured `Error` status; the durable
-  SQLite run remains marked blocked until it is manually investigated. The Jira
-  workflow must expose that exact Error status and the configured review status
-  (the default is `In Review`).
+- A failed stage makes one attempt by default, then comments diagnostics and
+  transitions the Jira issue to the configured `Error` status. Set
+  `maxAttempts` in the config (or `FACTORY_MAX_ATTEMPTS`) to allow additional
+  attempts; the same limit applies to planning's subtask reconciliation
+  checks. The durable SQLite run remains marked blocked after the limit. The
+  Jira workflow must expose that exact Error status and the configured review
+  status (the default is `In Review`).
 - Codex health, including the `Atlassian-Rovo-MCP` registration, and GitHub CLI
   authentication are checked by `doctor` before live processing. If either
   fails, the worker remains disabled.

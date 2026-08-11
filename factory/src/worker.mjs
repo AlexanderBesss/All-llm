@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { adfToText } from "./jira.mjs";
 import { abortError, isAbortError } from "./git.mjs";
-import { makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
+import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
 
 function hashInput(value) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -40,9 +40,17 @@ function normalizedText(value) {
   return adfToText(value).replace(/\s+/g, " ").trim();
 }
 
+function subtaskSummaryIdentity(value) {
+  return normalizedText(value)
+    .replace(/^(?:[A-Z][A-Z0-9]+-\d+)\s*[-–—:]\s*/i, "")
+    .replace(/\s+(?:[-–—:]\s*)?(?:\(|\[)?[A-Z][A-Z0-9]+-\d+(?:\)|\])?\s*$/i, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
 function matchesSubtask(expected, issue, marker) {
   const fields = issue.fields || {};
-  const summaryMatches = normalizedText(fields.summary) === normalizedText(expected.summary);
+  const summaryMatches = subtaskSummaryIdentity(fields.summary) === subtaskSummaryIdentity(expected.summary);
   const description = normalizedText(fields.description);
   return summaryMatches
     && description.includes(normalizedText(marker));
@@ -50,6 +58,18 @@ function matchesSubtask(expected, issue, marker) {
 
 function missingSubtasks(planned, found, marker) {
   return planned.filter((expected) => !found.some((issue) => matchesSubtask(expected, issue, marker)));
+}
+
+function normalizePlan(plan) {
+  if (!plan || typeof plan !== "object") throw new Error("Planner result must be an object.");
+  if (!Array.isArray(plan.subtasks)) throw new Error("Planner result must include a subtasks array.");
+  const directImplementation = typeof plan.directImplementation === "boolean"
+    ? plan.directImplementation
+    : plan.subtasks.length === 0;
+  if (directImplementation && plan.subtasks.length > 0) {
+    throw new Error("Planner marked the ticket for direct implementation but also returned subtasks.");
+  }
+  return { ...plan, directImplementation };
 }
 
 export class FactoryWorker {
@@ -71,7 +91,7 @@ export class FactoryWorker {
 
   log(level, event, details = undefined) {
     const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
-    this.logger[level]?.(`[factory] ${event}${suffix}`);
+    this.logger[level]?.(formatFactoryLog(`${event}${suffix}`));
   }
 
   runResult(action, run, issueKey) {
@@ -257,6 +277,7 @@ export class FactoryWorker {
             risks: [],
             files: [],
             tests: [],
+            directImplementation: false,
             subtasks: [{ summary: "Validate factory configuration", description: `${marker}\nValidate the factory configuration.`, dependsOn: [], files: [], tests: [] }],
           };
           this.log("info", "planning:dry-run-plan", { runId: run.id, subtasks: plan.subtasks.length });
@@ -272,6 +293,7 @@ export class FactoryWorker {
           });
         }
       }
+      plan = normalizePlan(plan);
       this.db.updateRun(run.id, {
         plan_json: JSON.stringify(plan),
         issue_json: JSON.stringify(issue),
@@ -280,8 +302,18 @@ export class FactoryWorker {
       this.log("info", "planning:plan-persisted", {
         runId: run.id,
         subtasks: plan.subtasks.length,
+        directImplementation: plan.directImplementation,
       });
-      const subtasks = dryRun ? [] : await this.reconcileSubtasks(run.issue_key, marker, plan.subtasks);
+      const subtasks = dryRun || plan.directImplementation
+        ? []
+        : await this.reconcileSubtasks(run.issue_key, marker, plan.subtasks);
+      if (!dryRun && plan.directImplementation) {
+        this.log("info", "planning:subtasks-skipped", {
+          runId: run.id,
+          issueKey: run.issue_key,
+          reason: "trivial-ticket",
+        });
+      }
       this.log("info", "planning:subtasks-reconciled", {
         runId: run.id,
         expected: plan.subtasks.length,
@@ -318,7 +350,8 @@ export class FactoryWorker {
 
   async reconcileSubtasks(parentKey, marker, expectedSubtasks) {
     let found = [];
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const maxChecks = Math.max(1, this.config.maxAttempts || 1);
+    for (let attempt = 0; attempt < maxChecks; attempt += 1) {
       this.throwIfStopping();
       this.log("info", "planning:subtasks-check", {
         parentKey,
@@ -332,7 +365,7 @@ export class FactoryWorker {
         found: found.length,
       });
       if (found.length >= expectedSubtasks.length && missingSubtasks(expectedSubtasks, found, marker).length === 0) return found;
-      if (attempt < 2) {
+      if (attempt + 1 < maxChecks) {
         this.log("info", "planning:subtasks-wait", { parentKey, delayMs: 1_000 });
         await sleep(1_000, this.signal);
       }
@@ -613,13 +646,13 @@ export async function runLoop(worker, { signal = worker.signal, pollIntervalMs =
   while (!stopped) {
     try {
       const result = await worker.runOnce();
-      worker.logger.info?.(`[factory] ${JSON.stringify(result)}`);
+      worker.logger.info?.(formatFactoryLog(JSON.stringify(result)));
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) {
         stop();
         break;
       }
-      worker.logger.error?.(`[factory] poll failed: ${error.stack || error.message || error}`);
+      worker.logger.error?.(formatFactoryLog(`poll failed: ${error.stack || error.message || error}`));
     }
     if (!stopped) {
       try {

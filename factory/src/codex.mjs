@@ -119,10 +119,15 @@ export class CodexAgentExecutor {
       `Issue: ${issue.key}\nSummary: ${issue.fields?.summary || ""}\n` +
       `Description:\n${JSON.stringify(issue.fields?.description || "")}\n` +
       `Run marker: ${marker}\n\n` +
-      `Inspect the repository and produce an implementation-ready plan. Use the connected ` +
-      `Atlassian-Rovo-MCP server to update the parent description with the plan, append the ` +
-      `run marker, and create ordered Jira subtasks when decomposition is needed. If the ` +
-      `ticket is small enough to implement directly, return an empty subtask list. Do not ` +
+      `Inspect the repository and produce an implementation-ready plan. First classify the ` +
+      `ticket before making any Jira mutation. A trivial ticket is one narrowly scoped, ` +
+      `independently implementable change with no cross-cutting behavior, lifecycle, API, ` +
+      `data-model, or multi-deliverable coordination. For a trivial ticket set ` +
+      `directImplementation=true, return an empty subtask list, and do not call the Jira ` +
+      `subtask-creation tool. For a non-trivial ticket set directImplementation=false and ` +
+      `create ordered Jira subtasks only when decomposition is genuinely useful. Use the ` +
+      `connected Atlassian-Rovo-MCP server to update the parent description with the plan, ` +
+      `append the run marker, and create subtasks only after that classification. Do not ` +
       `change source code, create branches, or commit. Each created subtask description must ` +
       `be complete and unambiguous, include the run marker, scope, acceptance criteria, ` +
       `dependencies, affected files, and tests. Prefer fewer, cohesive subtasks: target one ` +
@@ -132,7 +137,8 @@ export class CodexAgentExecutor {
       `test changes together so integration remains straightforward. Only exceed the ` +
       `preferred maximum when the work contains genuinely independent deliverables. Return ONLY JSON with this shape: ` +
       `{ "summary": string, "acceptanceCriteria": string[], "risks": string[], ` +
-      `"files": string[], "tests": string[], "subtasks": [{"summary": string, ` +
+      `"files": string[], "tests": string[], "directImplementation": boolean, ` +
+      `"subtasks": [{"summary": string, ` +
       `"description": string, "dependsOn": string[], "files": string[], "tests": string[]}] }`;
     const result = await this.run({
       task,
@@ -174,6 +180,10 @@ function assertPlan(plan) {
   if (!plan || typeof plan !== "object") throw new Error("Planner result must be an object.");
   if (!Array.isArray(plan.acceptanceCriteria) || plan.acceptanceCriteria.length === 0) throw new Error("Planner result must include acceptanceCriteria.");
   if (!Array.isArray(plan.subtasks)) throw new Error("Planner result must include a subtasks array.");
+  if (typeof plan.directImplementation !== "boolean") throw new Error("Planner result must include directImplementation.");
+  if (plan.directImplementation && plan.subtasks.length > 0) {
+    throw new Error("Planner marked the ticket for direct implementation but also returned subtasks.");
+  }
   for (const [index, task] of plan.subtasks.entries()) {
     if (!task.summary || !task.description) throw new Error(`Subtask ${index + 1} needs summary and description.`);
   }

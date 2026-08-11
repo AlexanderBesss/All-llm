@@ -20,6 +20,10 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+export function formatFactoryLog(message, timestamp = Date.now()) {
+  return `[${new Date(timestamp).toISOString()}] [factory] ${message}`;
+}
+
 export function makeRunId(issueKey, clock = Date.now()) {
   const safeKey = String(issueKey).replace(/[^A-Za-z0-9_-]+/g, "-");
   return `${safeKey}-${clock.toString(36)}`;

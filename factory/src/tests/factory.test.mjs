@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
+import { defaultConfig, validateConfig } from "../config.mjs";
 import { openStateDatabase } from "../db.mjs";
 import { runProcess } from "../git.mjs";
 import { InMemoryJiraAdapter } from "../jira.mjs";
@@ -12,7 +13,7 @@ import { RUN_STATUSES, STAGES } from "../types.mjs";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.mjs";
 import { CodexJiraAdapter } from "../codex-jira.mjs";
 
-async function fixture({ maxAttempts = 3 } = {}) {
+async function fixture({ maxAttempts = 1 } = {}) {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-"));
   const db = await openStateDatabase(stateDir);
   const jira = new InMemoryJiraAdapter([{
@@ -54,6 +55,7 @@ function planFor(marker) {
     risks: [],
     files: ["factory"],
     tests: ["node --test"],
+    directImplementation: false,
     subtasks: [{
       summary: "Add tests",
       description: `${marker}\nAdd tests for the change.`,
@@ -147,6 +149,21 @@ test("Codex JSONL parser selects the final agent message", () => {
   ].join("\n"));
   assert.equal(result.output, '{"step":2}');
   assert.equal(result.events.length, 3);
+});
+
+test("factory defaults to one attempt and supports a configurable attempt limit", () => {
+  const previous = process.env.FACTORY_MAX_ATTEMPTS;
+  delete process.env.FACTORY_MAX_ATTEMPTS;
+  try {
+    assert.equal(defaultConfig("C:/projects/All-llm").maxAttempts, 1);
+    process.env.FACTORY_MAX_ATTEMPTS = "4";
+    assert.equal(defaultConfig("C:/projects/All-llm").maxAttempts, 4);
+    assert.deepEqual(validateConfig({ ...defaultConfig("C:/projects/All-llm"), maxAttempts: 4 }, { live: false }), []);
+    assert.ok(validateConfig({ ...defaultConfig("C:/projects/All-llm"), maxAttempts: 0 }, { live: false }).includes("maxAttempts must be a positive integer"));
+  } finally {
+    if (previous === undefined) delete process.env.FACTORY_MAX_ATTEMPTS;
+    else process.env.FACTORY_MAX_ATTEMPTS = previous;
+  }
 });
 
 test("GitHub CLI adapter creates an idempotent pull request without a token", async () => {
@@ -278,6 +295,7 @@ test("processes one parent ticket through an aggregate PR", async () => {
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
   assert.ok(logs.some((entry) => entry.includes("pull-request:created")));
   assert.ok(logs.some((entry) => entry.includes("jira:status-changing")));
+  assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);
   assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
@@ -286,6 +304,11 @@ test("processes one parent ticket through an aggregate PR", async () => {
 
 test("allows direct implementation when the planner returns no subtasks", async () => {
   const fixtureData = await fixture();
+  let subtaskLookups = 0;
+  fixtureData.jira.findRunSubtasks = async () => {
+    subtaskLookups += 1;
+    throw new Error("direct implementation should not query subtasks");
+  };
   const agent = {
     async plan() {
       return {
@@ -295,6 +318,7 @@ test("allows direct implementation when the planner returns no subtasks", async 
           risks: [],
           files: ["factory"],
           tests: ["node --test"],
+          directImplementation: true,
           subtasks: [],
         },
         raw: {},
@@ -307,6 +331,7 @@ test("allows direct implementation when the planner returns no subtasks", async 
   const worker = new FactoryWorker({ ...fixtureData, agent, logger: { info() {}, warn() {}, error() {} } });
   await worker.runOnce();
   assert.equal(fixtureData.jira.issues.size, 1);
+  assert.equal(subtaskLookups, 0);
   assert.equal(fixtureData.db.listRuns(20)[0].status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
 });
@@ -332,6 +357,38 @@ test("accepts Jira-rendered subtask descriptions when identity and marker match"
   fixtureData.db.close();
 });
 
+test("matches subtask summaries when the planner appends a Jira key", async () => {
+  const fixtureData = await fixture();
+  const logs = [];
+  const agent = {
+    async plan({ marker }) {
+      const plan = planFor(marker);
+      plan.subtasks[0].summary = "FACT-2 — Add tests";
+      await fixtureData.jira.createSubtask({
+        parentKey: "FACT-1",
+        summary: "Add tests",
+        description: plan.subtasks[0].description,
+      });
+      return { result: plan, raw: {} };
+    },
+    async implement() { return { result: { committed: true, pushed: true }, raw: {} }; },
+  };
+  const worker = new FactoryWorker({
+    ...fixtureData,
+    agent,
+    logger: {
+      info(message) { logs.push(message); },
+      warn(message) { logs.push(message); },
+      error(message) { logs.push(message); },
+    },
+  });
+  const result = await worker.runOnce();
+  assert.equal(result.action, "claimed");
+  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.PLANNING), 1);
+  assert.equal(logs.some((entry) => entry.includes("planning:subtasks-wait")), false);
+  fixtureData.db.close();
+});
+
 test("blocks when a created subtask is missing the run marker", async () => {
   const fixtureData = await fixture({ maxAttempts: 1 });
   const agent = {
@@ -351,7 +408,7 @@ test("blocks when a created subtask is missing the run marker", async () => {
 });
 
 test("retries a failed stage and does not create a duplicate run", async () => {
-  const fixtureData = await fixture();
+  const fixtureData = await fixture({ maxAttempts: 2 });
   let attempts = 0;
   const agent = {
     async plan({ marker }) {
@@ -376,7 +433,7 @@ test("retries a failed stage and does not create a duplicate run", async () => {
 });
 
 test("persists the plan before Jira reconciliation and reuses it on retry", async () => {
-  const fixtureData = await fixture();
+  const fixtureData = await fixture({ maxAttempts: 2 });
   let planningCalls = 0;
   let failFirstSubtaskRead = true;
   const findRunSubtasks = fixtureData.jira.findRunSubtasks.bind(fixtureData.jira);
@@ -541,7 +598,7 @@ test("cancels a persisted run when its Jira parent was deleted", async () => {
 });
 
 test("pull request retries are idempotent after a GitHub outage", async () => {
-  const fixtureData = await fixture();
+  const fixtureData = await fixture({ maxAttempts: 2 });
   let githubAttempts = 0;
   const github = {
     enabled() { return true; },
