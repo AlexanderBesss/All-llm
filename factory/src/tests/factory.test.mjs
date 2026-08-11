@@ -8,6 +8,7 @@ import { openStateDatabase } from "../db.mjs";
 import { runProcess } from "../git.mjs";
 import { InMemoryJiraAdapter } from "../jira.mjs";
 import { GitHubCliAdapter, InMemoryGitHubAdapter } from "../github.mjs";
+import { buildPullRequestTitle, normalizePullRequestTaskType } from "../pull-request-title.mjs";
 import { FactoryWorker } from "../worker.mjs";
 import { RUN_STATUSES, STAGES } from "../types.mjs";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.mjs";
@@ -23,6 +24,7 @@ async function fixture({ maxAttempts = 1 } = {}) {
       description: "Implement the requested change.",
       project: { key: "FACT" },
       status: { name: "Ready" },
+      issuetype: { name: "Task" },
       labels: [],
     },
   }]);
@@ -214,14 +216,65 @@ test("GitHub CLI adapter creates an idempotent pull request without a token", as
   const responses = [
     { stdout: "[]" },
     { stdout: "https://github.com/example/factory/pull/7\n" },
-    { stdout: JSON.stringify({ number: 7, url: "https://github.com/example/factory/pull/7", headRefName: "factory/FACT-1", baseRefName: "main", title: "Factory change", body: "Details" }) },
+    { stdout: JSON.stringify({ number: 7, url: "https://github.com/example/factory/pull/7", headRefName: "factory/FACT-1", baseRefName: "main", title: "[FACT-1] Add factory coverage (Task)", body: "Details" }) },
   ];
   const runner = async (command, args, options) => { calls.push({ command, args, options }); return responses.shift(); };
   const github = new GitHubCliAdapter({ cliCommand: "gh-test", repositoryFullName: "example/factory", baseBranch: "main", repoPath: "C:/factory" }, runner);
-  const pr = await github.createPullRequest({ title: "Factory change", body: "Details", head: "factory/FACT-1", base: "main" });
+  const pr = await github.createPullRequest({
+    title: "[FACT-1] Add factory coverage (Task)",
+    taskNumber: "FACT-1",
+    taskName: "Add factory coverage",
+    taskType: "Task",
+    body: "Details",
+    head: "factory/FACT-1",
+    base: "main",
+  });
   assert.equal(pr.number, 7);
   assert.equal(pr.html_url, "https://github.com/example/factory/pull/7");
   assert.equal(calls.length, 3);
+});
+
+test("GitHub CLI adapter rejects an existing pull request with an incomplete title", async () => {
+  const calls = [];
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return {
+      stdout: JSON.stringify([{
+        number: 7,
+        url: "https://github.com/example/factory/pull/7",
+        headRefName: "factory/FACT-1",
+        baseRefName: "main",
+        title: "[FACT-1] Wrong task name (Task)",
+        body: "Details",
+      }]),
+    };
+  };
+  const github = new GitHubCliAdapter({ cliCommand: "gh-test", repositoryFullName: "example/factory", baseBranch: "main", repoPath: "C:/factory" }, runner);
+  await assert.rejects(
+    github.createPullRequest({
+      title: "[FACT-1] Add factory coverage (Task)",
+      taskNumber: "FACT-1",
+      taskName: "Add factory coverage",
+      taskType: "Task",
+      body: "Details",
+      head: "factory/FACT-1",
+      base: "main",
+    }),
+    /exact Jira task name/,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("pull-request title contract preserves the exact Jira name and canonical task type", () => {
+  assert.equal(
+    buildPullRequestTitle({ taskNumber: "KAN-16", taskName: "fine tune PR name", taskType: "Feature" }),
+    "[KAN-16] fine tune PR name (feature)",
+  );
+  assert.equal(normalizePullRequestTaskType("Bug Fix"), "bug fix");
+  assert.throws(
+    () => buildPullRequestTitle({ taskNumber: "KAN-16", taskName: "fine tune PR name", taskType: "Story" }),
+    /Unsupported Jira task type/,
+  );
 });
 
 test("Codex Jira adapter has no subtask mutation or lookup operations", async () => {
@@ -247,6 +300,8 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.deepEqual(events.filter((event) => event.startsWith("status:")), ["status:In Progress", "status:In Review"]);
   assert.ok(events.indexOf("status:In Progress") < events.indexOf("implementation"));
   assert.ok(events.indexOf("implementation") < events.indexOf("pull-request"));
+  assert.equal(fixtureData.github.pullRequests[0].title, "[FACT-1] Add factory coverage (Task)");
+  assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
   assert.equal(fixtureData.jira.issues.size, 1);
   assert.match((await fixtureData.jira.getIssue("FACT-1")).fields.description, /factory-run/);
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
@@ -255,6 +310,19 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);
   assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("blocks a pull request when the Jira type is unsupported", async () => {
+  const fixtureData = await fixture();
+  const issue = await fixtureData.jira.getIssue("FACT-1");
+  issue.fields.issuetype = { name: "Story" };
+  fixtureData.jira.issues.set("FACT-1", issue);
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+  const result = await worker.runOnce();
+  assert.equal(result.action, "blocked");
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.match(fixtureData.db.getRun(result.runId).last_error, /Unsupported Jira task type/);
   fixtureData.db.close();
 });
 
