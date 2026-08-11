@@ -1,0 +1,107 @@
+name: AI Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: review-${{ github.head_ref }}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch existing AI review
+        id: check-review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const aiComment = comments.data.find(c => c.body.startsWith('## AI Review'));
+            if (aiComment) {
+              fs.appendFileSync(process.env['GITHUB_OUTPUT'], `exists=true\n`);
+              fs.appendFileSync(process.env['GITHUB_OUTPUT'], `comment_id=${aiComment.id}\n`);
+              fs.writeFileSync('previous-review.md', aiComment.body);
+            } else {
+              fs.appendFileSync(process.env['GITHUB_OUTPUT'], `exists=false\n`);
+            }
+
+      - name: Run OpenCode AI Review
+        id: new-review
+        if: steps.check-review.outputs.exists == 'false'
+        uses: anomalyco/opencode/github@v1
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        with:
+          model: openai/unsloth-Qwen3.6-27B-UD-Q4_K_XL
+          prompt: |
+            Review this pull request thoroughly. Start your response with "## AI Review".
+            - Check for code quality issues
+            - Look for potential bugs
+            - Identify security concerns
+            - Check for performance issues
+            - Suggest improvements
+
+      - name: Post new AI review comment
+        if: steps.check-review.outputs.exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${{ steps.new-review.outputs.response }}`,
+            });
+
+      - name: Read previous review
+        id: read-review
+        if: steps.check-review.outputs.exists == 'true'
+        run: |
+          {
+            echo 'BODY<<EOF'
+            cat previous-review.md
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
+      - name: Update existing AI review with new findings
+        id: updated-review
+        if: steps.check-review.outputs.exists == 'true'
+        uses: anomalyco/opencode/github@v1
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        with:
+          model: openai/unsloth-Qwen3.6-27B-UD-Q4_K_XL
+          prompt: |
+            Here is the previous AI review of this PR. The PR has new changes.
+            Review the new changes and update the findings. Merge new issues with previous ones, remove resolved ones. Start your response with "## AI Review".
+
+            Previous review:
+            ${{ steps.read-review.outputs.BODY }}
+
+      - name: Update AI review comment
+        if: steps.check-review.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ steps.check-review.outputs.comment_id }},
+              body: `${{ steps.updated-review.outputs.response }}`,
+            });
