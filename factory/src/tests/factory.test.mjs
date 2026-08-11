@@ -194,6 +194,45 @@ test("process cancellation terminates an active child process", async () => {
   await assert.rejects(running, (error) => error.code === "ABORT_ERR");
 });
 
+test("GitAdapter switches to and fast-forward pulls the configured base branch", async () => {
+  const calls = [];
+  let currentBranch = "factory/KAN-19";
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    if (args[0] === "status") return { stdout: "", stderr: "" };
+    if (args[0] === "branch") return { stdout: `${currentBranch}\n`, stderr: "" };
+    if (args[0] === "checkout") {
+      currentBranch = args[1];
+      return { stdout: "", stderr: "" };
+    }
+    if (args[0] === "pull") return { stdout: "Already up to date.\n", stderr: "" };
+    throw new Error(`Unexpected Git command: ${args.join(" ")}`);
+  };
+  const git = new GitAdapter({ repoPath: "C:/projects/All-llm", remote: "origin", baseBranch: "main" }, runner);
+
+  const result = await git.syncBaseBranch();
+
+  assert.deepEqual(result, { previousBranch: "factory/KAN-19", branch: "main", switched: true });
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["status", "--porcelain"],
+    ["branch", "--show-current"],
+    ["checkout", "main"],
+    ["pull", "--ff-only", "origin", "main"],
+  ]);
+});
+
+test("GitAdapter refuses to switch or pull a dirty repository", async () => {
+  const calls = [];
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: " M factory/src/git.mjs\n", stderr: "" };
+  };
+  const git = new GitAdapter({ repoPath: "C:/projects/All-llm", remote: "origin", baseBranch: "main" }, runner);
+
+  await assert.rejects(() => git.syncBaseBranch(), /Repository has tracked changes/);
+  assert.deepEqual(calls.map(({ args }) => args), [["status", "--porcelain"]]);
+});
+
 test("Codex JSONL parser selects the final agent message", () => {
   const result = parseJsonLines([
     JSON.stringify({ type: "item.completed", item: { type: "tool_call", text: "ignored" } }),
