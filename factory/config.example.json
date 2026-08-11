@@ -1,0 +1,45 @@
+{
+  "repoPath": "C:/projects/All-llm",
+  "stateDir": "C:/Users/REPLACE/AppData/Local/AllLlmFactory",
+  "pollIntervalMs": 60000,
+  "leaseMs": 900000,
+  "maxAttempts": 3,
+  "retryBackoffMs": 30000,
+  "factory": {
+    "branchPrefix": "factory",
+    "preferredMaxSubtasks": 5,
+    "agentOwnsMutations": true,
+    "allowSupervisorMutationFallback": false
+  },
+  "jira": {
+    "adapter": "codex-mcp",
+    "projectKey": "KAN",
+    "statuses": {
+      "ready": "Ready",
+      "planning": "Planning",
+      "implementation": "In Progress",
+      "review": "In Review",
+      "done": "Done",
+      "error": "Error"
+    }
+  },
+  "github": {
+    "provider": "gh",
+    "repositoryFullName": "AlexanderBesss/All-llm",
+    "cliCommand": ""
+  },
+  "git": {
+    "remote": "origin",
+    "baseBranch": "main"
+  },
+  "codex": {
+    "model": "gpt-5.6-luna",
+    "reasoningEffort": "max",
+    "sandbox": "danger-full-access",
+    "approvalPolicy": "never",
+    "contextWindowTokens": 250000,
+    "autoCompactTokenLimit": 225000,
+    "timeoutMs": 600000,
+    "command": ""
+  }
+}

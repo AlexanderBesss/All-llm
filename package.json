@@ -1,0 +1,18 @@
+{
+  "name": "all-llm-factory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "factory": "node factory/src/cli.mjs",
+    "start": "node factory/src/cli.mjs start",
+    "test": "node --test factory/src/tests/factory.test.mjs",
+    "factory:start": "node factory/src/cli.mjs start",
+    "factory:run-once": "node factory/src/cli.mjs run-once",
+    "factory:dry-run": "node factory/src/cli.mjs run-once --dry-run",
+    "factory:status": "node factory/src/cli.mjs status",
+    "factory:status:json": "node factory/src/cli.mjs status --json",
+    "factory:doctor": "node factory/src/cli.mjs doctor",
+    "factory:install": "node factory/src/cli.mjs install",
+    "factory:test": "node --test factory/src/tests/factory.test.mjs"
+  }
+}

@@ -12,3 +12,5 @@
 *.log
 *.pdb
 .venv
+/factory/config.local.json
+/factory/worktrees/
