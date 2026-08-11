@@ -12,6 +12,7 @@ jobs:
   review:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -29,6 +30,9 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           OPENCODE_CONFIG_CONTENT: |
             {
+              "permission": {
+                "external_directory": "deny"
+              },
               "provider": {
                 "llamacpp": {
                   "options": {
@@ -38,7 +42,7 @@ jobs:
                 }
               }
             }
-          AI_REVIEW_FINDINGS_FILE: ${{ runner.temp }}/ai-review-findings.json
+          AI_REVIEW_FINDINGS_FILE: ${{ github.workspace }}/.git/ai-review-findings.json
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL
@@ -49,10 +53,10 @@ jobs:
             Invoke the subagents synchronously, one file at a time, and wait for each subagent to finish before calling the next.
             Do not run file-review subagents in parallel or combine multiple files in one subagent.
             After all file reviews are complete, synthesize their findings into the final pull request review.
-            Write the actionable findings for inline code comments to ${{ runner.temp }}/ai-review-findings.json.
+            Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
             The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","body":"Explain the issue and the recommended fix."}]}.
             Use one finding per comment. The path must be relative to the repository root, and line must be a line present in the pull request diff. Use RIGHT for additions or context lines and LEFT for deletions. Omit findings that cannot be anchored to a diff line.
-            If there are no actionable findings, write {"findings":[]} instead. Do not write this file inside the repository, do not wrap it in Markdown fences, and keep the final response concise because the detailed findings will be posted as inline review comments.
+            If there are no actionable findings, write {"findings":[]} instead. Do not write this file in a tracked repository path, do not wrap it in Markdown fences, and keep the final response concise because the detailed findings will be posted as inline review comments.
             - Check for code quality issues
             - Look for potential bugs
             - Identify security concerns
@@ -62,7 +66,7 @@ jobs:
       - name: Publish inline AI review comments
         uses: actions/github-script@v7
         env:
-          FINDINGS_FILE: ${{ runner.temp }}/ai-review-findings.json
+          FINDINGS_FILE: ${{ github.workspace }}/.git/ai-review-findings.json
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
