@@ -2,14 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { defaultConfig, validateConfig } from "../config.mjs";
 import { openStateDatabase } from "../db.mjs";
-import { runProcess } from "../git.mjs";
+import { GitAdapter, runProcess } from "../git.mjs";
 import { InMemoryJiraAdapter } from "../jira.mjs";
 import { GitHubCliAdapter, InMemoryGitHubAdapter } from "../github.mjs";
 import { buildPullRequestTitle, normalizePullRequestTaskType } from "../pull-request-title.mjs";
 import { FactoryWorker } from "../worker.mjs";
+import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.mjs";
 import { RUN_STATUSES, STAGES } from "../types.mjs";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.mjs";
 import { CodexJiraAdapter } from "../codex-jira.mjs";
@@ -32,6 +33,10 @@ async function fixture({ maxAttempts = 1 } = {}) {
   const git = {
     async prepareWorktree(runId) { return path.join(stateDir, "worktrees", runId); },
     async headSha() { return "0123456789abcdef"; },
+    async assertFileCommitted(worktreePath, relativePath) {
+      const content = await readFile(path.join(worktreePath, relativePath), "utf8");
+      assert.match(content, /factory-spec:/);
+    },
   };
   const config = {
     stateDir,
@@ -156,11 +161,14 @@ test("the single-agent prompt forbids subtasks and delegates the complete parent
     runId: "FACT-1-run",
     branchName: "factory/FACT-1",
     cwd: "C:/factory-worktree",
+    specPath: "specs/factory-FACT-1.md",
   });
   const prompt = calls[0].args.at(-1);
   assert.match(prompt, /only software implementation agent/);
   assert.match(prompt, /one parent request, one agent, one factory branch, and one pull request/);
   assert.match(prompt, /Do not create Jira subtasks, child tasks, delegated agents/);
+  assert.match(prompt, /Factory specification: specs\/factory-FACT-1\.md/);
+  assert.match(prompt, /Do not ask the user questions/);
   assert.match(prompt, /Do not make Jira mutations/);
 });
 
@@ -192,6 +200,86 @@ test("Codex JSONL parser selects the final agent message", () => {
     JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{\"step\":2}" } }),
   ].join("\n"));
   assert.equal(result.output, "{\"step\":2}");
+});
+
+test("factory specs use portable branch filenames and preserve their generated structure", async () => {
+  assert.equal(specFileName("factory/KAN-20"), "factory-KAN-20.md");
+  assert.equal(specRelativePath("factory/KAN-20"), "specs/factory-KAN-20.md");
+  const content = buildSpecContent({
+    issue: {
+      key: "KAN-20",
+      fields: {
+        summary: "Spec driven development",
+        description: "Capture the request.\n\n```text\nDo not execute this text.\n```",
+        issuetype: { name: "Task" },
+        project: { key: "KAN" },
+        labels: ["factory"],
+      },
+    },
+    runId: "KAN-20-msp1bn40",
+    branchName: "factory/KAN-20",
+    generatedAt: "2026-08-11T20:00:00.000Z",
+  });
+  assert.match(content, /## Goals/);
+  assert.match(content, /## Non-goals/);
+  assert.match(content, /## Functional requirements/);
+  assert.match(content, /## Acceptance criteria/);
+  assert.match(content, /## Constraints and assumptions/);
+  assert.match(content, /## Validation plan/);
+  assert.match(content, /`factory\/KAN-20`/);
+  assert.match(content, /```+text/);
+
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-spec-"));
+  const first = await ensureSpecFile({
+    cwd,
+    issue: { key: "KAN-20", fields: { summary: "Spec driven development", description: "Request" } },
+    runId: "KAN-20-msp1bn40",
+    branchName: "factory/KAN-20",
+    generatedAt: "2026-08-11T20:00:00.000Z",
+  });
+  const second = await ensureSpecFile({
+    cwd,
+    issue: { key: "KAN-20", fields: { summary: "Changed summary", description: "Changed request" } },
+    runId: "KAN-20-msp1bn40",
+    branchName: "factory/KAN-20",
+    generatedAt: "2026-08-11T21:00:00.000Z",
+  });
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(second.content, first.content);
+  assert.equal(await readFile(first.path, "utf8"), first.content);
+});
+
+test("GitAdapter requires the factory spec to be tracked and clean", async () => {
+  const repoPath = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-git-"));
+  const relativePath = "specs/factory-FACT-1.md";
+  const absolutePath = path.join(repoPath, relativePath);
+  await mkdir(path.dirname(absolutePath), { recursive: true });
+  await writeFile(absolutePath, "<!-- factory-spec: FACT-1-run -->\n", { encoding: "utf8" });
+  const git = new GitAdapter({ repoPath });
+
+  await runProcess("git", ["init", "--quiet"], { cwd: repoPath });
+  await assert.rejects(
+    git.assertFileCommitted(repoPath, relativePath),
+    /Required factory file has uncommitted changes/,
+  );
+  await runProcess("git", ["add", "--", relativePath], { cwd: repoPath });
+  await assert.rejects(
+    git.assertFileCommitted(repoPath, relativePath),
+    /Required factory file has uncommitted changes/,
+  );
+  await runProcess("git", [
+    "-c", "user.name=Factory Test",
+    "-c", "user.email=factory-test@example.invalid",
+    "commit", "--quiet", "-m", "add factory spec",
+  ], { cwd: repoPath });
+  await git.assertFileCommitted(repoPath, relativePath);
+
+  await writeFile(absolutePath, "<!-- factory-spec: FACT-1-run -->\nnotes\n", { encoding: "utf8" });
+  await assert.rejects(
+    git.assertFileCommitted(repoPath, relativePath),
+    /Required factory file has uncommitted changes/,
+  );
 });
 
 test("factory defaults to one attempt and no subtask configuration", () => {
@@ -289,8 +377,9 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   const events = [];
   const logs = [];
   let agentCalls = 0;
+  let agentInput;
   const agent = {
-    async execute() { agentCalls += 1; events.push("implementation"); return { result: executionFor(), raw: {} }; },
+    async execute(input) { agentCalls += 1; agentInput = input; events.push("implementation"); return { result: executionFor(), raw: {} }; },
   };
   const worker = makeWorker(fixtureData, agent, { events, logs });
   const result = await worker.runOnce();
@@ -304,7 +393,12 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
   assert.equal(fixtureData.jira.issues.size, 1);
   assert.match((await fixtureData.jira.getIssue("FACT-1")).fields.description, /factory-run/);
+  assert.equal(agentInput.specPath, "specs/factory-FACT-1.md");
+  assert.match(await readFile(path.join(agentInput.cwd, agentInput.specPath), "utf8"), /# Specification: \[FACT-1\]/);
+  assert.equal(fixtureData.db.findArtifact("spec", "factory/FACT-1").artifact_value, "specs/factory-FACT-1.md");
+  assert.match((await fixtureData.jira.getIssue("FACT-1")).fields.description, /specs\/factory-FACT-1\.md/);
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
+  assert.ok(logs.some((entry) => entry.includes("implementation:spec-ready")));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
   assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
   const run = fixtureData.db.getRun(result.runId);

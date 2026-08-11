@@ -132,6 +132,18 @@ export class GitAdapter {
     return Boolean(await this.output(["status", "--porcelain"], worktreePath));
   }
 
+  async assertFileCommitted(worktreePath, relativePath) {
+    const root = path.resolve(worktreePath);
+    const target = path.resolve(root, relativePath);
+    const relative = path.relative(root, target);
+    if (!relative || path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+      throw new Error(`Refusing to verify a path outside the worktree: ${relativePath}`);
+    }
+    const status = await this.output(["status", "--porcelain", "--", relative], worktreePath);
+    if (status) throw new Error(`Required factory file has uncommitted changes: ${relativePath}`);
+    await this.git(["ls-files", "--error-unmatch", "--", relative], worktreePath);
+  }
+
   async removeWorktree(worktreePath) {
     try {
       await this.git(["worktree", "remove", "--force", worktreePath], this.config.repoPath);
