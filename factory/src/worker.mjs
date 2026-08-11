@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { abortError, isAbortError } from "./git.mjs";
+import { adfToText } from "./jira.mjs";
 import { buildPullRequestTitle } from "./pull-request-title.mjs";
 import { ensureSpecFile } from "./spec.mjs";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
@@ -56,8 +57,17 @@ function normalizePlan(plan) {
   };
 }
 
-function planDescription(plan, marker, specPath = "") {
+function quotedDescription(description) {
+  return adfToText(description)
+    .split(/\r?\n/)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function planDescription(originalDescription, plan, marker, specPath = "") {
   return [
+    quotedDescription(originalDescription),
+    "",
     marker,
     "",
     ...(specPath ? ["## Specification", `- \`${specPath}\` (committed on the factory branch)`, ""] : []),
@@ -390,7 +400,12 @@ export class FactoryWorker {
         lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
       });
       this.log("info", "implementation:parent-description", { runId: run.id, issueKey: run.issue_key });
-      await this.jira.updateDescription(run.issue_key, planDescription(plan, makeRunMarker(run.id), spec.relativePath));
+      await this.jira.updateDescription(run.issue_key, planDescription(
+        issue.fields?.description,
+        plan,
+        makeRunMarker(run.id),
+        spec.relativePath,
+      ));
       this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
       this.db.updateRun(run.id, {
         stage: STAGES.PULL_REQUEST,
