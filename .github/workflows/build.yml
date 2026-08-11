@@ -5,10 +5,12 @@ on:
     branches: [main, master]
     paths:
       - whisper-note/**
+      - .github/workflows/build.yml
   pull_request:
     branches: [main, master]
     paths:
       - whisper-note/**
+      - .github/workflows/build.yml
   workflow_dispatch:
 
 jobs:
