@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { runProcess } from "./git.mjs";
+import { assertPullRequestTitle } from "./pull-request-title.mjs";
 
 function parseJson(stdout, operation) {
   try {
@@ -94,17 +95,21 @@ export class GitHubCliAdapter {
     return existing ? normalizePullRequest(existing, branchName) : null;
   }
 
-  async createPullRequest({ title, body, head, base }) {
+  async createPullRequest({ title, taskNumber, taskName, taskType, body, head, base }) {
+    const validatedTitle = assertPullRequestTitle(title, { taskNumber, taskName, taskType });
     const targetBase = base || this.baseBranch;
     const existing = await this.findOpenPullRequest(head);
-    if (existing) return existing;
+    if (existing) {
+      assertPullRequestTitle(existing.title, { taskNumber, taskName, taskType });
+      return existing;
+    }
 
     const created = await this.run([
       "pr", "create",
       "--repo", this.repository,
       "--head", head,
       "--base", targetBase,
-      "--title", title,
+      "--title", validatedTitle,
       "--body", body,
     ]);
     const url = String(created.stdout || "")
@@ -117,7 +122,9 @@ export class GitHubCliAdapter {
       "pr", "view", url,
       "--json", "number,url,headRefName,baseRefName,title,body",
     ]);
-    return normalizePullRequest(parseJson(details.stdout, "reading the created pull request"), head);
+    const pullRequest = normalizePullRequest(parseJson(details.stdout, "reading the created pull request"), head);
+    assertPullRequestTitle(pullRequest.title, { taskNumber, taskName, taskType });
+    return pullRequest;
   }
 
   async getCommitStatus(commitSha) {
@@ -134,14 +141,18 @@ export class InMemoryGitHubAdapter {
   enabled() { return true; }
 
   async createPullRequest(input) {
+    const validatedTitle = assertPullRequestTitle(input.title, input);
     const existing = this.pullRequests.find((pr) => pr.head.ref === input.head);
-    if (existing) return existing;
+    if (existing) {
+      assertPullRequestTitle(existing.title, input);
+      return existing;
+    }
     const pr = {
       number: this.pullRequests.length + 1,
       html_url: `https://github.test/pr/${this.pullRequests.length + 1}`,
       head: { ref: input.head },
       base: { ref: input.base || "main" },
-      title: input.title,
+      title: validatedTitle,
       body: input.body,
     };
     this.pullRequests.push(pr);

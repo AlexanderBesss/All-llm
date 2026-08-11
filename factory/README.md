@@ -18,6 +18,12 @@ requests or writes to the default branch. Every request uses exactly one parent
 task, one agent, one branch, and one pull request. The factory never creates Jira
 subtasks or delegates child work.
 
+Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
+(Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
+type is normalized to one of those three supported values. A pull request is
+rejected if any required part is missing or if an existing open pull request has
+an invalid title.
+
 The factory root contains operational files and documentation. Runtime modules,
 schemas, and tests live under `factory/src/`.
 
