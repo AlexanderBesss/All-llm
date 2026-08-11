@@ -41,7 +41,7 @@
         "llamacpp": {
             "name": "llama.cpp (local)",
             "options": {
-                "baseURL": "http://localhost:8080/v1",
+                "baseURL": "http://192.168.0.96:8080/v1",
                 "apiKey": "docker"
             },
             "models": {
@@ -54,7 +54,7 @@
                     "presence_penalty": 0.0,
                     "top_p": 0.95,
                     "limit": {
-                        "context": 120000,
+                        "context": 100000,
                         "output": 8192
                     },
                     "cost": {
