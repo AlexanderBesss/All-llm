@@ -27,12 +27,27 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENCODE_CONFIG_CONTENT: |
+            {
+              "provider": {
+                "llamacpp": {
+                  "options": {
+                    "baseURL": "{env:OPENAI_BASE_URL}",
+                    "apiKey": "{env:OPENAI_API_KEY}"
+                  }
+                }
+              }
+            }
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: openai/unsloth-Qwen3.6-27B-UD-Q4_K_XL
+          model: llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL
           use_github_token: true
           prompt: |
             Review this pull request thoroughly. Start your response with "## AI Review".
+            First list every changed file in the pull request. Review each changed file in a separate subagent.
+            Invoke the subagents synchronously, one file at a time, and wait for each subagent to finish before calling the next.
+            Do not run file-review subagents in parallel or combine multiple files in one subagent.
+            After all file reviews are complete, synthesize their findings into the final pull request review.
             - Check for code quality issues
             - Look for potential bugs
             - Identify security concerns
