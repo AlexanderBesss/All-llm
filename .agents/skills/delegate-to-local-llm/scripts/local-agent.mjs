@@ -81,7 +81,7 @@ export async function resolveConfiguration(cwd = process.cwd()) {
     agent: process.env.OPENCODE_LOCAL_AGENT || "build",
     baseUrl: expectedBaseUrl.replace(/\/+$/, ""),
     maxAgents: positiveNumber("MAX_LOCAL_AGENTS", 4, true),
-    timeoutMs: positiveNumber("OPENCODE_LOCAL_TIMEOUT_MS", 600000, true),
+    timeoutMs: positiveNumber("OPENCODE_LOCAL_TIMEOUT_MS", 1200000, true),
     maxContextBytes: positiveNumber("LOCAL_LLM_MAX_CONTEXT_BYTES", 100000, true),
     cwd: path.resolve(cwd),
   };

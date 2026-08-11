@@ -48,7 +48,7 @@ export function defaultConfig(repoPath = process.cwd()) {
       approvalPolicy: process.env.CODEX_APPROVAL_POLICY || "never",
       contextWindowTokens: Number(process.env.CODEX_CONTEXT_WINDOW_TOKENS || 250_000),
       autoCompactTokenLimit: Number(process.env.CODEX_AUTO_COMPACT_TOKEN_LIMIT || 225_000),
-      timeoutMs: 600_000,
+      timeoutMs: 1_200_000,
       command: process.env.CODEX_COMMAND || "",
     },
   };

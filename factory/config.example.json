@@ -35,7 +35,7 @@
     "approvalPolicy": "never",
     "contextWindowTokens": 250000,
     "autoCompactTokenLimit": 225000,
-    "timeoutMs": 600000,
+    "timeoutMs": 1200000,
     "command": ""
   }
 }
