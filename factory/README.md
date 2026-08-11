@@ -27,6 +27,23 @@ an invalid title.
 The factory root contains operational files and documentation. Runtime modules,
 schemas, and tests live under `factory/src/`.
 
+## Specification-driven runs
+
+Every live implementation run creates a Markdown specification in the root
+`specs/` directory inside its factory worktree before the implementation agent
+starts. The filename is derived from the Git branch: branch separators are
+flattened for portability, so `factory/KAN-20` becomes
+`specs/factory-KAN-20.md`; the exact branch remains in the file metadata.
+
+The generated spec records the Jira request as untrusted source data, then
+sets out the problem, goals, non-goals, functional requirements, testable
+acceptance criteria, constraints, risks, validation plan, and decision log.
+The unattended agent reads it, records useful implementation decisions, and
+must commit and push it with the rest of the parent change. A retry preserves
+an existing spec in the worktree so an earlier attempt's notes are not lost.
+The agent resolves ambiguity with documented assumptions and never pauses for
+user questions. Dry runs retain their existing no-worktree-mutation behavior.
+
 Factory log lines begin with an ISO-8601 UTC timestamp, for example
 `[2026-08-11T16:00:42.689Z] [factory] poll:start`.
 

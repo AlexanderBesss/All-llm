@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { abortError, isAbortError } from "./git.mjs";
 import { buildPullRequestTitle } from "./pull-request-title.mjs";
+import { ensureSpecFile } from "./spec.mjs";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
 
 function hashInput(value) {
@@ -55,10 +56,11 @@ function normalizePlan(plan) {
   };
 }
 
-function planDescription(plan, marker) {
+function planDescription(plan, marker, specPath = "") {
   return [
     marker,
     "",
+    ...(specPath ? ["## Specification", `- \`${specPath}\` (committed on the factory branch)`, ""] : []),
     "## Implementation plan",
     plan.summary,
     "",
@@ -341,8 +343,29 @@ export class FactoryWorker {
       const worktree = await this.git.prepareWorktree(run.id, branchName);
       this.log("info", "implementation:worktree-ready", { runId: run.id, worktree });
       this.db.updateRun(run.id, { branch_name: branchName, worktree_path: worktree });
+      const spec = await ensureSpecFile({
+        cwd: worktree,
+        issue,
+        runId: run.id,
+        branchName,
+        generatedAt: run.created_at || nowIso(),
+      });
+      this.db.recordArtifact(run.id, "spec", branchName, spec.relativePath);
+      this.log("info", "implementation:spec-ready", {
+        runId: run.id,
+        branchName,
+        specPath: spec.relativePath,
+        created: spec.created,
+      });
       this.log("info", "implementation:agent-start", { runId: run.id, branchName, worktree });
-      const result = await this.agent.execute({ issue, runId: run.id, branchName, cwd: worktree, previousPlan });
+      const result = await this.agent.execute({
+        issue,
+        runId: run.id,
+        branchName,
+        cwd: worktree,
+        previousPlan,
+        specPath: spec.relativePath,
+      });
       this.throwIfStopping();
       const plan = normalizePlan(result.result?.plan);
       this.log("info", "implementation:agent-complete", {
@@ -357,6 +380,9 @@ export class FactoryWorker {
       if (!result.result?.committed || !result.result?.pushed) {
         throw new Error("Implementation agent did not confirm both commit and push.");
       }
+      if (typeof this.git.assertFileCommitted === "function") {
+        await this.git.assertFileCommitted(worktree, spec.relativePath);
+      }
       this.log("info", "implementation:plan-persisting", { runId: run.id });
       this.db.updateRun(run.id, {
         plan_json: JSON.stringify(plan),
@@ -364,7 +390,7 @@ export class FactoryWorker {
         lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
       });
       this.log("info", "implementation:parent-description", { runId: run.id, issueKey: run.issue_key });
-      await this.jira.updateDescription(run.issue_key, planDescription(plan, makeRunMarker(run.id)));
+      await this.jira.updateDescription(run.issue_key, planDescription(plan, makeRunMarker(run.id), spec.relativePath));
       this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
       this.db.updateRun(run.id, {
         stage: STAGES.PULL_REQUEST,

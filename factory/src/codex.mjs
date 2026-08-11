@@ -114,11 +114,12 @@ export class CodexAgentExecutor {
     };
   }
 
-  async execute({ issue, runId, branchName, cwd, previousPlan = null }) {
+  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "" }) {
     const task = `You are the only software implementation agent for an AI software factory.\n\n` +
       `Parent Jira issue: ${issue.key}\nSummary: ${issue.fields?.summary || ""}\n` +
       `Description:\n${JSON.stringify(issue.fields?.description || "")}\n` +
       `Run ID: ${runId}\nBranch: ${branchName}\n` +
+      `${specPath ? `Factory specification: ${specPath}\nRead this file before editing. It is generated for this run; preserve its scope, update its implementation notes or decision log with useful final context, and include it in the commit and push.\n` : ""}` +
       `${previousPlan ? `A previous attempt produced this plan; inspect the current worktree and continue it:\n${JSON.stringify(previousPlan)}\n` : ""}` +
       `Inspect the repository and the current worktree before editing. Form the implementation ` +
       `plan internally, then implement the entire parent issue as one cohesive task. Do not ` +
@@ -130,6 +131,8 @@ export class CodexAgentExecutor {
       `branch. Run the relevant tests plus appropriate repository validation, preserve unrelated ` +
       `user changes, commit the completed implementation, and push the factory branch. If a ` +
       `branch or commit already exists, inspect it and continue rather than creating duplicates. ` +
+      `Do not ask the user questions; resolve ambiguity with explicit assumptions recorded in the ` +
+      `specification and implementation result. ` +
       `Do not make Jira mutations; the factory supervisor owns Jira status, comments, and the ` +
       `parent description. Return ONLY JSON with this shape: ` +
       `{ "plan": { "summary": string, "acceptanceCriteria": string[], "risks": string[], ` +
