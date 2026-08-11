@@ -1,6 +1,6 @@
 import path from "node:path";
 import { extractJson } from "./json-output.mjs";
-import { JiraIssueNotFoundError } from "./jira.mjs";
+import { BOARD_TRIGGER_JQL, isIssueOnBoard, JiraIssueNotFoundError } from "./jira.mjs";
 
 function normalizeIssue(item) {
   const fields = {
@@ -12,6 +12,7 @@ function normalizeIssue(item) {
     project: { key: item.projectKey || "" },
   };
   if (item.parentKey) fields.parent = { key: item.parentKey };
+  if (Object.prototype.hasOwnProperty.call(item, "sprint")) fields.sprint = item.sprint;
   return { key: item.key, fields };
 }
 
@@ -41,10 +42,11 @@ export class CodexJiraAdapter {
     const status = String(this.config.readyStatus || "Ready").replace(/"/g, '\\"');
     const project = String(this.config.projectKey || "").replace(/[^A-Za-z0-9_-]/g, "");
     const result = await this.structured(
-      `Use the connected Atlassian-Rovo-MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema. Do not filter by labels.`,
+      `Use the connected Atlassian-Rovo-MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" AND ${BOARD_TRIGGER_JQL} ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema, including sprint metadata when available. Do not filter by labels.`,
       this.issuesSchema,
     );
-    return (result.issues || []).map(normalizeIssue);
+    return (result.issues || []).map(normalizeIssue).filter((issue) =>
+      issue.fields.sprint === undefined || isIssueOnBoard(issue));
   }
 
   async getIssue(issueKey) {

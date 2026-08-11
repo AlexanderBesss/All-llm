@@ -1,5 +1,14 @@
 import { assertNonEmpty } from "./types.mjs";
 
+export const BOARD_TRIGGER_JQL = "sprint IS NOT EMPTY";
+
+export function isIssueOnBoard(issue) {
+  const sprint = issue?.fields?.sprint ?? issue?.fields?.customfield_10020 ?? issue?.sprint;
+  if (Array.isArray(sprint)) return sprint.length > 0;
+  if (sprint && typeof sprint === "object") return Object.keys(sprint).length > 0;
+  return typeof sprint === "string" ? sprint.trim().length > 0 : Boolean(sprint);
+}
+
 export class JiraApiError extends Error {
   constructor(message, status, body) {
     super(message);
@@ -98,7 +107,7 @@ export class JiraRestAdapter {
   async searchReady() {
     const project = this.config.projectKey;
     const status = this.config.readyStatus || "Ready";
-    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" ORDER BY priority DESC, updated ASC`;
+    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" AND ${BOARD_TRIGGER_JQL} ORDER BY priority DESC, updated ASC`;
     return this.search(jql);
   }
 
@@ -160,7 +169,8 @@ export class InMemoryJiraAdapter {
   enabled() { return true; }
 
   async searchReady() {
-    return [...this.issues.values()].filter((issue) => issue.fields?.status?.name === "Ready");
+    return [...this.issues.values()].filter((issue) =>
+      issue.fields?.status?.name === "Ready" && isIssueOnBoard(issue));
   }
 
   async getIssue(key) {
