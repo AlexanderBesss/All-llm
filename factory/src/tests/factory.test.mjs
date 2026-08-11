@@ -6,7 +6,7 @@ import { mkdtemp } from "node:fs/promises";
 import { defaultConfig, validateConfig } from "../config.mjs";
 import { openStateDatabase } from "../db.mjs";
 import { runProcess } from "../git.mjs";
-import { InMemoryJiraAdapter } from "../jira.mjs";
+import { InMemoryJiraAdapter, JiraRestAdapter } from "../jira.mjs";
 import { GitHubCliAdapter, InMemoryGitHubAdapter } from "../github.mjs";
 import { FactoryWorker } from "../worker.mjs";
 import { RUN_STATUSES, STAGES } from "../types.mjs";
@@ -23,6 +23,7 @@ async function fixture({ maxAttempts = 1 } = {}) {
       description: "Implement the requested change.",
       project: { key: "FACT" },
       status: { name: "Ready" },
+      sprint: [{ id: 1, name: "Sprint 1", state: "active" }],
       labels: [],
     },
   }]);
@@ -229,6 +230,82 @@ test("Codex Jira adapter has no subtask mutation or lookup operations", async ()
   const adapter = new CodexJiraAdapter({ repoPath: "C:/projects/All-llm", projectKey: "FACT", readyStatus: "Ready" }, executor);
   assert.equal(typeof adapter.createSubtask, "undefined");
   assert.equal(typeof adapter.findRunSubtasks, "undefined");
+});
+
+test("Jira ready discovery only includes issues assigned to a sprint", async () => {
+  const jira = new InMemoryJiraAdapter([
+    { key: "FACT-BOARD", fields: { status: { name: "Ready" }, sprint: [{ id: 1, name: "Sprint 1" }] } },
+    { key: "FACT-BACKLOG", fields: { status: { name: "Ready" } } },
+    { key: "FACT-DONE", fields: { status: { name: "Done" }, sprint: [{ id: 1, name: "Sprint 1" }] } },
+  ]);
+  assert.deepEqual((await jira.searchReady()).map((issue) => issue.key), ["FACT-BOARD"]);
+});
+
+test("factory does not claim a Ready issue that remains in the backlog", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Backlog work",
+      description: "This issue must not be claimed.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      labels: [],
+    },
+  });
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+  const claimed = await worker.runOnce();
+  const nextPoll = await worker.runOnce();
+  assert.equal(claimed.issueKey, "FACT-1");
+  assert.equal(nextPoll.action, "idle");
+  assert.equal(fixtureData.db.getActiveRunForIssue("FACT-2"), null);
+  assert.equal(agentCalls, 1);
+  fixtureData.db.close();
+});
+
+test("REST Jira ready discovery adds the board-only sprint clause", async () => {
+  const requests = [];
+  const jira = new JiraRestAdapter({
+    baseUrl: "https://jira.example.test",
+    projectKey: "FACT",
+    readyStatus: "Ready",
+    email: "factory@example.test",
+    apiToken: "token",
+  }, async (url, options) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, async text() { return JSON.stringify({ issues: [] }); } };
+  });
+  await jira.searchReady();
+  const body = JSON.parse(requests[0].options.body);
+  assert.equal(body.jql, 'project = FACT AND status = "Ready" AND sprint IS NOT EMPTY ORDER BY priority DESC, updated ASC');
+});
+
+test("Codex Jira ready discovery requests and preserves the board-only sprint filter", async () => {
+  const calls = [];
+  const executor = {
+    async run(input) {
+      calls.push(input);
+      return {
+        output: JSON.stringify({
+          issues: [
+            { key: "FACT-BOARD", summary: "On board", description: "", status: "Ready", issuetype: "Task", labels: [], parentKey: "", projectKey: "FACT", sprint: [{ id: 1, name: "Sprint 1" }] },
+            { key: "FACT-BACKLOG", summary: "In backlog", description: "", status: "Ready", issuetype: "Task", labels: [], parentKey: "", projectKey: "FACT", sprint: null },
+          ],
+        }),
+      };
+    },
+  };
+  const adapter = new CodexJiraAdapter({ repoPath: "C:/projects/All-llm", projectKey: "FACT", readyStatus: "Ready" }, executor);
+  const issues = await adapter.searchReady();
+  assert.match(calls[0].task, /status = "Ready" AND sprint IS NOT EMPTY/);
+  assert.deepEqual(issues.map((issue) => issue.key), ["FACT-BOARD"]);
+  assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1" }]);
 });
 
 test("processes one parent ticket with one agent and one aggregate PR", async () => {

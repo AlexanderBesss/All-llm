@@ -16,7 +16,8 @@
           "issuetype": { "type": "string" },
           "labels": { "type": "array", "items": { "type": "string" } },
           "parentKey": { "type": "string" },
-          "projectKey": { "type": "string" }
+          "projectKey": { "type": "string" },
+          "sprint": {}
         },
         "additionalProperties": false
       }
