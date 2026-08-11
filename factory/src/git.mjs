@@ -95,6 +95,17 @@ export class GitAdapter {
     if (status) throw new Error(`Repository has tracked changes; refusing to start a factory worktree:\n${status}`);
   }
 
+  async syncBaseBranch() {
+    await this.assertRepositoryClean();
+    const baseBranch = this.config.baseBranch;
+    const remote = this.config.remote || "origin";
+    const currentBranch = await this.output(["branch", "--show-current"]);
+    const switched = currentBranch !== baseBranch;
+    if (switched) await this.git(["checkout", baseBranch]);
+    await this.git(["pull", "--ff-only", remote, baseBranch]);
+    return { previousBranch: currentBranch, branch: baseBranch, switched };
+  }
+
   async prepareWorktree(runId, branchName) {
     await this.assertRepositoryClean();
     const worktreePath = path.join(this.config.stateDir, "worktrees", runId);

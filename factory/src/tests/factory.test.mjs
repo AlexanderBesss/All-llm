@@ -5,7 +5,7 @@ import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { defaultConfig, validateConfig } from "../config.mjs";
 import { openStateDatabase } from "../db.mjs";
-import { runProcess } from "../git.mjs";
+import { GitAdapter, runProcess } from "../git.mjs";
 import { InMemoryJiraAdapter } from "../jira.mjs";
 import { GitHubCliAdapter, InMemoryGitHubAdapter } from "../github.mjs";
 import { buildPullRequestTitle, normalizePullRequestTaskType } from "../pull-request-title.mjs";
@@ -183,6 +183,45 @@ test("process cancellation terminates an active child process", async () => {
   const running = runProcess(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { timeoutMs: 60_000, signal: controller.signal });
   setTimeout(() => controller.abort(), 50);
   await assert.rejects(running, (error) => error.code === "ABORT_ERR");
+});
+
+test("GitAdapter switches to and fast-forward pulls the configured base branch", async () => {
+  const calls = [];
+  let currentBranch = "factory/KAN-19";
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    if (args[0] === "status") return { stdout: "", stderr: "" };
+    if (args[0] === "branch") return { stdout: `${currentBranch}\n`, stderr: "" };
+    if (args[0] === "checkout") {
+      currentBranch = args[1];
+      return { stdout: "", stderr: "" };
+    }
+    if (args[0] === "pull") return { stdout: "Already up to date.\n", stderr: "" };
+    throw new Error(`Unexpected Git command: ${args.join(" ")}`);
+  };
+  const git = new GitAdapter({ repoPath: "C:/projects/All-llm", remote: "origin", baseBranch: "main" }, runner);
+
+  const result = await git.syncBaseBranch();
+
+  assert.deepEqual(result, { previousBranch: "factory/KAN-19", branch: "main", switched: true });
+  assert.deepEqual(calls.map(({ args }) => args), [
+    ["status", "--porcelain"],
+    ["branch", "--show-current"],
+    ["checkout", "main"],
+    ["pull", "--ff-only", "origin", "main"],
+  ]);
+});
+
+test("GitAdapter refuses to switch or pull a dirty repository", async () => {
+  const calls = [];
+  const runner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: " M factory/src/git.mjs\n", stderr: "" };
+  };
+  const git = new GitAdapter({ repoPath: "C:/projects/All-llm", remote: "origin", baseBranch: "main" }, runner);
+
+  await assert.rejects(() => git.syncBaseBranch(), /Repository has tracked changes/);
+  assert.deepEqual(calls.map(({ args }) => args), [["status", "--porcelain"]]);
 });
 
 test("Codex JSONL parser selects the final agent message", () => {

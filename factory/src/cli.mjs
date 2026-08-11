@@ -54,11 +54,12 @@ function normalizedGitHubConfig(config, signal) {
 }
 
 async function makeWorker(config, signal) {
+  const git = new GitAdapter(normalizedGitConfig(config, signal));
+  await git.syncBaseBranch();
   const db = await openStateDatabase(config.stateDir);
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
-    const git = new GitAdapter(normalizedGitConfig(config, signal));
     const agent = new CodexAgentExecutor({ ...config, signal });
     const jira = config.jira.adapter === "rest"
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))

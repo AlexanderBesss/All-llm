@@ -56,6 +56,12 @@ inspection. Local Git uses the `gh` credential helper for fetch, branch,
 commit, and push operations on this PC; no GitHub token is stored in the
 factory configuration.
 
+Before the worker starts processing runs, it verifies that the configured
+repository is clean, checks out the configured base branch (`main` by default),
+and runs `git pull --ff-only <remote> <baseBranch>`. A local change or Git
+failure stops startup so existing work is not overwritten and runs do not use
+an out-of-date base branch.
+
 Complete the Atlassian MCP OAuth login once for the same Windows user account
 that will run the scheduled task. Codex uses the existing
 `.codex/config.toml` registration for `Atlassian-Rovo-MCP`; the factory supervisor
@@ -142,6 +148,8 @@ restartable Windows Scheduled Task. State and logs belong under
   exists; if it was deleted, the run is marked cancelled and no agent, Git, or
   pull-request work is started.
 - The worker refuses to start a worktree when the tracked repository is dirty.
+- Each factory startup synchronizes the clean tracked repository to the latest
+  configured base branch before polling Jira.
 - A failed stage makes one attempt by default, then comments diagnostics and
   transitions the Jira issue to the configured `Error` status. Set
   `maxAttempts` in the config (or `FACTORY_MAX_ATTEMPTS`) to allow additional
