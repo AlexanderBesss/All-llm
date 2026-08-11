@@ -14,7 +14,7 @@ import { RUN_STATUSES, STAGES } from "../types.mjs";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.mjs";
 import { CodexJiraAdapter } from "../codex-jira.mjs";
 
-async function fixture({ maxAttempts = 1 } = {}) {
+async function fixture({ maxAttempts = 1, continueFailedTasks = false } = {}) {
   const stateDir = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-"));
   const db = await openStateDatabase(stateDir);
   const jira = new InMemoryJiraAdapter([{
@@ -38,6 +38,7 @@ async function fixture({ maxAttempts = 1 } = {}) {
     repoPath: stateDir,
     leaseMs: 60_000,
     maxAttempts,
+    continueFailedTasks,
     retryBackoffMs: 0,
     factory: { branchPrefix: "factory" },
     jira: {
@@ -200,6 +201,7 @@ test("factory defaults to one attempt and no subtask configuration", () => {
   try {
     const config = defaultConfig("C:/projects/All-llm");
     assert.equal(config.maxAttempts, 1);
+    assert.equal(config.continueFailedTasks, true);
     assert.equal(config.factory.preferredMaxSubtasks, undefined);
     process.env.FACTORY_MAX_ATTEMPTS = "4";
     assert.equal(defaultConfig("C:/projects/All-llm").maxAttempts, 4);
@@ -386,6 +388,65 @@ test("blocks a run after bounded single-agent failures", async () => {
   assert.equal(run.status, RUN_STATUSES.BLOCKED);
   assert.equal(fixtureData.jira.transitions.at(-1).statusName, "Error");
   assert.match(fixtureData.jira.comments.at(-1).body, /implementation failure/);
+  fixtureData.db.close();
+});
+
+test("continues blocked implementation tasks from their failed stage when enabled", async () => {
+  const fixtureData = await fixture({ continueFailedTasks: true });
+  let shouldFail = true;
+  let agentCalls = 0;
+  const agent = {
+    async execute() {
+      agentCalls += 1;
+      if (shouldFail) throw new Error("implementation timeout");
+      return { result: executionFor(), raw: {} };
+    },
+  };
+  const worker = makeWorker(fixtureData, agent);
+  const first = await worker.runOnce();
+  assert.equal(first.action, "blocked");
+  assert.equal(fixtureData.db.getRun(first.runId).stage, STAGES.BLOCKED);
+  assert.equal(fixtureData.jira.transitions.at(-1).statusName, "Error");
+
+  shouldFail = false;
+  const second = await worker.runOnce();
+  assert.equal(second.action, "resumed");
+  assert.equal(agentCalls, 2);
+  assert.deepEqual(
+    fixtureData.jira.transitions.map((item) => item.statusName),
+    ["In Progress", "Error", "In Progress", "In Review"],
+  );
+  assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("continues blocked pull-request tasks without rerunning implementation", async () => {
+  const fixtureData = await fixture({ continueFailedTasks: true });
+  const createPullRequest = fixtureData.github.createPullRequest.bind(fixtureData.github);
+  let shouldFail = true;
+  fixtureData.github.createPullRequest = async (input) => {
+    if (shouldFail) throw new Error("GitHub timeout");
+    return createPullRequest(input);
+  };
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+
+  const first = await worker.runOnce();
+  assert.equal(first.action, "blocked");
+  assert.equal(fixtureData.db.getLastFailedStage(first.runId), STAGES.PULL_REQUEST);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+
+  shouldFail = false;
+  const second = await worker.runOnce();
+  assert.equal(second.action, "resumed");
+  assert.equal(agentCalls, 1);
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
 });
 

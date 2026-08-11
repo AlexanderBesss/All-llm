@@ -20,6 +20,10 @@ function nextRetryAt(backoffMs, attempts) {
   return new Date(Date.now() + backoffMs * (2 ** Math.max(0, attempts - 1))).toISOString();
 }
 
+function resumableStage(stage) {
+  return stage === STAGES.IMPLEMENTATION || stage === STAGES.PULL_REQUEST;
+}
+
 async function sleep(ms, signal) {
   if (signal?.aborted) throw abortError("Factory shutdown requested.");
   await new Promise((resolve, reject) => {
@@ -116,7 +120,11 @@ export class FactoryWorker {
       || (run.status === RUN_STATUSES.ACTIVE
         && (!run.lease_owner || run.lease_owner === this.leaseOwner)
         && run.stage !== STAGES.REVIEW
-        && run.stage !== STAGES.BLOCKED));
+        && run.stage !== STAGES.BLOCKED)
+      || (this.config.continueFailedTasks === true
+        && run.status === RUN_STATUSES.BLOCKED
+        && run.stage === STAGES.BLOCKED
+        && resumableStage(this.db.getLastFailedStage(run.id))));
     if (resumable) {
       this.throwIfStopping();
       this.log("info", "run:resume-found", {
@@ -137,7 +145,37 @@ export class FactoryWorker {
         this.log("info", "run:busy", { runId: resumable.id });
         return { action: "busy", runId: resumable.id };
       }
-      const leased = this.db.getRun(resumable.id);
+      let leased = this.db.getRun(resumable.id);
+      if (leased.status === RUN_STATUSES.BLOCKED) {
+        const failedStage = this.db.getLastFailedStage(leased.id);
+        if (!resumableStage(failedStage)) {
+          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+          this.log("warn", "run:resume-skipped", {
+            runId: leased.id,
+            issueKey: leased.issue_key,
+            reason: "No supported failed stage was recorded.",
+          });
+          return { action: "idle" };
+        }
+        try {
+          await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
+        } catch (error) {
+          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+          throw error;
+        }
+        leased = this.db.updateRun(leased.id, {
+          status: RUN_STATUSES.ACTIVE,
+          stage: failedStage,
+          next_attempt_at: null,
+          last_error: null,
+        });
+        this.log("info", "run:failed-task-continued", {
+          runId: leased.id,
+          issueKey: leased.issue_key,
+          stage: failedStage,
+          jiraStatus: this.config.jira.statuses.implementation,
+        });
+      }
       this.log("info", "run:resume", { runId: leased.id, stage: leased.stage });
       await this.advanceRun(leased, { dryRun });
       return this.runResult("resumed", this.db.getRun(leased.id), leased.issue_key);

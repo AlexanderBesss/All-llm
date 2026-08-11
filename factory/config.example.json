@@ -4,6 +4,7 @@
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
   "maxAttempts": 1,
+  "continueFailedTasks": true,
   "retryBackoffMs": 30000,
   "factory": {
     "branchPrefix": "factory"

@@ -120,6 +120,13 @@ Jira comments, retries, and blocked runs.
 fails before the retry limit. It does not wait for the retry; use `npm start`
 for continuous polling and automatic continuation.
 
+To continue tasks that already reached the configured Jira `Error` status, set
+`continueFailedTasks` to `true` in the config (this is enabled by default). The worker finds the durable
+blocked run, resumes at its last failed stage, changes the Jira task back to
+the configured implementation status (normally `In Progress`), and continues
+using the existing branch and worktree. Set it to `false` when blocked tasks
+should remain terminal.
+
 Press `Ctrl+C` to request a graceful shutdown. The worker aborts active Codex,
 Git, GitHub CLI, Jira HTTP, and retry-wait operations, terminates their child
 processes, and closes the state database after cancellation completes.
@@ -148,6 +155,11 @@ restartable Windows Scheduled Task. State and logs belong under
   attempts. The durable SQLite run remains marked blocked after the limit. The
   Jira workflow must expose that exact Error status and the configured review
   status (the default is `In Review`).
+- When `continueFailedTasks` is enabled (the default), blocked runs are eligible for a new
+  continuation. The worker uses `stage_runs` to restart the implementation or
+  pull-request stage that failed, moves the Jira issue from `Error` to the
+  configured implementation status, and returns to `Error` if the continuation
+  fails again.
 - Codex health, including the `Atlassian-Rovo-MCP` registration, and GitHub CLI
   authentication are checked by `doctor` before live processing. If either
   fails, the worker remains disabled.

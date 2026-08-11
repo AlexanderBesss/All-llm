@@ -14,6 +14,7 @@ export function defaultConfig(repoPath = process.cwd()) {
     pollIntervalMs: 60_000,
     leaseMs: 15 * 60_000,
     maxAttempts: Number(process.env.FACTORY_MAX_ATTEMPTS || 1),
+    continueFailedTasks: process.env.FACTORY_CONTINUE_FAILED_TASKS !== "false",
     retryBackoffMs: 30_000,
     factory: {
       branchPrefix: "factory",
@@ -83,6 +84,9 @@ export function validateConfig(config, { live = true } = {}) {
   if (!config.stateDir) errors.push("stateDir is required");
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
+  }
+  if (typeof config.continueFailedTasks !== "boolean") {
+    errors.push("continueFailedTasks must be a boolean");
   }
   if (!config.git?.baseBranch) errors.push("git.baseBranch is required");
   if (!Number.isInteger(config.codex?.contextWindowTokens) || config.codex.contextWindowTokens <= 0) {
