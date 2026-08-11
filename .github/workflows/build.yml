@@ -3,6 +3,8 @@ name: Build WhisperNote
 on:
   push:
     branches: [main, master]
+    tags:
+      - 'v*'
     paths:
       - whisper-note/**
       - .github/workflows/build.yml
@@ -16,6 +18,9 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -38,9 +43,44 @@ jobs:
             /p:PublishSingleFile=true `
             /p:SelfContained=false
 
+      - name: Package release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Compress-Archive `
+            -Path whisper-note/publish/* `
+            -DestinationPath artifacts/WhisperNote-win-x64.zip `
+            -Force
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WhisperNote
-          path: whisper-note/publish/
+          name: WhisperNote-win-x64
+          path: artifacts/WhisperNote-win-x64.zip
           if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WhisperNote-win-x64
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            artifacts/WhisperNote-win-x64.zip \
+            --verify-tag \
+            --title "WhisperNote $GITHUB_REF_NAME" \
+            --generate-notes
