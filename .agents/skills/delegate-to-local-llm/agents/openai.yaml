@@ -1,0 +1,7 @@
+interface:
+  display_name: "Delegate to Local LLM"
+  short_description: "Run sequential Qwen 3.6 27B OpenCode workers"
+  default_prompt: "Use $delegate-to-local-llm to run tool-enabled OpenCode workers sequentially on my local Qwen 3.6 27B model, then verify their work."
+
+policy:
+  allow_implicit_invocation: true
