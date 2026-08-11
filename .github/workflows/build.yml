@@ -1,0 +1,44 @@
+name: Build WhisperNote
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - whisper-note/**
+  pull_request:
+    branches: [main, master]
+    paths:
+      - whisper-note/**
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore whisper-note/WhisperNote.csproj
+
+      - name: Publish Release
+        run: |
+          dotnet publish whisper-note/WhisperNote.csproj `
+            -c Release `
+            -r win-x64 `
+            -o whisper-note/publish `
+            /p:PublishSingleFile=true `
+            /p:SelfContained=false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhisperNote
+          path: whisper-note/publish/
+          if-no-files-found: error
