@@ -17,7 +17,30 @@
           "labels": { "type": "array", "items": { "type": "string" } },
           "parentKey": { "type": "string" },
           "projectKey": { "type": "string" },
-          "sprint": {}
+          "sprint": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "anyOf": [{ "type": "integer" }, { "type": "string" }, { "type": "null" }] },
+                    "name": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "state": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "boardId": { "anyOf": [{ "type": "integer" }, { "type": "string" }, { "type": "null" }] },
+                    "originBoardId": { "anyOf": [{ "type": "integer" }, { "type": "string" }, { "type": "null" }] },
+                    "startDate": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "endDate": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "completeDate": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+                    "goal": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                  },
+                  "required": ["id", "name", "state", "boardId", "originBoardId", "startDate", "endDate", "completeDate", "goal"],
+                  "additionalProperties": false
+                }
+              }
+            ]
+          }
         },
         "additionalProperties": false
       }
