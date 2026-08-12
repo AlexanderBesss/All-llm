@@ -9,7 +9,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["severity", "file", "description", "resolution"],
+        "required": ["severity", "file", "line", "description", "resolution"],
         "properties": {
           "severity": { "type": "string", "enum": ["critical", "major", "minor", "suggestion"] },
           "file": { "type": "string" },
