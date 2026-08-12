@@ -154,7 +154,7 @@ test("MCP Jira mutations get one correction request after a provider timeout", a
   const executor: JiraExecutor = {
     async run() {
       calls += 1;
-      if (calls === 1) throw new Error("timed out after 120000 ms");
+      if (calls === 1) throw new Error("timed out after 240000 ms");
       return { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
     },
   };

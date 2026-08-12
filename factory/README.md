@@ -67,7 +67,7 @@ OpenCode accepts `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`,
 `JIRA_BASE_URL`, `JIRA_EMAIL`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
 Provider-backed Jira MCP operations are bounded by `jira.mcpTimeoutMs`
-(120 seconds by default, or `FACTORY_JIRA_MCP_TIMEOUT_MS`).
+(240 seconds by default, or `FACTORY_JIRA_MCP_TIMEOUT_MS`).
 OpenCode uses the dedicated `factory-jira` agent for these calls; its agentic
 steps are capped so a failed MCP mutation cannot spin indefinitely.
 

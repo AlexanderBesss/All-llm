@@ -11,7 +11,7 @@
     "branchPrefix": "factory"
   },
   "jira": {
-    "mcpTimeoutMs": 120000,
+    "mcpTimeoutMs": 240000,
     "mcpAgent": "factory-jira",
     "projectKey": "KAN",
     "statuses": {
