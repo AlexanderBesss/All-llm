@@ -127,6 +127,14 @@ test("process cancellation terminates an active child process", async () => {
   await assert.rejects(running, (error: unknown) => isAbortError(error));
 });
 
+test("noninteractive subprocesses receive detached stdin", async () => {
+  const result = await runProcess(process.execPath, [
+    "-e",
+    "const fs = require('node:fs'); process.stdout.write(String(fs.fstatSync(0).isCharacterDevice()));",
+  ]);
+  assert.equal(result.stdout, "true");
+});
+
 test("GitAdapter switches to and fast-forward pulls the configured base branch", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   let currentBranch = "factory/KAN-19";

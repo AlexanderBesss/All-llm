@@ -35,7 +35,17 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       reject(abortError(`Operation aborted before starting: ${command}`));
       return;
     }
-    const child = spawn(command, args, { cwd, env, windowsHide: true, shell: false });
+    // None of the factory subprocesses consume stdin. Keep it detached so
+    // Codex does not mistake the supervisor's pipe for an additional prompt
+    // and block while trying to read it (newer Codex CLIs explicitly read
+    // piped stdin even when a prompt argument is supplied).
+    const child = spawn(command, args, {
+      cwd,
+      env,
+      windowsHide: true,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -60,7 +70,6 @@ export function runProcess(command: string, args: string[], { cwd, env = process
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.stdin.end();
     child.on("error", (error) => {
       fail(error);
     });
