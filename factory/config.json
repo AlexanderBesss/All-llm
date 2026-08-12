@@ -46,6 +46,7 @@
     "agent": "build",
     "timeoutMs": 1200000,
     "command": "",
-    "directory": ""
+    "directory": "",
+    "configPath": "../opencode.json"
   }
 }
