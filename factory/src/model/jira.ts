@@ -76,7 +76,7 @@ export interface JiraStructuredResponse {
 }
 
 export interface JiraExecutor {
-  run(input: { task: string; context?: string; cwd: string; outputSchema: string }): Promise<{ output: string }>;
+  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number }): Promise<{ output: string }>;
 }
 
 export interface JiraFetchResponse {

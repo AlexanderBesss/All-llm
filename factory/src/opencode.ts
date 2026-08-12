@@ -85,7 +85,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     };
   }
 
-  async run({ task, context = "", cwd, outputSchema }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs }: CodexRunInput) {
     const settings = this.config.opencode || {};
     let schemaInstruction = "";
     if (outputSchema) {
@@ -109,7 +109,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     ];
     const result = await this.processRunner(this.invocation().command, args, {
       cwd: this.config.repoPath,
-      timeoutMs: settings.timeoutMs || 1_200_000,
+      timeoutMs: timeoutMs || settings.timeoutMs || 1_200_000,
       signal: this.config.signal,
       env: this.runtimeEnv(),
     });

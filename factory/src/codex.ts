@@ -88,7 +88,7 @@ export class CodexAgentExecutor {
     ];
   }
 
-  async run({ task, context = "", cwd, outputSchema }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs }: CodexRunInput) {
     const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
     const runWithTier = async (serviceTier = this.config.codex.serviceTier) => {
       const args = [...this.baseArgs(serviceTier), cwd];
@@ -100,7 +100,7 @@ export class CodexAgentExecutor {
         // actual source worktree used by the agent.
         cwd: this.config.repoPath,
         input: prompt,
-        timeoutMs: this.config.codex.timeoutMs,
+        timeoutMs: timeoutMs || this.config.codex.timeoutMs,
         signal: this.config.signal,
         env: this.runtimeEnv(),
       });

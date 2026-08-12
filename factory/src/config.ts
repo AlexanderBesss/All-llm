@@ -32,6 +32,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       adapter: jiraAdapter,
       baseUrl: process.env.JIRA_BASE_URL || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "KAN",
+      mcpTimeoutMs: Number(process.env.FACTORY_JIRA_MCP_TIMEOUT_MS || 120_000),
       email: process.env.JIRA_EMAIL || "",
       apiToken: process.env.JIRA_API_TOKEN || "",
       statuses: {
@@ -172,6 +173,9 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
     errors.push("provider must be codex or opencode");
   }
   if (!config.stateDir) errors.push("stateDir is required");
+  if (!Number.isInteger(config.jira?.mcpTimeoutMs) || config.jira.mcpTimeoutMs <= 0) {
+    errors.push("jira.mcpTimeoutMs must be a positive integer");
+  }
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
   }

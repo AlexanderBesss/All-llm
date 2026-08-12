@@ -33,6 +33,8 @@ export interface JiraConfig {
   adapter?: JiraAdapterKind;
   baseUrl?: string;
   projectKey?: string;
+  /** Maximum time for one provider-backed Jira MCP request. */
+  mcpTimeoutMs?: number;
   email?: string;
   apiToken?: string;
   readyStatus?: string;

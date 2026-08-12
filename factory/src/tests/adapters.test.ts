@@ -101,6 +101,33 @@ test("MCP Jira adapter has no subtask mutation or lookup operations", async () =
   assert.equal(adapterShape.findRunSubtasks, undefined);
 });
 
+test("MCP Jira description updates use a bounded timeout and strict Markdown payload", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      return {
+        output: JSON.stringify(requests.length === 1
+          ? { ok: false, issueKey: "FACT-1", key: "FACT-1", details: "description must be a Markdown string, not an object" }
+          : { ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }),
+      };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", mcpTimeoutMs: 12_345 }, executor);
+
+  await adapter.updateDescription("FACT-1", "## Plan\n\nKeep this exact text.");
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].timeoutMs, 12_345);
+  assert.equal(requests[1].timeoutMs, 12_345);
+  assert.match(requests[0].task, /plain Markdown JSON string/);
+  assert.match(requests[0].task, /must never be an object and must never be \{\}/);
+  assert.match(requests[0].task, /BEGIN EXACT DESCRIPTION/);
+  assert.match(requests[0].task, /Keep this exact text\./);
+  assert.match(requests[1].task, /description must be a Markdown string/);
+  assert.match(requests[1].task, /one permitted correction attempt/);
+});
+
 test("Jira ready discovery includes Ready issues with or without a sprint", async () => {
   const jira = new InMemoryJiraAdapter([
     { key: "FACT-BOARD", fields: { status: { name: "Ready" }, sprint: [{ id: 1, name: "Sprint 1" }] } },

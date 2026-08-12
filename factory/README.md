@@ -62,6 +62,8 @@ OpenCode accepts `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`,
 `OPENCODE_DIRECTORY`, and `OPENCODE_CONFIG` overrides.
 `JIRA_BASE_URL`, `JIRA_EMAIL`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
+Provider-backed Jira MCP operations are bounded by `jira.mcpTimeoutMs`
+(120 seconds by default, or `FACTORY_JIRA_MCP_TIMEOUT_MS`).
 
 `repoPath` may be relative; it is resolved from the detected repository root.
 `stateDir` may also be relative and is resolved from the configured repository
@@ -160,8 +162,11 @@ its own MCP server during `doctor` and before live processing. OpenCode's
 `--format json` mode supplies raw JSON events, so the factory also embeds each
 requested JSON Schema in the prompt, rejects commentary around structured
 responses, recovers fenced JSON when possible, and retries read-only Jira
-lookups once after an invalid response. Mutating Jira operations are not
-automatically retried.
+lookups once after an invalid response. A failed Jira description mutation may
+receive one separate correction request containing the MCP error; no mutation
+can loop beyond that single correction. A provider-backed Jira operation that
+times out is reported as a failed factory stage instead of leaving the model
+session running indefinitely.
 
 ## Commands
 

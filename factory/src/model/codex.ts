@@ -13,6 +13,7 @@ export interface CodexRunInput {
   context?: string;
   cwd: string;
   outputSchema?: string;
+  timeoutMs?: number;
 }
 
 export interface CodexEvent {
