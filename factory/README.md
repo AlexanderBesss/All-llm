@@ -117,6 +117,18 @@ the factory paths and running `opencode mcp auth jira`. This keeps logs,
 database files, and MCP OAuth credentials writable and consistent for the
 scheduled worker.
 
+For the checked-in project-local configuration, authenticate once from Git Bash
+at the repository root with:
+
+```bash
+state="$PWD/tmp/AllLlmFactory"
+export XDG_CONFIG_HOME="$state/opencode-config"
+export XDG_DATA_HOME="$state/opencode-data"
+export XDG_STATE_HOME="$state/opencode-state"
+export OPENCODE_CONFIG="$PWD/opencode.json"
+opencode mcp auth jira
+```
+
 Codex is launched with the repository as its process directory so its MCP
 registration remains visible, while `-C` points its file and Git tools at the
 run’s external worktree.

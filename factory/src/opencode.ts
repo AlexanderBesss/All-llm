@@ -7,9 +7,6 @@ import type { CodexAgentConfig, CodexJsonLinesResult, CodexRunInput } from "./mo
 
 function defaultOpenCodeEntry() {
   if (process.env.OPENCODE_COMMAND) return process.env.OPENCODE_COMMAND;
-  if (process.platform === "win32" && process.env.APPDATA) {
-    return path.join(process.env.APPDATA, "npm", "opencode.cmd");
-  }
   return "opencode";
 }
 

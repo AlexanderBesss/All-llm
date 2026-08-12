@@ -39,7 +39,8 @@ function defaultGitBashEntry() {
 }
 
 export function processInvocation(command: string, args: string[]) {
-  const useWindowsCommandShim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+  const useWindowsCommandShim = process.platform === "win32"
+    && (/\.(?:cmd|bat)$/i.test(command) || command.toLowerCase() === "opencode");
   if (!useWindowsCommandShim) return { command, args };
   // Pass the command and arguments as bash positional parameters. This keeps
   // OpenCode prompts and JSON payloads intact without interpolating them into

@@ -264,6 +264,20 @@ test("Windows command shims are launched through Git Bash with preserved argumen
   ]);
 });
 
+test("bare OpenCode commands are resolved through Git Bash on Windows", () => {
+  if (process.platform !== "win32") return;
+  const invocation = processInvocation("opencode", ["mcp", "auth", "jira"]);
+  assert.match(invocation.command, /(?:^|[\\/])Git[\\/]bin[\\/]bash\.exe$/i);
+  assert.deepEqual(invocation.args, [
+    "-lc",
+    'exec "$0" "$@"',
+    "opencode",
+    "mcp",
+    "auth",
+    "jira",
+  ]);
+});
+
 test("noninteractive subprocesses receive detached stdin", async () => {
   const result = await runProcess(process.execPath, [
     "-e",
