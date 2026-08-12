@@ -78,7 +78,8 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       cleanup();
       if (code !== 0) {
         settled = true;
-        reject(new Error(`${command} ${args.join(" ")} failed (${code}): ${stderr.trim() || stdout.trim()}`));
+        const details = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");
+        reject(new Error(`${command} ${args.join(" ")} failed (${code})${details ? `: ${details}` : "."}`));
         return;
       }
       settled = true;
