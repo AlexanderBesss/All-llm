@@ -176,3 +176,38 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
   assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1" }]);
 });
 
+test("MCP Jira lookup accepts an existing issue in Error status", async () => {
+  const executor: JiraExecutor = {
+    async run() {
+      return {
+        output: JSON.stringify({
+          issues: [{
+            key: "FACT-1",
+            summary: "Blocked task",
+            description: "",
+            status: "Error",
+            issuetype: "Task",
+            labels: [],
+            parentKey: "",
+            projectKey: "FACT",
+            sprint: null,
+          }],
+        }),
+      };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+  const issue = await adapter.getIssue("FACT-1");
+  assert.equal(issue.fields.status?.name, "Error");
+});
+
+test("MCP Jira inconclusive lookup is not treated as deletion", async () => {
+  const executor: JiraExecutor = { async run() { return { output: JSON.stringify({ issues: [] }) }; } };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+  await assert.rejects(adapter.getIssue("FACT-404"), (error: Error & { code?: string }) => {
+    assert.match(error.message, /lookup was inconclusive/);
+    assert.notEqual(error.code, "JIRA_ISSUE_NOT_FOUND");
+    return true;
+  });
+});
+

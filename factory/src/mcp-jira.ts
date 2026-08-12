@@ -1,6 +1,5 @@
 import path from "node:path";
 import { extractJson } from "./json-output.js";
-import { JiraIssueNotFoundError } from "./jira.js";
 import type { JiraConfig } from "./model/config.js";
 import type { JiraExecutor, JiraIssue, JiraIssueFields, JiraSearchItem, JiraStructuredResponse } from "./model/jira.js";
 
@@ -57,11 +56,16 @@ export class McpJiraAdapter {
 
   async getIssue(issueKey) {
     const result = await this.structured(
-      `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. Return that one issue normalized to the requested JSON schema. Do not search broadly.`,
+      `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. The issue may have any current Jira status, including Error; determine existence only from the exact issue key, never from its status. Return that one issue normalized to the requested JSON schema. Do not search broadly.`,
       this.issuesSchema,
     );
     const item = result.issues?.[0];
-    if (!item || item.key !== issueKey) throw new JiraIssueNotFoundError(issueKey);
+    if (!item || item.key !== issueKey) {
+      // An agent-backed MCP lookup can return an empty/malformed structured
+      // result even when Jira contains the issue. Do not turn that ambiguity
+      // into a deletion signal; only the REST adapter has authoritative 404s.
+      throw new Error(`Jira MCP did not return issue ${issueKey}; lookup was inconclusive.`);
+    }
     return normalizeIssue(item);
   }
 
