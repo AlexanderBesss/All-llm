@@ -1,4 +1,5 @@
 {
+  "provider": "codex",
   "repoPath": ".",
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
@@ -39,5 +40,12 @@
     "autoCompactTokenLimit": 225000,
     "timeoutMs": 1200000,
     "command": ""
+  },
+  "opencode": {
+    "model": "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+    "agent": "build",
+    "timeoutMs": 1200000,
+    "command": "",
+    "directory": ""
   }
 }

@@ -33,6 +33,7 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     },
   };
   const config = {
+    provider: "codex" as const,
     stateDir,
     repoPath: stateDir,
     leaseMs: 60_000,
@@ -46,6 +47,8 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     },
     github: { repositoryFullName: "example/factory" },
     git: { baseBranch: "main" },
+    codex: {},
+    opencode: {},
   };
   return { db, jira, github, git, config };
 }

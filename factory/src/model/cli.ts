@@ -31,6 +31,7 @@ export interface RepositoryCheck extends CheckReport {
 export interface DoctorReport {
   repoPath: string;
   stateDir: string;
+  provider?: string;
   model?: string;
   reasoningEffort?: string;
   sandbox?: string;

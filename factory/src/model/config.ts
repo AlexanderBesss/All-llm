@@ -1,4 +1,5 @@
 export type JiraAdapterKind = "codex-mcp" | "rest";
+export type AgentProvider = "codex" | "opencode";
 
 export interface FactoryStatuses {
   ready: string;
@@ -55,7 +56,19 @@ export interface CodexSettings {
   command?: string;
 }
 
+export interface OpenCodeSettings {
+  model?: string;
+  agent?: string;
+  command?: string;
+  timeoutMs?: number;
+  directory?: string;
+}
+
 export interface FactoryConfig {
+  /** Provider strategy used for implementation, review, and structured Jira operations. */
+  provider: AgentProvider;
+  /** Backward/forward-compatible descriptive alias for provider. */
+  agentProvider?: AgentProvider;
   repoPath: string;
   stateDir: string;
   pollIntervalMs: number;
@@ -68,5 +81,6 @@ export interface FactoryConfig {
   github: GitHubConfig;
   git: GitConfig;
   codex: CodexSettings;
+  opencode: OpenCodeSettings;
   signal?: AbortSignal;
 }

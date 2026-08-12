@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import type { FactoryConfig, JiraAdapterKind } from "./model/config.js";
+import type { AgentProvider, FactoryConfig, JiraAdapterKind } from "./model/config.js";
 import type { UnknownRecord } from "./model/common.js";
 
 function localAppData() {
@@ -15,6 +15,7 @@ function resolveConfiguredPath(value: string, baseDir: string) {
 export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
   const stateDir = path.join(localAppData(), "AllLlmFactory");
   return {
+    provider: (process.env.FACTORY_AGENT_PROVIDER || "codex") as AgentProvider,
     repoPath: path.resolve(repoPath),
     stateDir,
     pollIntervalMs: 60_000,
@@ -61,6 +62,13 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       timeoutMs: 1_200_000,
       command: process.env.CODEX_COMMAND || "",
     },
+    opencode: {
+      model: process.env.OPENCODE_MODEL || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+      agent: process.env.OPENCODE_AGENT || "build",
+      timeoutMs: 1_200_000,
+      command: process.env.OPENCODE_COMMAND || "",
+      directory: process.env.OPENCODE_DIRECTORY || "",
+    },
   };
 }
 
@@ -87,6 +95,9 @@ export async function loadConfig(configPath = process.env.FACTORY_CONFIG, repoPa
   if (!configPath) return base;
   const raw: unknown = JSON.parse(await readFile(path.resolve(configPath), "utf8"));
   const result = merge(base, raw);
+  if (isRecord(raw) && typeof raw.agentProvider === "string" && raw.provider === undefined) {
+    result.provider = raw.agentProvider as AgentProvider;
+  }
   result.repoPath = resolveConfiguredPath(result.repoPath || repoPath, base.repoPath);
   result.stateDir = resolveConfiguredPath(result.stateDir || base.stateDir, result.repoPath);
   result.git.repoPath = result.repoPath;
@@ -96,6 +107,9 @@ export async function loadConfig(configPath = process.env.FACTORY_CONFIG, repoPa
 export function validateConfig(config: FactoryConfig, { live = true }: { live?: boolean } = {}): string[] {
   const errors = [];
   if (!config.repoPath) errors.push("repoPath is required");
+  if (!config.provider || !["codex", "opencode"].includes(config.provider)) {
+    errors.push("provider must be codex or opencode");
+  }
   if (!config.stateDir) errors.push("stateDir is required");
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
@@ -112,10 +126,15 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
   } else if (config.codex.autoCompactTokenLimit >= config.codex.contextWindowTokens) {
     errors.push("codex.autoCompactTokenLimit must be lower than codex.contextWindowTokens");
   }
+  if (!config.opencode?.model) errors.push("opencode.model is required");
+  if (!config.opencode?.agent) errors.push("opencode.agent is required");
   if (live) {
     if (!config.jira?.projectKey) errors.push("jira.projectKey is required");
     if (!config.jira?.adapter || !["codex-mcp", "rest"].includes(config.jira.adapter)) {
       errors.push("jira.adapter must be codex-mcp or rest");
+    }
+    if (config.provider === "opencode" && config.jira?.adapter === "codex-mcp") {
+      errors.push("jira.adapter=codex-mcp requires provider=codex; use jira.adapter=rest with OpenCode");
     }
     if (config.jira?.adapter === "rest") {
       if (!config.jira?.baseUrl) errors.push("jira.baseUrl is required when jira.adapter=rest");

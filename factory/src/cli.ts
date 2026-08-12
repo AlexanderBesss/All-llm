@@ -7,7 +7,7 @@ import { JiraRestAdapter } from "./jira.js";
 import { CodexJiraAdapter } from "./codex-jira.js";
 import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError, runProcess } from "./git.js";
-import { CodexAgentExecutor } from "./codex.js";
+import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
 import { FactoryWorker, runLoop } from "./worker.js";
 import type { FactoryConfig, GitConfig, GitHubConfig, JiraConfig } from "./model/config.js";
@@ -62,8 +62,7 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
-    const agent = new CodexAgentExecutor({ ...config, signal });
-    const reviewer = new CodexAgentExecutor({ ...config, signal });
+    const { agent, reviewer } = createAgentExecutors(config, signal);
     const jira = config.jira.adapter === "rest"
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
       : new CodexJiraAdapter(normalizedJiraConfig(config, signal), agent);
@@ -161,10 +160,10 @@ async function checkStateDatabase(config: FactoryConfig): Promise<CheckReport> {
   }
 }
 
-async function checkCodex(config: FactoryConfig): Promise<CheckReport> {
+async function checkAgent(config: FactoryConfig): Promise<CheckReport> {
   try {
-    const codex = new CodexAgentExecutor(config);
-    return { ok: true, ...(await codex.health()) };
+    const { agent } = createAgentExecutors(config);
+    return { ok: true, provider: config.provider, ...(await agent.health()) };
   } catch (error) {
     return { ok: false, error: error.message };
   }
@@ -186,9 +185,11 @@ async function checkGitHub(config: FactoryConfig): Promise<CheckReport> {
   }
 }
 
-function checkJira(config: FactoryConfig, codexCheck: CheckReport): CheckReport {
+function checkJira(config: FactoryConfig, agentCheck: CheckReport): CheckReport {
   if (config.jira.adapter === "codex-mcp") {
-    const mcpRegistered = codexCheck.ok === true && codexCheck.mcp === "Atlassian-Rovo-MCP";
+    const mcpRegistered = config.provider === "codex"
+      && agentCheck.ok === true
+      && agentCheck.mcp === "Atlassian-Rovo-MCP";
     const configured = Boolean(config.jira.projectKey);
     return {
       ok: Boolean(configured && mcpRegistered),
@@ -197,7 +198,11 @@ function checkJira(config: FactoryConfig, codexCheck: CheckReport): CheckReport 
       projectKey: config.jira.projectKey || "",
       mcpRegistered,
       ...(configured && mcpRegistered ? {} : {
-        error: !configured ? "jira.projectKey is required." : "Atlassian-Rovo-MCP is not available through Codex.",
+        error: !configured
+          ? "jira.projectKey is required."
+          : config.provider !== "codex"
+            ? "jira.adapter=codex-mcp requires provider=codex; use jira.adapter=rest with OpenCode."
+            : "Atlassian-Rovo-MCP is not available through Codex.",
       }),
     };
   }
@@ -217,7 +222,8 @@ async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
   const report: DoctorReport = {
     repoPath: config.repoPath,
     stateDir: config.stateDir,
-    model: config.codex.model,
+    provider: config.provider,
+    model: config.provider === "opencode" ? config.opencode.model : config.codex.model,
     reasoningEffort: config.codex.reasoningEffort,
     sandbox: config.codex.sandbox,
     approvalPolicy: config.codex.approvalPolicy,
@@ -233,19 +239,20 @@ async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
     version: process.version,
     executable: process.execPath,
   };
-  const [gitCheck, repositoryCheck, stateCheck, codexCheck, githubCheck] = await Promise.all([
+  const [gitCheck, repositoryCheck, stateCheck, agentCheck, githubCheck] = await Promise.all([
     checkGitTool(config),
     checkRepository(config),
     checkStateDatabase(config),
-    checkCodex(config),
+    checkAgent(config),
     checkGitHub(config),
   ]);
   report.checks.git = gitCheck;
   report.checks.repository = repositoryCheck;
   report.checks.sqlite = stateCheck;
-  report.checks.codex = codexCheck;
+  report.checks.agent = agentCheck;
+  report.checks[config.provider] = agentCheck;
   report.checks.github = githubCheck;
-  report.checks.jira = checkJira(config, codexCheck);
+  report.checks.jira = checkJira(config, agentCheck);
   report.checks.configuration = {
     ok: liveErrors.length === 0,
     errors: liveErrors,

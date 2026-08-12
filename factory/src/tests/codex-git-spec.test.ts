@@ -7,8 +7,45 @@ import { defaultConfig, validateConfig } from "../config.js";
 import { GitAdapter, isAbortError, runProcess } from "../git.js";
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
+import { OpenCodeAgentExecutor, parseOpenCodeOutput } from "../opencode.js";
+import { createAgentStrategy } from "../agent-strategy.js";
 import { executionFor, reviewFor } from "./support.js";
 import type { ProcessOptions, ProcessRunner } from "../model/process.js";
+
+test("provider strategy defaults to Codex and can select OpenCode", () => {
+  assert.equal(createAgentStrategy("codex").name, "codex");
+  assert.equal(createAgentStrategy("opencode").name, "opencode");
+  assert.equal(createAgentStrategy(undefined).name, "codex");
+});
+
+test("OpenCode executor invokes the configured local model and parses JSON events", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const executor = new OpenCodeAgentExecutor({
+    repoPath: ".",
+    codex: {},
+    opencode: { command: "opencode", model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", agent: "build", timeoutMs: 1234 },
+  }, async (command, args, options) => {
+    calls.push({ command, args, options });
+    return {
+      stdout: [
+        JSON.stringify({ type: "step_start" }),
+        JSON.stringify({ type: "text", part: { text: '{"ok":' } }),
+        JSON.stringify({ type: "text", part: { text: "true}" } }),
+      ].join("\n"),
+      stderr: "",
+    };
+  });
+  const result = await executor.run({ task: "Return JSON.", cwd: "../factory-worktree" });
+  assert.equal(result.output, '{"ok":true}');
+  assert.equal(calls[0].command, "opencode");
+  assert.deepEqual(calls[0].args.slice(0, 8), ["run", "--model", "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", "--agent", "build", "--format", "json", "--auto"]);
+  assert.equal(calls[0].args.at(-2), "../factory-worktree");
+  assert.equal(calls[0].options?.timeoutMs, 1234);
+});
+
+test("OpenCode parser rejects output without final text events", () => {
+  assert.throws(() => parseOpenCodeOutput('{"value":42}'), /no final agent message/);
+});
 test("Codex executor uses configurable Luna max-effort settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const config = {

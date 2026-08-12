@@ -101,11 +101,16 @@ Set `jira.adapter` to `rest` only if a separate Jira REST credential is desired;
 that fallback then requires `baseUrl`, `email`, and `apiToken` in the Jira
 section.
 
-The factory invokes the installed Codex CLI, not OpenCode or the local Qwen
-bridge. Defaults are `gpt-5.6-luna` with maximum reasoning effort. Override
-them in the JSON config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
+The factory uses a provider strategy. `provider` defaults to `codex`, which
+invokes the installed Codex CLI with `gpt-5.6-luna` and maximum reasoning
+effort. Set `provider` to `opencode` to invoke the installed OpenCode CLI and
+the local model configured in `opencode.json`; the default is
+`llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL`. Override Codex settings in the JSON
+config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
 `CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
-`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. The factory defaults to
+`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. OpenCode can be
+overridden with `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`, and
+`OPENCODE_DIRECTORY`. The factory defaults to
 a 250,000-token context ceiling and starts automatic compaction at 225,000
 tokens. The `danger-full-access` sandbox and `never` approval policy are
 intentionally high trust because an unattended worker must use local Git and
@@ -114,6 +119,10 @@ PR review in place. When Codex reports that the selected model is at capacity,
 the factory immediately makes one additional attempt using the `priority`
 service tier (configurable through `highCapacityServiceTier`); other failures
 continue through the normal bounded stage-retry policy.
+
+OpenCode uses the same implementation and review strategy contract as Codex.
+Because Jira's `codex-mcp` adapter is provided by Codex's MCP registry,
+OpenCode configurations must use the `rest` Jira adapter with its credentials.
 
 ## Commands
 

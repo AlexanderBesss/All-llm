@@ -3,6 +3,7 @@ import type { JiraIssue } from "./jira.js";
 export interface CodexAgentConfig {
   repoPath: string;
   codex: import("./config.js").CodexSettings;
+  opencode?: import("./config.js").OpenCodeSettings;
   signal?: AbortSignal;
 }
 
@@ -80,6 +81,7 @@ export interface CodexReviewResult {
 }
 
 export interface CodexAgent {
+  run(input: CodexRunInput): Promise<CodexJsonLinesResult>;
   execute(input: {
     issue: JiraIssue;
     runId: string;

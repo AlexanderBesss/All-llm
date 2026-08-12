@@ -114,7 +114,7 @@ export class CodexAgentExecutor {
     }
   }
 
-  async health() {
+  async health(): Promise<{ command: string; version: string; codexHome?: string; mcp?: string; model?: string; config?: string }> {
     const invocation = this.invocation();
     const version = await this.processRunner(invocation.command, [...invocation.prefix, "--version"], {
       cwd: this.config.repoPath,
