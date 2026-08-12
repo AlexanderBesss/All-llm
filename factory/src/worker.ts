@@ -33,6 +33,24 @@ function nextRetryAt(backoffMs: number, attempts: number): string {
   return new Date(Date.now() + backoffMs * (2 ** Math.max(0, attempts - 1))).toISOString();
 }
 
+function leaseOwnerProcessId(owner: string | null | undefined): number | null {
+  const match = /^factory-(\d+)(?:-|$)/.exec(String(owner || ""));
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but cannot be inspected. Treat it as
+    // alive; only an explicit missing-process result is reclaimable.
+    return error?.code === "EPERM";
+  }
+}
+
 function resumableStage(stage: string | null): boolean {
   return stage === STAGES.IMPLEMENTATION || stage === STAGES.CODE_REVIEW || stage === STAGES.PULL_REQUEST;
 }
@@ -156,7 +174,9 @@ export class FactoryWorker {
     this.reviewer = reviewer;
     this.logger = logger;
     this.signal = signal;
-    this.leaseOwner = `factory-${process.pid}`;
+    // Include a per-process nonce so a restarted worker never looks like the
+    // previous worker merely because the operating system reused its PID.
+    this.leaseOwner = `factory-${process.pid}-${crypto.randomUUID()}`;
   }
 
   throwIfStopping() {
@@ -187,6 +207,16 @@ export class FactoryWorker {
   async runOnce({ dryRun = false }: { dryRun?: boolean } = {}): Promise<FactoryRunResult> {
     this.throwIfStopping();
     this.log("info", "poll:start", { dryRun });
+    const deadOwners = this.db.listRuns(50)
+      .map((run) => run.lease_owner)
+      .filter((owner): owner is string => {
+        const pid = leaseOwnerProcessId(owner);
+        return pid !== null && owner !== this.leaseOwner && !processIsAlive(pid);
+      });
+    const reclaimed = this.db.reapLeasesForOwners(deadOwners);
+    if (reclaimed) {
+      this.log("info", "run:dead-lease-reclaimed", { count: reclaimed });
+    }
     this.db.reapExpiredLeases();
     const resumable = this.db.listRuns(50).find((run) =>
       (run.status === RUN_STATUSES.RETRY_WAIT && due(run.next_attempt_at))
@@ -596,24 +626,34 @@ export class FactoryWorker {
       const taskType = issue.fields?.issuetype?.name;
       const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
       const specPath = this.db.findArtifact(ArtifactKind.Spec, branchName)?.artifact_value || "";
-      if (!dryRun) this.log("info", "pull-request:creating", { runId: run.id, branchName });
+      const persistedPr = !dryRun && run.pr_number && run.pr_url
+        ? { number: run.pr_number, html_url: run.pr_url, head: { ref: branchName } }
+        : null;
+      if (persistedPr) {
+        this.log("info", "pull-request:recovered", {
+          runId: run.id,
+          number: persistedPr.number,
+          url: persistedPr.html_url,
+        });
+      } else if (!dryRun) {
+        this.log("info", "pull-request:creating", { runId: run.id, branchName });
+      }
       const pr = dryRun
         ? { number: 0, html_url: "dry-run", head: { ref: branchName } }
-        : await this.github.createPullRequest({
-          title,
-          taskNumber,
-          taskName,
-          taskType,
-          body: pullRequestDescription({
-            runId: run.id,
-            issueKey: run.issue_key,
-            plan,
-            specPath,
-          }),
-          head: branchName,
-          base: this.config.git.baseBranch,
-        });
-      this.throwIfStopping();
+        : persistedPr || await this.github.createPullRequest({
+            title,
+            taskNumber,
+            taskName,
+            taskType,
+            body: pullRequestDescription({
+              runId: run.id,
+              issueKey: run.issue_key,
+              plan,
+              specPath,
+            }),
+            head: branchName,
+            base: this.config.git.baseBranch,
+          });
       this.log("info", "pull-request:created", {
         runId: run.id,
         number: pr?.number,
@@ -622,9 +662,21 @@ export class FactoryWorker {
       });
       if (!dryRun) {
         if (!pr?.html_url) throw new Error("GitHub did not return a pull-request URL.");
+        // Checkpoint the remote PR before Jira reporting. If the worker is
+        // interrupted after GitHub succeeds, the next attempt can resume
+        // reporting without recreating the PR.
+        this.db.updateRun(run.id, {
+          pr_number: pr.number || null,
+          pr_url: pr.html_url,
+          lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
+        });
+        this.db.recordArtifact(run.id, ArtifactKind.PullRequest, `${this.config.github.repositoryFullName}:${branchName}`, pr.html_url);
+        this.throwIfStopping();
         this.log("info", "pull-request:jira-comment", { runId: run.id, issueKey: run.issue_key });
         await this.jira.addComment(run.issue_key, `${makeRunMarker(run.id)}\nPull request created: ${pr.html_url}`);
         await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.review);
+      } else {
+        this.throwIfStopping();
       }
       this.db.finishStage(run.id, STAGES.PULL_REQUEST, attempt, pr, StageRunStatus.Completed);
       this.db.recordArtifact(run.id, ArtifactKind.PullRequest, `${this.config.github.repositoryFullName}:${branchName}`, pr.html_url || "dry-run");

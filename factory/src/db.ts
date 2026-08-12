@@ -210,4 +210,16 @@ export class StateDatabase {
     `).run(now, now);
     return Number(result.changes || 0);
   }
+
+  reapLeasesForOwners(owners: string[], now = nowIso()) {
+    const candidates = [...new Set(owners.filter(Boolean))];
+    if (!candidates.length) return 0;
+    const placeholders = candidates.map(() => "?").join(", ");
+    const result = this.db.prepare(`
+      UPDATE runs
+      SET lease_owner = NULL, lease_until = NULL, updated_at = ?
+      WHERE status IN ('active', 'retry_wait') AND lease_owner IN (${placeholders})
+    `).run(now, ...candidates);
+    return Number(result.changes || 0);
+  }
 }

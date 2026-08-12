@@ -226,6 +226,7 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 
 - Tickets in the configured Ready status are claimed from the configured Jira project whether they are on a board or in the backlog; sprint assignment is not required.
 - Runs use stable IDs, branch names, and Jira markers to reconcile retries.
+- On startup, a worker immediately releases active leases owned by a no-longer-running factory process, so an interrupted run does not wait for the normal lease timeout before resuming. Leases owned by live processes remain protected.
 - Each request has one implementation agent and one durable parent run. A retry
   reuses the same branch/worktree and asks that agent to inspect existing changes
   and continue; it never creates child tasks.
@@ -252,6 +253,8 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 - The selected agent performs source changes through local Git in the factory worktree. The
   worker uses GitHub CLI only for the hosting-platform pull-request object;
   local Git remains responsible for source mutations and branch publication.
+- The pull-request URL is checkpointed before Jira comment and status reporting,
+  allowing a restart after GitHub creation to resume the remaining reporting work.
 - After implementation and its reported tests, a separate ephemeral invocation
   of the selected provider
   invocation independently reviews the specification and complete branch diff.

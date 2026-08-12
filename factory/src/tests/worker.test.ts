@@ -340,6 +340,76 @@ test("a new worker reclaims an expired active lease and resumes the parent agent
   fixtureData.db.close();
 });
 
+test("a restarted worker reclaims an interrupted PR-stage lease before timeout", async () => {
+  const fixtureData = await fixture({ maxAttempts: 2 });
+  const claimed = fixtureData.db.claimRun({
+    id: "FACT-1-pr-restart",
+    issueKey: "FACT-1",
+    projectKey: "FACT",
+    issue: await fixtureData.jira.getIssue("FACT-1"),
+    stage: STAGES.PULL_REQUEST,
+    leaseOwner: "factory-999999999-dead-worker",
+    leaseUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
+  });
+  fixtureData.db.updateRun(claimed.run.id, {
+    stage: STAGES.PULL_REQUEST,
+    status: RUN_STATUSES.ACTIVE,
+    plan_json: JSON.stringify(planFor()),
+    branch_name: "factory/FACT-1",
+    commit_sha: "0123456789abcdef",
+    lease_owner: "factory-999999999-dead-worker",
+    lease_until: new Date(Date.now() + 60 * 60_000).toISOString(),
+  });
+
+  const worker = makeWorker(fixtureData, { async execute() {
+    throw new Error("implementation must not run during PR recovery");
+  } });
+  const result = await worker.runOnce();
+
+  assert.equal(result.action, RunAction.Resumed);
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  assert.equal(fixtureData.db.getRun(claimed.run.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("resumes Jira reporting from a checkpointed pull request", async () => {
+  const fixtureData = await fixture({ maxAttempts: 2 });
+  const claimed = fixtureData.db.claimRun({
+    id: "FACT-1-pr-checkpoint",
+    issueKey: "FACT-1",
+    projectKey: "FACT",
+    issue: await fixtureData.jira.getIssue("FACT-1"),
+    stage: STAGES.PULL_REQUEST,
+    leaseOwner: "factory-999999998-dead-worker",
+    leaseUntil: new Date(Date.now() + 60 * 60_000).toISOString(),
+  });
+  fixtureData.db.updateRun(claimed.run.id, {
+    stage: STAGES.PULL_REQUEST,
+    status: RUN_STATUSES.ACTIVE,
+    plan_json: JSON.stringify(planFor()),
+    branch_name: "factory/FACT-1",
+    commit_sha: "0123456789abcdef",
+    pr_number: 7,
+    pr_url: "https://github.test/pr/7",
+    lease_owner: "factory-999999998-dead-worker",
+    lease_until: new Date(Date.now() + 60 * 60_000).toISOString(),
+  });
+
+  const worker = makeWorker(fixtureData, { async execute() {
+    throw new Error("implementation must not run during PR reporting recovery");
+  } });
+  worker.github.createPullRequest = async () => {
+    throw new Error("checkpointed PR must not be recreated");
+  };
+  const result = await worker.runOnce();
+
+  assert.equal(result.action, RunAction.Resumed);
+  assert.equal(fixtureData.jira.comments.length, 1);
+  assert.equal(fixtureData.jira.comments[0].body, "[factory-run:FACT-1-pr-checkpoint]\nPull request created: https://github.test/pr/7");
+  assert.equal(fixtureData.db.getRun(claimed.run.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
 test("legacy planning runs migrate without invoking an agent or creating subtasks", async () => {
   const fixtureData = await fixture();
   const claimed = fixtureData.db.claimRun({

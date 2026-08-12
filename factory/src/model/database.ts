@@ -42,6 +42,7 @@ export interface RunPatch {
 export interface StateDatabaseLike {
   close(): void;
   reapExpiredLeases(now?: string): number;
+  reapLeasesForOwners(owners: string[], now?: string): number;
   listRuns(limit?: number): FactoryRun[];
   getRun(id: string): FactoryRun | null;
   getActiveRunForIssue(issueKey: string): FactoryRun | null;
