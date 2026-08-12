@@ -7,7 +7,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["key", "summary", "description", "status", "issuetype", "labels", "parentKey", "projectKey"],
+        "required": ["key", "summary", "description", "status", "issuetype", "labels", "parentKey", "projectKey", "sprint"],
         "properties": {
           "key": { "type": "string" },
           "summary": { "type": "string" },
