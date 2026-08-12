@@ -3,8 +3,6 @@ import type { JiraApiResponse, JiraFetch, JiraIssue, JiraIssueLike, JiraTransiti
 import type { JiraConfig } from "./model/config.js";
 import type { JsonValue } from "./model/common.js";
 
-export const BOARD_TRIGGER_JQL = "sprint IS NOT EMPTY";
-
 export function isIssueOnBoard(issue: JiraIssueLike) {
   const sprint = issue?.fields?.sprint ?? issue?.fields?.customfield_10020 ?? issue?.sprint;
   if (Array.isArray(sprint)) return sprint.length > 0;
@@ -121,7 +119,7 @@ export class JiraRestAdapter {
   async searchReady() {
     const project = this.config.projectKey;
     const status = this.config.readyStatus || "Ready";
-    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" AND ${BOARD_TRIGGER_JQL} ORDER BY priority DESC, updated ASC`;
+    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" ORDER BY priority DESC, updated ASC`;
     return this.search(jql);
   }
 
@@ -188,7 +186,7 @@ export class InMemoryJiraAdapter {
 
   async searchReady(): Promise<JiraIssue[]> {
     return [...this.issues.values()].filter((issue) =>
-      issue.fields?.status?.name === "Ready" && isIssueOnBoard(issue));
+      issue.fields?.status?.name === "Ready");
   }
 
   async getIssue(key) {

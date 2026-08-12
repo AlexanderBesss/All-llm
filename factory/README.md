@@ -173,7 +173,7 @@ restartable Windows Scheduled Task. State and logs belong under
 
 ## Safety behavior
 
-- Only tickets in the configured Ready status with a non-empty Jira sprint are claimed; Ready issues without a sprint remain in the backlog and are ignored.
+- Tickets in the configured Ready status are claimed from the configured Jira project whether they are on a board or in the backlog; sprint assignment is not required.
 - Runs use stable IDs, branch names, and Jira markers to reconcile retries.
 - Each request has one implementation agent and one durable parent run. A retry
   reuses the same branch/worktree and asks that agent to inspect existing changes

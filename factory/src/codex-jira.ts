@@ -1,6 +1,6 @@
 import path from "node:path";
 import { extractJson } from "./json-output.js";
-import { BOARD_TRIGGER_JQL, isIssueOnBoard, JiraIssueNotFoundError } from "./jira.js";
+import { JiraIssueNotFoundError } from "./jira.js";
 import type { JiraConfig } from "./model/config.js";
 import type { JiraExecutor, JiraIssue, JiraIssueFields, JiraSearchItem, JiraStructuredResponse } from "./model/jira.js";
 
@@ -49,11 +49,10 @@ export class CodexJiraAdapter {
     const status = String(this.config.readyStatus || "Ready").replace(/"/g, '\\"');
     const project = String(this.config.projectKey || "").replace(/[^A-Za-z0-9_-]/g, "");
     const result = await this.structured(
-      `Use the connected Atlassian-Rovo-MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" AND ${BOARD_TRIGGER_JQL} ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema, including sprint metadata when available. Do not filter by labels.`,
+      `Use the connected Atlassian-Rovo-MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema, including sprint metadata when available. Do not filter by labels.`,
       this.issuesSchema,
     );
-    return (result.issues || []).map(normalizeIssue).filter((issue) =>
-      issue.fields.sprint === undefined || isIssueOnBoard(issue));
+    return (result.issues || []).map(normalizeIssue);
   }
 
   async getIssue(issueKey) {
