@@ -139,7 +139,12 @@ continue through the normal bounded stage-retry policy.
 
 OpenCode uses the same implementation, review, and structured-Jira strategy
 contract as Codex. The Jira prompts are provider-neutral; each strategy checks
-its own MCP server during `doctor` and before live processing.
+its own MCP server during `doctor` and before live processing. OpenCode's
+`--format json` mode supplies raw JSON events, so the factory also embeds each
+requested JSON Schema in the prompt, rejects commentary around structured
+responses, recovers fenced JSON when possible, and retries read-only Jira
+lookups once after an invalid response. Mutating Jira operations are not
+automatically retried.
 
 ## Commands
 

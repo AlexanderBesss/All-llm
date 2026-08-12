@@ -1,4 +1,5 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { runProcess } from "./git.js";
 import { CodexAgentExecutor } from "./codex.js";
 import type { ProcessRunner } from "./model/process.js";
@@ -80,7 +81,16 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
 
   async run({ task, context = "", cwd, outputSchema }: CodexRunInput) {
     const settings = this.config.opencode || {};
-    const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
+    let schemaInstruction = "";
+    if (outputSchema) {
+      try {
+        const schema = await readFile(outputSchema, "utf8");
+        schemaInstruction = `\n\nThe response must validate against this JSON Schema:\n${schema}`;
+      } catch {
+        schemaInstruction = `\n\nThe response must validate against the JSON Schema file at ${outputSchema}.`;
+      }
+    }
+    const prompt = `${task}\n\n${context}${schemaInstruction}\n\nOutput protocol: return exactly one JSON value satisfying the requested schema. The first character must be { or [, and the last character must be } or ]. Do not use Markdown fences. Do not add explanations, labels, or any text before or after the JSON. Do not continue after emitting the JSON result.`;
     const directory = settings.directory || cwd;
     const args = [
       "run",

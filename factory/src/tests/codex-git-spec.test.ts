@@ -8,6 +8,7 @@ import { GitAdapter, isAbortError, runProcess } from "../git.js";
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
 import { OpenCodeAgentExecutor, parseOpenCodeOutput } from "../opencode.js";
+import { extractJson } from "../json-output.js";
 import { createAgentStrategy } from "../agent-strategy.js";
 import { AgentProvider } from "../model/config.js";
 import { ReviewVerdict } from "../model/codex.js";
@@ -40,7 +41,11 @@ test("OpenCode executor invokes the configured local model and parses JSON event
       stderr: "",
     };
   });
-  const result = await executor.run({ task: "Return JSON.", cwd: "../factory-worktree" });
+  const result = await executor.run({
+    task: "Return JSON.",
+    cwd: "../factory-worktree",
+    outputSchema: path.resolve("src/schemas/execution-result.schema.json"),
+  });
   assert.equal(result.output, '{"ok":true}');
   assert.equal(calls[0].command, "opencode");
   assert.deepEqual(calls[0].args.slice(0, 8), ["run", "--model", "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", "--agent", "build", "--format", "json", "--auto"]);
@@ -48,6 +53,8 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   assert.equal(calls[0].options?.timeoutMs, 1234);
   assert.equal(calls[0].options?.env?.OPENCODE_CONFIG, path.resolve("opencode.json"));
   assert.equal(calls[0].options?.env?.XDG_CONFIG_HOME, path.resolve("C:\\factory-state\\opencode-config"));
+  assert.match(calls[0].args.at(-1) || "", /Output protocol: return exactly one JSON value/);
+  assert.match(calls[0].args.at(-1) || "", /JSON Schema/);
 });
 
 test("OpenCode health verifies the configured Jira MCP server", async () => {
@@ -93,6 +100,11 @@ test("OpenCode health rejects a Jira MCP server that needs authentication", asyn
 
 test("OpenCode parser rejects output without final text events", () => {
   assert.throws(() => parseOpenCodeOutput('{"value":42}'), /no final agent message/);
+});
+
+test("JSON extraction recovers fenced and embedded agent responses", () => {
+  assert.deepEqual(extractJson("```json\n{\"ok\":true}\n```"), { ok: true });
+  assert.deepEqual(extractJson("Here is the result: {\"text\":\"brace } inside\"}."), { text: "brace } inside" });
 });
 test("Codex executor uses configurable Luna max-effort settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];

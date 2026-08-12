@@ -211,3 +211,18 @@ test("MCP Jira inconclusive lookup is not treated as deletion", async () => {
   });
 });
 
+test("MCP Jira read retries once after invalid JSON", async () => {
+  let calls = 0;
+  const executor: JiraExecutor = {
+    async run() {
+      calls += 1;
+      return calls === 1
+        ? { output: "I could not format that response." }
+        : { output: JSON.stringify({ issues: [] }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
+  assert.deepEqual(await adapter.searchReady(), []);
+  assert.equal(calls, 2);
+});
+
