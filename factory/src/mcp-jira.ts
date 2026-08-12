@@ -3,16 +3,30 @@ import { extractJson } from "./json-output.js";
 import type { JiraConfig } from "./model/config.js";
 import type { JiraExecutor, JiraIssue, JiraIssueFields, JiraSearchItem, JiraStructuredResponse } from "./model/jira.js";
 
+function textField(value: unknown, property: "name" | "key" = "name") {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const candidate = (value as Record<string, unknown>)[property];
+    if (typeof candidate === "string") return candidate;
+  }
+  return "";
+}
+
 function normalizeIssue(item: JiraSearchItem): JiraIssue {
   const fields: JiraIssueFields = {
     summary: item.summary || "",
     description: item.description || "",
-    status: { name: item.status || "" },
-    issuetype: { name: item.issuetype || "" },
+    // Provider-backed agents occasionally return the native Jira field
+    // objects even though the normalized schema asks for strings. Accept
+    // both shapes so downstream title/status logic never sees
+    // "[object Object]".
+    status: { name: textField(item.status) },
+    issuetype: { name: textField(item.issuetype) },
     labels: Array.isArray(item.labels) ? item.labels : [],
-    project: { key: item.projectKey || "" },
+    project: { key: textField(item.projectKey, "key") },
   };
-  if (item.parentKey) fields.parent = { key: item.parentKey };
+  const parentKey = textField(item.parentKey, "key");
+  if (parentKey) fields.parent = { key: parentKey };
   if (Object.prototype.hasOwnProperty.call(item, "sprint")) fields.sprint = item.sprint;
   return { key: item.key, fields };
 }

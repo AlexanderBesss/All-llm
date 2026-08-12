@@ -321,6 +321,35 @@ test("MCP Jira lookup accepts an existing issue in Error status", async () => {
   assert.equal(issue.fields.status?.name, "Error");
 });
 
+test("MCP Jira lookup normalizes native Jira field objects", async () => {
+  const executor: JiraExecutor = {
+    async run() {
+      return {
+        output: JSON.stringify({
+          issues: [{
+            key: "FACT-1",
+            summary: "Native fields",
+            description: "",
+            status: { name: "In Progress" },
+            issuetype: { name: "Task" },
+            labels: [],
+            projectKey: { key: "FACT" },
+            parentKey: { key: "FACT-0" },
+          }],
+        }),
+      };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  const issue = await adapter.getIssue("FACT-1");
+
+  assert.equal(issue.fields.status?.name, "In Progress");
+  assert.equal(issue.fields.issuetype?.name, "Task");
+  assert.equal(issue.fields.project?.key, "FACT");
+  assert.equal(issue.fields.parent?.key, "FACT-0");
+});
+
 test("MCP Jira inconclusive lookup is not treated as deletion", async () => {
   let calls = 0;
   const executor: JiraExecutor = { async run() { calls += 1; return { output: JSON.stringify({ issues: [] }) }; } };
