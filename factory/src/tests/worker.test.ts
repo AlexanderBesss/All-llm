@@ -5,7 +5,8 @@ import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
 import { RUN_STATUSES, STAGES } from "../types.js";
-import { executionFor, fixture, makeWorker, planFor } from "./support.js";
+import { executionFor, fixture, makeWorker, planFor, reviewFor } from "./support.js";
+import { pullRequestDescription } from "../worker.js";
 test("processes one parent ticket with one agent and one aggregate PR", async () => {
   const fixtureData = await fixture();
   const events = [];
@@ -15,16 +16,28 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   const agent = {
     async execute(input) { agentCalls += 1; agentInput = input; events.push("implementation"); return { result: executionFor(), raw: {} }; },
   };
-  const worker = makeWorker(fixtureData, agent, { events, logs });
+  const reviewer = {
+    async review(input) { events.push("code-review"); assert.equal(input.specPath, "specs/factory-FACT-1.md"); return { result: reviewFor(), raw: {} }; },
+  };
+  const worker = makeWorker(fixtureData, agent, { events, logs, reviewer });
   const result = await worker.runOnce();
   assert.equal(result.action, "claimed");
   assert.equal(agentCalls, 1);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.deepEqual(events.filter((event) => event.startsWith("status:")), ["status:In Progress", "status:In Review"]);
   assert.ok(events.indexOf("status:In Progress") < events.indexOf("implementation"));
+  assert.ok(events.indexOf("implementation") < events.indexOf("code-review"));
+  assert.ok(events.indexOf("code-review") < events.indexOf("pull-request"));
   assert.ok(events.indexOf("implementation") < events.indexOf("pull-request"));
   assert.equal(fixtureData.github.pullRequests[0].title, "[FACT-1] Add factory coverage (Task)");
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
+  const pullRequestBody = fixtureData.github.pullRequests[0].body;
+  assert.match(pullRequestBody, /## Intent\nFactory coverage/);
+  assert.match(pullRequestBody, /## What this changes/);
+  assert.match(pullRequestBody, /### Implementation areas\n- factory/);
+  assert.match(pullRequestBody, /## Acceptance criteria/);
+  assert.match(pullRequestBody, /## Validation\nThe implementation agent was asked to run:/);
+  assert.match(pullRequestBody, /## References\n- Jira issue: `FACT-1`\n- Factory specification: `specs\/factory-FACT-1\.md`/);
   assert.equal(fixtureData.jira.issues.size, 1);
   const description = String((await fixtureData.jira.getIssue("FACT-1")).fields.description || "");
   assert.match(description, /^> Implement the requested change\./);
@@ -41,6 +54,73 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);
   assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("pull-request description presents intent and review context in a predictable order", () => {
+  const body = pullRequestDescription({
+    runId: "FACT-1-run",
+    issueKey: "FACT-1",
+    plan: {
+      summary: "Allow reviewers to understand the factory result from the PR itself.",
+      acceptanceCriteria: ["The PR explains the delivered behavior in plain language."],
+      risks: [],
+      files: ["factory/src/worker.ts"],
+      tests: ["npm test — verifies the factory workflow."],
+    },
+    specPath: "specs/factory-FACT-1.md",
+  });
+  assert.ok(body.indexOf("## Intent") < body.indexOf("## Acceptance criteria"));
+  assert.ok(body.indexOf("## Acceptance criteria") < body.indexOf("## Validation"));
+  assert.ok(body.indexOf("## Validation") < body.indexOf("## References"));
+  assert.match(body, /Allow reviewers to understand the factory result/);
+  assert.match(body, /factory\/src\/worker\.ts/);
+  assert.match(body, /npm test — verifies the factory workflow\./);
+});
+
+test("independent review corrections are committed before the pull request", async () => {
+  const fixtureData = await fixture();
+  let reviewInput;
+  const reviewer = {
+    async review(input) {
+      reviewInput = input;
+      return { result: reviewFor({ changed: true, committed: true, pushed: true, summary: "Fixed a boundary-condition defect." }), raw: {} };
+    },
+  };
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
+  const result = await worker.runOnce();
+  assert.equal(result.action, "claimed");
+  assert.equal(reviewInput.branchName, "factory/FACT-1");
+  assert.equal(reviewInput.baseBranch, "main");
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  assert.equal(fixtureData.db.getRun(result.runId).stage, STAGES.REVIEW);
+  fixtureData.db.close();
+});
+
+test("a review blocker prevents pull-request creation", async () => {
+  const fixtureData = await fixture({ maxAttempts: 1 });
+  const reviewer = {
+    async review() {
+      return { result: reviewFor({ verdict: "blocked", blockers: ["The implementation does not satisfy the acceptance criteria."] }), raw: {} };
+    },
+  };
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
+  const result = await worker.runOnce();
+  assert.equal(result.action, "blocked");
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.equal(fixtureData.db.getLastFailedStage(result.runId), STAGES.CODE_REVIEW);
+  fixtureData.db.close();
+});
+
+test("dry-run still records the code-review stage before pull-request generation", async () => {
+  const fixtureData = await fixture();
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+  const result = await worker.runOnce({ dryRun: true });
+  assert.equal(result.action, "claimed");
+  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.IMPLEMENTATION), 1);
+  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.CODE_REVIEW), 1);
+  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.PULL_REQUEST), 1);
+  assert.equal(fixtureData.db.getRun(result.runId).stage, STAGES.REVIEW);
   fixtureData.db.close();
 });
 

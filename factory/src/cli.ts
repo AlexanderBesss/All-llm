@@ -63,10 +63,11 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
     const agent = new CodexAgentExecutor({ ...config, signal });
+    const reviewer = new CodexAgentExecutor({ ...config, signal });
     const jira = config.jira.adapter === "rest"
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
       : new CodexJiraAdapter(normalizedJiraConfig(config, signal), agent);
-    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, signal }) };
+    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, reviewer, signal }) };
   } catch (error) {
     db.close();
     throw error;

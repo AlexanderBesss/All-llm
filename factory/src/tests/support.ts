@@ -72,7 +72,21 @@ export function executionFor(overrides = {}) {
   };
 }
 
-export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) {
+export function reviewFor(overrides = {}) {
+  return {
+    verdict: "passed",
+    summary: "Independent review passed",
+    findings: [],
+    changed: false,
+    committed: false,
+    pushed: false,
+    tests: [{ command: "node --test", status: "passed", output: "ok" }],
+    blockers: [],
+    ...overrides,
+  };
+}
+
+export function makeWorker(fixtureData, agent, { events = [], logs = [], reviewer = null } = {}) {
   const jira = {
     enabled: fixtureData.jira.enabled.bind(fixtureData.jira),
     searchReady: fixtureData.jira.searchReady.bind(fixtureData.jira),
@@ -96,6 +110,7 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) 
     jira,
     github,
     agent,
+    reviewer: reviewer || { async review() { return { result: reviewFor(), raw: {} }; } },
     logger: {
       info(message) { logs.push(message); },
       warn(message) { logs.push(message); },

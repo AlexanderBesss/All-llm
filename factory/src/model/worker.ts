@@ -1,4 +1,5 @@
 import type { CodexAgent } from "./codex.js";
+import type { CodexReviewer } from "./codex.js";
 import type { FactoryConfig } from "./config.js";
 import type { StateDatabaseLike } from "./database.js";
 import type { GitAdapterLike } from "./git.js";
@@ -18,6 +19,7 @@ export interface FactoryWorkerOptions {
   github: GitHubAdapter;
   git: GitAdapterLike;
   agent: CodexAgent;
+  reviewer: CodexReviewer;
   logger?: FactoryLogger;
   signal?: AbortSignal;
 }

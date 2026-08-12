@@ -11,6 +11,7 @@ export interface GitAdapterConfig {
 export interface GitAdapterLike {
   prepareWorktree(runId: string, branchName: string): Promise<string>;
   headSha(worktreePath: string): Promise<string>;
+  hasChanges?(worktreePath: string): Promise<boolean>;
   assertFileCommitted?(worktreePath: string, relativePath: string): Promise<void>;
 }
 

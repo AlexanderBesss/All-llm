@@ -7,7 +7,7 @@ import { defaultConfig, validateConfig } from "../config.js";
 import { GitAdapter, isAbortError, runProcess } from "../git.js";
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
-import { executionFor } from "./support.js";
+import { executionFor, reviewFor } from "./support.js";
 import type { ProcessOptions, ProcessRunner } from "../model/process.js";
 test("Codex executor uses configurable Luna max-effort settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
@@ -71,6 +71,39 @@ test("the single-agent prompt forbids subtasks and delegates the complete parent
   assert.match(prompt, /Factory specification: specs\/factory-FACT-1\.md/);
   assert.match(prompt, /Do not ask the user questions/);
   assert.match(prompt, /Do not make Jira mutations/);
+  assert.match(prompt, /copied into the Jira update and pull-request description/);
+  assert.match(prompt, /one to three concise sentences that explain the intended outcome/);
+  assert.match(prompt, /concrete, observable behavior or outcomes/);
+  assert.match(prompt, /The factory derives the pull-request title from the exact Jira task name and type/);
+});
+
+test("independent reviewer runs in a fresh ephemeral context and may correct the branch", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: { command: "codex", timeoutMs: 1234 },
+  }, async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(reviewFor()) } }), stderr: "" };
+  });
+  const result = await executor.review({
+    issue: { key: "FACT-1", fields: { summary: "Implement change", description: "Details" } },
+    runId: "FACT-1-run",
+    branchName: "factory/FACT-1",
+    baseBranch: "main",
+    cwd: "../factory-worktree",
+    specPath: "specs/factory-FACT-1.md",
+    plan: executionFor().plan,
+    commitSha: "0123456789abcdef",
+  });
+  const prompt = calls[0].args.at(-1);
+  assert.equal(result.result.verdict, "passed");
+  assert.match(prompt, /independent software reviewer operating in a fresh context/);
+  assert.match(prompt, /complete diff from main to HEAD/);
+  assert.match(prompt, /commit the correction, and push the same factory branch/);
+  assert.match(prompt, /Do not create branches, subtasks, pull requests, or Jira mutations/);
+  assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
+  assert.match(calls[0].args[calls[0].args.indexOf("--output-schema") + 1], /review-result\.schema\.json$/);
 });
 
 test("Codex health uses the runtime CODEX_HOME and verifies the Jira MCP", async () => {

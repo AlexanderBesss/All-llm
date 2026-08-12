@@ -1,6 +1,7 @@
 export const STAGES = Object.freeze({
   PLANNING: "planning",
   IMPLEMENTATION: "implementation",
+  CODE_REVIEW: "code_review",
   PULL_REQUEST: "pull_request",
   REVIEW: "review",
   BLOCKED: "blocked",

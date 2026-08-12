@@ -32,7 +32,7 @@ function nextRetryAt(backoffMs: number, attempts: number): string {
 }
 
 function resumableStage(stage: string | null): boolean {
-  return stage === STAGES.IMPLEMENTATION || stage === STAGES.PULL_REQUEST;
+  return stage === STAGES.IMPLEMENTATION || stage === STAGES.CODE_REVIEW || stage === STAGES.PULL_REQUEST;
 }
 
 async function sleep(ms, signal) {
@@ -95,6 +95,43 @@ function planDescription(originalDescription: unknown, plan: ImplementationPlan,
   ].join("\n");
 }
 
+export function pullRequestDescription({ runId, issueKey, plan, specPath = "" }: {
+  runId: string;
+  issueKey: string;
+  plan: ImplementationPlan;
+  specPath?: string;
+}): string {
+  const implementationAreas = plan.files.length
+    ? plan.files.map((item) => `- ${item}`)
+    : ["- See the committed diff for the implementation areas."];
+  const validationChecks = plan.tests.length
+    ? plan.tests.map((item) => `- ${item}`)
+    : ["- Relevant repository tests and validation checks."];
+  return [
+    makeRunMarker(runId),
+    "",
+    "## Intent",
+    plan.summary.trim(),
+    "",
+    "## What this changes",
+    "This pull request implements the requested behavior for Jira issue " + `\`${issueKey}\`.`,
+    "",
+    "### Implementation areas",
+    ...implementationAreas,
+    "",
+    "## Acceptance criteria",
+    ...plan.acceptanceCriteria.map((item) => `- ${item}`),
+    "",
+    "## Validation",
+    "The implementation agent was asked to run:",
+    ...validationChecks,
+    "",
+    "## References",
+    `- Jira issue: \`${issueKey}\``,
+    ...(specPath ? [`- Factory specification: \`${specPath}\``] : []),
+  ].join("\n");
+}
+
 export class FactoryWorker {
   config: FactoryConfig;
   db: FactoryWorkerOptions["db"];
@@ -102,17 +139,19 @@ export class FactoryWorker {
   github: GitHubAdapter;
   git: GitAdapterLike;
   agent: CodexAgent;
+  reviewer: FactoryWorkerOptions["reviewer"];
   logger: FactoryLogger;
   signal?: AbortSignal;
   leaseOwner: string;
 
-  constructor({ config, db, jira, github, git, agent, logger = console, signal }: FactoryWorkerOptions) {
+  constructor({ config, db, jira, github, git, agent, reviewer, logger = console, signal }: FactoryWorkerOptions) {
     this.config = config;
     this.db = db;
     this.jira = jira;
     this.github = github;
     this.git = git;
     this.agent = agent;
+    this.reviewer = reviewer;
     this.logger = logger;
     this.signal = signal;
     this.leaseOwner = `factory-${process.pid}`;
@@ -255,7 +294,7 @@ export class FactoryWorker {
 
   async advanceRun(run, { dryRun = false } = {}) {
     let current = run;
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < 4; step += 1) {
       this.throwIfStopping();
       if (!current || current.status === RUN_STATUSES.CANCELLED || current.stage === STAGES.REVIEW || current.stage === STAGES.BLOCKED) return current;
       this.log("info", "run:stage", {
@@ -311,6 +350,7 @@ export class FactoryWorker {
   async processRun(run, { dryRun = false } = {}) {
     if (run.stage === STAGES.PLANNING) return this.migrateLegacyPlanning(run);
     if (run.stage === STAGES.IMPLEMENTATION) return this.processImplementation(run, { dryRun });
+    if (run.stage === STAGES.CODE_REVIEW) return this.processCodeReview(run, { dryRun });
     if (run.stage === STAGES.PULL_REQUEST) return this.processPullRequest(run, { dryRun });
     return { stage: run.stage, status: run.status };
   }
@@ -360,7 +400,7 @@ export class FactoryWorker {
         });
         this.db.updateRun(run.id, { plan_json: JSON.stringify(plan), issue_json: JSON.stringify(issue) });
         this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, "completed");
-        this.db.updateRun(run.id, { stage: STAGES.PULL_REQUEST, branch_name: branchName, worktree_path: worktreePath });
+        this.db.updateRun(run.id, { stage: STAGES.CODE_REVIEW, branch_name: branchName, worktree_path: worktreePath });
         return { stage: STAGES.IMPLEMENTATION, dryRun: true };
       }
       await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.implementation);
@@ -428,7 +468,7 @@ export class FactoryWorker {
       ));
       this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
       this.db.updateRun(run.id, {
-        stage: STAGES.PULL_REQUEST,
+        stage: STAGES.CODE_REVIEW,
         status: RUN_STATUSES.ACTIVE,
         branch_name: branchName,
         worktree_path: worktree,
@@ -441,11 +481,96 @@ export class FactoryWorker {
         issueKey: run.issue_key,
         commitSha,
         branchName,
-        nextStage: STAGES.PULL_REQUEST,
+        nextStage: STAGES.CODE_REVIEW,
       });
       return { stage: STAGES.IMPLEMENTATION, commitSha };
     } catch (error) {
       return this.failStage(run, STAGES.IMPLEMENTATION, attempt, error);
+    }
+  }
+
+  async processCodeReview(run, { dryRun }) {
+    this.throwIfStopping();
+    const issue = JSON.parse(run.issue_json) as JiraIssue;
+    const plan = normalizePlan(JSON.parse(run.plan_json));
+    const branchName = run.branch_name;
+    const worktreePath = run.worktree_path;
+    const specPath = this.db.findArtifact("spec", branchName)?.artifact_value || "specification unavailable";
+    const attempt = this.db.startStage(run.id, STAGES.CODE_REVIEW, hashInput({
+      issue,
+      plan,
+      branchName,
+      commit: run.commit_sha,
+    }));
+    this.log("info", "code-review:start", {
+      runId: run.id,
+      issueKey: run.issue_key,
+      branchName,
+      worktreePath,
+      commitSha: run.commit_sha,
+      dryRun,
+    });
+    try {
+      if (dryRun) {
+        this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { dryRun: true }, "completed");
+        this.db.updateRun(run.id, { stage: STAGES.PULL_REQUEST });
+        return { stage: STAGES.CODE_REVIEW, dryRun: true };
+      }
+      if (!worktreePath) throw new Error("Code review requires the implementation worktree path.");
+      const beforeSha = run.commit_sha || await this.git.headSha(worktreePath);
+      this.log("info", "code-review:agent-start", { runId: run.id, branchName, worktree: worktreePath });
+      const result = await this.reviewer.review({
+        issue,
+        runId: run.id,
+        branchName,
+        baseBranch: this.config.git.baseBranch,
+        cwd: worktreePath,
+        specPath,
+        plan,
+        commitSha: beforeSha,
+      });
+      this.throwIfStopping();
+      const review = result.result;
+      const afterSha = await this.git.headSha(worktreePath);
+      const changed = review.changed || afterSha !== beforeSha;
+      this.log("info", "code-review:agent-complete", {
+        runId: run.id,
+        branchName,
+        verdict: review.verdict,
+        changed,
+        findings: review.findings.length,
+        tests: review.tests.length,
+        blockers: review.blockers.length,
+      });
+      if (review.verdict !== "passed") {
+        throw new Error(`Independent code review blocked the run: ${review.blockers.join("; ") || review.summary}`);
+      }
+      if (changed && (!review.committed || !review.pushed)) {
+        throw new Error("Code reviewer changed the implementation without confirming both commit and push.");
+      }
+      if (typeof this.git.hasChanges === "function" && await this.git.hasChanges(worktreePath)) {
+        throw new Error("Code review completed with uncommitted worktree changes.");
+      }
+      if (typeof this.git.assertFileCommitted === "function" && specPath !== "specification unavailable") {
+        await this.git.assertFileCommitted(worktreePath, specPath);
+      }
+      this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { ...review, commitSha: afterSha }, "completed");
+      this.db.updateRun(run.id, {
+        stage: STAGES.PULL_REQUEST,
+        status: RUN_STATUSES.ACTIVE,
+        commit_sha: afterSha,
+        last_error: null,
+        next_attempt_at: null,
+      });
+      this.log("info", "code-review:complete", {
+        runId: run.id,
+        issueKey: run.issue_key,
+        commitSha: afterSha,
+        nextStage: STAGES.PULL_REQUEST,
+      });
+      return { stage: STAGES.CODE_REVIEW, commitSha: afterSha, changed };
+    } catch (error) {
+      return this.failStage(run, STAGES.CODE_REVIEW, attempt, error);
     }
   }
 
@@ -468,6 +593,7 @@ export class FactoryWorker {
       const taskName = issue.fields?.summary;
       const taskType = issue.fields?.issuetype?.name;
       const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
+      const specPath = this.db.findArtifact("spec", branchName)?.artifact_value || "";
       if (!dryRun) this.log("info", "pull-request:creating", { runId: run.id, branchName });
       const pr = dryRun
         ? { number: 0, html_url: "dry-run", head: { ref: branchName } }
@@ -476,7 +602,12 @@ export class FactoryWorker {
           taskNumber,
           taskName,
           taskType,
-          body: `${makeRunMarker(run.id)}\n\nJira: ${run.issue_key}\n\n${plan.summary || ""}\n\nAcceptance criteria:\n${(plan.acceptanceCriteria || []).map((item) => `- ${item}`).join("\n")}`,
+          body: pullRequestDescription({
+            runId: run.id,
+            issueKey: run.issue_key,
+            plan,
+            specPath,
+          }),
           head: branchName,
           base: this.config.git.baseBranch,
         });

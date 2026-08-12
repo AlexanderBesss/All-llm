@@ -4,19 +4,20 @@ This worker processes Jira tickets in the configured Ready status through a dura
 state machine:
 
 ```text
-Ready -> In Progress -> In Review -> Done (human)
+Ready -> In Progress -> Code Review -> In Review -> Done (human)
           \-> Error after bounded failure
 ```
 
 It uses one aggregate `factory/<JIRA-KEY>` branch and one pull request per
 parent ticket. `Ready` means the ticket is waiting to be processed. `In Progress`
 means one implementation agent is working on the complete parent issue in one
-factory worktree. `In Review` means the pull request has been created and is
+factory worktree. `Code Review` is an internal fresh-context review and
+correction stage. `In Review` means the pull request has been created and is
 waiting for human review; `Pull Request` is the factory's internal stage while
 creating that pull request, not a Jira status. The worker never merges pull
 requests or writes to the default branch. Every request uses exactly one parent
-task, one agent, one branch, and one pull request. The factory never creates Jira
-subtasks or delegates child work.
+task, one implementation agent, one independent reviewer, one branch, and one
+pull request. The factory never creates Jira subtasks or delegates child work.
 
 Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
 (Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
@@ -144,8 +145,8 @@ state, Codex and `Atlassian-Rovo-MCP`, authenticated GitHub CLI repository
 access, and Jira configuration.
 
 `npm start` emits progress logs for polling, issue discovery and claiming,
-Jira status changes, worktree creation, the single Codex implementation agent,
-commit and push confirmation, pull-request creation,
+Jira status changes, worktree creation, the Codex implementation agent, the
+fresh-context code reviewer, commit and push confirmation, pull-request creation,
 Jira comments, retries, and blocked runs.
 
 `factory:run-once` performs one poll and reports `retry_scheduled` when a stage
@@ -190,8 +191,8 @@ restartable Windows Scheduled Task. State and logs belong under
   Jira workflow must expose that exact Error status and the configured review
   status (the default is `In Review`).
 - When `continueFailedTasks` is enabled (the default), blocked runs are eligible for a new
-  continuation. The worker uses `stage_runs` to restart the implementation or
-  pull-request stage that failed, moves the Jira issue from `Error` to the
+  continuation. The worker uses `stage_runs` to restart the implementation,
+  code-review, or pull-request stage that failed, moves the Jira issue from `Error` to the
   configured implementation status, and returns to `Error` if the continuation
   fails again.
 - Codex health, including the `Atlassian-Rovo-MCP` registration, and GitHub CLI
@@ -200,3 +201,8 @@ restartable Windows Scheduled Task. State and logs belong under
 - Codex performs source changes through local Git in the factory worktree. The
   worker uses GitHub CLI only for the hosting-platform pull-request object;
   local Git remains responsible for source mutations and branch publication.
+- After implementation and its reported tests, a separate ephemeral Codex
+  invocation independently reviews the specification and complete branch diff.
+  It may fix actionable defects on the same branch, but must commit and push
+  those corrections before the pull request stage can proceed. A review blocker
+  uses the normal bounded retry and Error handling.
