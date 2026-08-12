@@ -72,11 +72,16 @@ export interface JiraMutationResult {
 export interface JiraStructuredResponse {
   issues?: JiraSearchItem[];
   ok?: boolean;
+  issueKey?: string;
+  key?: string;
   details?: string;
 }
 
 export interface JiraExecutor {
-  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string }): Promise<{ output: string }>;
+  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string }): Promise<{
+    output: string;
+    events?: Array<Record<string, unknown>>;
+  }>;
 }
 
 export interface JiraFetchResponse {

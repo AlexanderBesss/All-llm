@@ -122,8 +122,8 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
   assert.equal(requests[1].timeoutMs, 12_345);
   assert.equal(requests[0].agent, "factory-jira");
   assert.equal(requests[1].agent, "factory-jira");
-  assert.match(requests[0].task, /plain Markdown JSON string/);
-  assert.match(requests[0].task, /must never be an object and must never be \{\}/);
+  assert.match(requests[0].task, /complete Markdown string itself/);
+  assert.match(requests[0].task, /ADF object.*never \{\}/);
   assert.match(requests[0].task, /BEGIN EXACT DESCRIPTION/);
   assert.match(requests[0].task, /Keep this exact text\./);
   assert.match(requests[1].task, /description must be a Markdown string/);
@@ -144,6 +144,62 @@ test("MCP Jira mutations get one correction request after a provider timeout", a
   await adapter.updateDescription("FACT-1", "Updated description");
 
   assert.equal(calls, 2);
+});
+
+test("MCP Jira mutations recover a completed tool when OpenCode exhausts its response step", async () => {
+  const executor: JiraExecutor = {
+    async run() {
+      return {
+        output: "CRITICAL - MAXIMUM STEPS REACHED",
+        events: [{
+          type: "tool",
+          part: {
+            tool: "jira_transitionJiraIssue",
+            state: {
+              status: "completed",
+              input: { issueIdOrKey: "FACT-1" },
+              output: '{"success":true}',
+            },
+          },
+        }],
+      };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.transition("FACT-1", "In Progress");
+});
+
+test("MCP Jira mutations use the MCP error as the single correction reason", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      if (requests.length === 1) {
+        return {
+          output: "CRITICAL - MAXIMUM STEPS REACHED",
+          events: [{
+            type: "tool",
+            part: {
+              tool: "jira_editJiraIssue",
+              state: {
+                status: "error",
+                input: { issueIdOrKey: "FACT-1" },
+                error: '{"error":true,"message":"description must be a Markdown string"}',
+              },
+            },
+          }],
+        };
+      }
+      return { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.updateDescription("FACT-1", "Updated description");
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].task, /description must be a Markdown string/);
 });
 
 test("Jira ready discovery includes Ready issues with or without a sprint", async () => {

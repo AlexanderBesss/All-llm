@@ -786,7 +786,22 @@ export class FactoryWorker {
       return;
     }
     this.log("info", "jira:status-changing", { issueKey, from: currentStatus, to: statusName });
-    await this.jira.transition(issueKey, statusName);
+    try {
+      await this.jira.transition(issueKey, statusName);
+    } catch (error) {
+      // A Jira transition can succeed while the agent exhausts its final
+      // response step. Confirm the authoritative issue state before treating
+      // that ambiguous mutation as a failure.
+      const observed = await this.jira.getIssue(issueKey);
+      const observedStatus = observed.fields?.status?.name || "";
+      if (String(observedStatus).toLowerCase() !== String(statusName).toLowerCase()) throw error;
+      this.log("warn", "jira:status-confirmed-after-error", {
+        issueKey,
+        status: observedStatus,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
     this.log("info", "jira:status-changed", { issueKey, status: statusName });
   }
 }

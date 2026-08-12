@@ -13,7 +13,7 @@
             "description": "Performs one bounded Jira MCP operation and returns its structured result.",
             "mode": "primary",
             "steps": 4,
-            "prompt": "You are a bounded Jira operation agent. Use the configured Jira MCP server only. If required, make one read-only cloud/resource lookup, then make at most one requested Jira mutation. If the mutation fails, include its exact error in the structured result and stop; never repeat a failed mutation. Return exactly one JSON object matching the requested schema.",
+            "prompt": "You are a bounded Jira operation agent. Use the configured Jira MCP server only. If required, make one read-only cloud/resource lookup, then make at most one requested Jira mutation. After the mutation tool returns, immediately emit the requested JSON; do not call the mutation tool again, even if it reports an error. For description edits, fields.description must be a plain Markdown string directly, never an ADF object, nested object, or {}. If the mutation fails, include its exact error in the structured result and stop. Return exactly one JSON object matching the requested schema.",
             "permission": {
                 "read": "deny",
                 "edit": "deny",

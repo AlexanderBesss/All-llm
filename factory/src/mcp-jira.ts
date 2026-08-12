@@ -17,6 +17,37 @@ function normalizeIssue(item: JiraSearchItem): JiraIssue {
   return { key: item.key, fields };
 }
 
+function mutationResultFromEvents(events: Array<Record<string, unknown>> | undefined): JiraStructuredResponse | undefined {
+  if (!events?.length) return undefined;
+  for (const event of [...events].reverse()) {
+    const part = event.part && typeof event.part === "object"
+      ? event.part as Record<string, unknown>
+      : undefined;
+    const tool = String(part?.tool || event.tool || "");
+    if (!/^jira_(editJiraIssue|transitionJiraIssue|addCommentToJiraIssue)$/i.test(tool)) continue;
+    const state = part?.state && typeof part.state === "object"
+      ? part.state as Record<string, unknown>
+      : undefined;
+    const status = String(state?.status || "");
+    if (status !== "completed" && status !== "error") continue;
+    const input = state?.input && typeof state.input === "object"
+      ? state.input as Record<string, unknown>
+      : {};
+    const issueKey = String(input.issueIdOrKey || input.issueKey || "");
+    const rawDetails = status === "error" ? state?.error : state?.output;
+    const details = typeof rawDetails === "string"
+      ? rawDetails
+      : JSON.stringify(rawDetails ?? status);
+    return {
+      ok: status === "completed",
+      issueKey,
+      key: issueKey,
+      details,
+    };
+  }
+  return undefined;
+}
+
 export class McpJiraAdapter {
   config: JiraConfig;
   executor: JiraExecutor;
@@ -46,22 +77,32 @@ export class McpJiraAdapter {
       agent: this.config.mcpAgent,
     });
     const correction = (reason: string) => request(
-      `${task}\n\nThe previous one-call attempt failed before returning a usable result. The failure was: ${JSON.stringify(reason)}. This is the one permitted correction attempt. Correct only the request payload using that failure, call the Jira tool exactly once, and then return ok=true only if it succeeds or ok=false with the final error. Do not make any further tool calls.`,
+      `${task}\n\nThe previous one-call attempt failed before returning a usable result. The failure was: ${JSON.stringify(reason)}. This is the one permitted correction attempt. Correct only the request payload using that failure, call the Jira tool exactly once, and then return ok=true only if it succeeds or ok=false with the final error. Do not make any further tool calls. For description updates specifically, fields.description must be the complete Markdown string itself; never send an ADF object, a nested value object, or {} under fields.description.`,
     );
+    const correctedResult = async (reason: string) => {
+      const response = await correction(reason);
+      try {
+        return extractJson<JiraStructuredResponse>(response.output);
+      } catch (error) {
+        return mutationResultFromEvents(response.events) || (() => { throw error; })();
+      }
+    };
     let first;
     try {
       first = await request(task);
     } catch (error) {
       if (!retryMutation) throw error;
-      return extractJson<JiraStructuredResponse>((await correction(error?.message || String(error))).output);
+      return correctedResult(error?.message || String(error));
     }
     try {
       const result = extractJson<JiraStructuredResponse>(first.output);
       if (!retryMutation || result.ok !== false) return result;
-      return extractJson<JiraStructuredResponse>((await correction(result.details || "unknown MCP error")).output);
+      return correctedResult(result.details || "unknown MCP error");
     } catch (error) {
       if (retryMutation) {
-        return extractJson<JiraStructuredResponse>((await correction(error?.message || String(error))).output);
+        const observed = mutationResultFromEvents(first.events);
+        if (observed?.ok === true) return observed;
+        return correctedResult(observed?.details || error?.message || String(error));
       }
       if (!retryInvalidJson) throw error;
       const retry = await request(`${task}\n\nThe previous response was not valid JSON. Repeat the same read-only operation now. Return exactly one JSON object matching the requested schema, with no Markdown or commentary.`);
@@ -109,6 +150,7 @@ export class McpJiraAdapter {
     const result = await this.structured(
       `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
       this.mutationSchema,
+      { retryMutation: true },
     );
     if (!result.ok) throw new Error(`Jira transition failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
@@ -116,7 +158,7 @@ export class McpJiraAdapter {
 
   async updateDescription(issueKey, description) {
     const result = await this.structured(
-      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. Pass the description as a plain Markdown JSON string in fields.description; fields.description must never be an object and must never be {}. Use contentFormat=markdown if the tool exposes that option. The exact Markdown string to write is delimited below; preserve every character between the delimiters. If the tool returns an error, stop immediately and return ok=false; do not retry the edit.\n\n--- BEGIN EXACT DESCRIPTION ---\n${description}\n--- END EXACT DESCRIPTION ---\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
+      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. The mutation arguments must use this shape: fields is an object and fields.description is the complete Markdown string itself, not an ADF object, not a nested value object, and never {}. Use contentFormat="markdown" if the tool exposes that option. The exact Markdown string to write is delimited below; preserve every character between the delimiters. If the tool returns an error, stop immediately and return ok=false; do not retry the edit.\n\n--- BEGIN EXACT DESCRIPTION ---\n${description}\n--- END EXACT DESCRIPTION ---\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
       this.mutationSchema,
       { retryMutation: true },
     );
@@ -128,6 +170,7 @@ export class McpJiraAdapter {
     const result = await this.structured(
       `Use the configured Jira MCP server to add exactly one comment to Jira issue ${issueKey} with this exact body:\n\n${body}\n\nReturn ok=true only after the comment succeeds. Do not change any other issue.`,
       this.mutationSchema,
+      { retryMutation: true },
     );
     if (!result.ok) throw new Error(`Jira comment failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
