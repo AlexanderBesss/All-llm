@@ -361,7 +361,6 @@ export async function main(argv: string[] = process.argv.slice(2)) {
     ({ db, worker: runtimeWorker } = await makeWorker(config, controller.signal));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
     else {
-      runtimeWorker.loopLabel = "merge-check";
       await Promise.all([
         runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
         runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),

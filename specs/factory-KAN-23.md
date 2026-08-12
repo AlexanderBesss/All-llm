@@ -106,3 +106,7 @@ Added a separate merge-check loop (`runMergeCheckLoop`) that runs every 5 minute
 - TypeScript compilation: passes (`tsc --noEmit`)
 - Tests: 75 total, 70 pass, 5 pre-existing failures unrelated to this change (OpenCode config path resolution)
 - New tests: 2 passing tests for merge check functionality
+
+### Final notes
+- Loop labeling: each loop function embeds its label (`poll` or `merge-check`) into event names and result JSON, so concurrent log output is clearly attributable to its source loop
+- The `loopLabel` worker property is retained for backward compatibility but no longer set from cli.ts

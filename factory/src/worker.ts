@@ -908,23 +908,24 @@ export class FactoryWorker {
 }
 
 export async function runLoop(worker, { signal = worker.signal, pollIntervalMs = 60_000 } = {}) {
+  const label = "poll";
   let stopped = false;
   const stop = () => {
     if (!stopped) worker.log?.("info", "loop:shutdown-requested");
     stopped = true;
   };
   signal?.addEventListener("abort", stop, { once: true });
-  worker.log?.("info", "loop:started", { pollIntervalMs });
+  worker.log?.("info", `${label}:loop:started`, { pollIntervalMs });
   while (!stopped) {
     try {
       const result = await worker.runOnce();
-      worker.logger.info?.(formatFactoryLog(JSON.stringify(result)));
+      worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label })));
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) {
         stop();
         break;
       }
-      worker.logger.error?.(formatFactoryLog(`poll failed: ${error.stack || error.message || error}`));
+      worker.logger.error?.(formatFactoryLog(`[${label}] poll failed: ${error.stack || error.message || error}`));
     }
     if (!stopped) {
       try {
@@ -939,27 +940,28 @@ export async function runLoop(worker, { signal = worker.signal, pollIntervalMs =
     }
   }
   signal?.removeEventListener("abort", stop);
-  worker.log?.("info", "loop:stopped");
+  worker.log?.("info", `${label}:loop:stopped`);
 }
 
 export async function runMergeCheckLoop(worker, { signal = worker.signal, intervalMs = 300_000 } = {}) {
+  const label = "merge-check";
   let stopped = false;
   const stop = () => {
     if (!stopped) worker.log?.("info", "merge-check-loop:shutdown-requested");
     stopped = true;
   };
   signal?.addEventListener("abort", stop, { once: true });
-  worker.log?.("info", "merge-check-loop:started", { intervalMs });
+  worker.log?.("info", `${label}:loop:started`, { intervalMs });
   while (!stopped) {
     try {
       const result = await worker.checkMergedPullRequests();
-      worker.logger.info?.(formatFactoryLog(JSON.stringify(result)));
+      worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label })));
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) {
         stop();
         break;
       }
-      worker.logger.error?.(formatFactoryLog(`merge-check failed: ${error.stack || error.message || error}`));
+      worker.logger.error?.(formatFactoryLog(`[${label}] merge-check failed: ${error.stack || error.message || error}`));
     }
     if (!stopped) {
       try {
@@ -974,5 +976,5 @@ export async function runMergeCheckLoop(worker, { signal = worker.signal, interv
     }
   }
   signal?.removeEventListener("abort", stop);
-  worker.log?.("info", "merge-check-loop:stopped");
+  worker.log?.("info", `${label}:loop:stopped`);
 }
