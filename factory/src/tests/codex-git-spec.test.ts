@@ -9,13 +9,15 @@ import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
 import { OpenCodeAgentExecutor, parseOpenCodeOutput } from "../opencode.js";
 import { createAgentStrategy } from "../agent-strategy.js";
+import { AgentProvider } from "../model/config.js";
+import { ReviewVerdict } from "../model/codex.js";
 import { executionFor, reviewFor } from "./support.js";
 import type { ProcessOptions, ProcessRunner } from "../model/process.js";
 
 test("provider strategy defaults to Codex and can select OpenCode", () => {
-  assert.equal(createAgentStrategy("codex").name, "codex");
-  assert.equal(createAgentStrategy("opencode").name, "opencode");
-  assert.equal(createAgentStrategy(undefined).name, "codex");
+  assert.equal(createAgentStrategy(AgentProvider.Codex).name, AgentProvider.Codex);
+  assert.equal(createAgentStrategy(AgentProvider.OpenCode).name, AgentProvider.OpenCode);
+  assert.equal(createAgentStrategy(undefined).name, AgentProvider.Codex);
 });
 
 test("OpenCode executor invokes the configured local model and parses JSON events", async () => {
@@ -159,7 +161,7 @@ test("independent reviewer runs in a fresh ephemeral context and may correct the
     commitSha: "0123456789abcdef",
   });
   const prompt = calls[0].options?.input || "";
-  assert.equal(result.result.verdict, "passed");
+  assert.equal(result.result.verdict, ReviewVerdict.Passed);
   assert.match(prompt, /independent software reviewer operating in a fresh context/);
   assert.match(prompt, /complete diff from main to HEAD/);
   assert.match(prompt, /commit the correction, and push the same factory branch/);

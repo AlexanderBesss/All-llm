@@ -1,5 +1,14 @@
 import type { FactoryConfig } from "./config.js";
 
+export enum CliCommand {
+  Help = "help",
+  Doctor = "doctor",
+  Status = "status",
+  Install = "install",
+  RunOnce = "run-once",
+  Start = "start",
+}
+
 export interface CliArgs {
   command: string;
   config?: string;

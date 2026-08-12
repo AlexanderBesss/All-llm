@@ -3,6 +3,7 @@ import path from "node:path";
 import { extractJson } from "./json-output.js";
 import { runProcess } from "./git.js";
 import type { ProcessRunner } from "./model/process.js";
+import { ReviewVerdict } from "./model/codex.js";
 import type { CodexAgentConfig, CodexEvent, CodexJsonLinesResult, CodexRunInput, CodexExecutionResult, ExecutionResult, CodexReviewResult, ReviewResult, ImplementationPlan } from "./model/codex.js";
 import type { JiraIssue } from "./model/jira.js";
 
@@ -256,7 +257,7 @@ function assertExecution(execution: unknown): ExecutionResult {
 function assertReview(review: unknown): ReviewResult {
   if (!review || typeof review !== "object") throw new Error("Code review result must be an object.");
   const candidate = review as Partial<ReviewResult>;
-  if (candidate.verdict !== "passed" && candidate.verdict !== "blocked") {
+  if (candidate.verdict !== ReviewVerdict.Passed && candidate.verdict !== ReviewVerdict.Blocked) {
     throw new Error("Code review result must include a passed or blocked verdict.");
   }
   if (typeof candidate.summary !== "string") throw new Error("Code review result must include a summary.");

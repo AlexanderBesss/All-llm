@@ -34,7 +34,7 @@ export function parseOpenCodeOutput(stdout: string): CodexJsonLinesResult {
       invalidLines.push(line);
     }
   }
-  const output = textParts.join("\n").trim();
+  const output = textParts.join("").trim();
   if (!output) {
     const detail = invalidLines.length ? ` Invalid output: ${invalidLines.join(" ").slice(0, 1000)}` : "";
     throw new Error(`OpenCode returned no final agent message.${detail}`);

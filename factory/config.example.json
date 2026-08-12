@@ -1,5 +1,5 @@
 {
-  "provider": "codex",
+  "provider": "opencode",
   "repoPath": ".",
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
@@ -10,7 +10,7 @@
     "branchPrefix": "factory"
   },
   "jira": {
-    "adapter": "codex-mcp",
+    "adapter": "opencode-mcp",
     "projectKey": "KAN",
     "statuses": {
       "ready": "Ready",

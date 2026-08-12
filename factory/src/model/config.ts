@@ -1,5 +1,21 @@
-export type JiraAdapterKind = "codex-mcp" | "rest";
-export type AgentProvider = "codex" | "opencode";
+export enum JiraAdapterKind {
+  CodexMcp = "codex-mcp",
+  OpenCodeMcp = "opencode-mcp",
+  Rest = "rest",
+}
+
+export enum AgentProvider {
+  Codex = "codex",
+  OpenCode = "opencode",
+}
+
+export enum JiraStatusKey {
+  Ready = "ready",
+  Implementation = "implementation",
+  Review = "review",
+  Done = "done",
+  Error = "error",
+}
 
 export interface FactoryStatuses {
   ready: string;

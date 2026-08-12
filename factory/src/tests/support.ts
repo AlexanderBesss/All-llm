@@ -6,6 +6,8 @@ import { openStateDatabase } from "../db.js";
 import { InMemoryJiraAdapter } from "../jira.js";
 import { InMemoryGitHubAdapter } from "../github.js";
 import { FactoryWorker } from "../worker.js";
+import { AgentProvider, JiraAdapterKind } from "../model/config.js";
+import { TestStatus, ReviewVerdict } from "../model/codex.js";
 import type { JiraDescription } from "../model/jira.js";
 
 export async function fixture({ maxAttempts = 1, description = "Implement the requested change.", continueFailedTasks = false }: { maxAttempts?: number; description?: JiraDescription; continueFailedTasks?: boolean } = {}) {
@@ -33,7 +35,7 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     },
   };
   const config = {
-    provider: "codex" as const,
+    provider: AgentProvider.Codex,
     stateDir,
     repoPath: stateDir,
     leaseMs: 60_000,
@@ -69,7 +71,7 @@ export function executionFor(overrides = {}) {
     summary: "Implemented the parent task",
     committed: true,
     pushed: true,
-    tests: [{ command: "node --test", status: "passed", output: "ok" }],
+    tests: [{ command: "node --test", status: TestStatus.Passed, output: "ok" }],
     blockers: [],
     ...overrides,
   };
@@ -77,13 +79,13 @@ export function executionFor(overrides = {}) {
 
 export function reviewFor(overrides = {}) {
   return {
-    verdict: "passed",
+    verdict: ReviewVerdict.Passed,
     summary: "Independent review passed",
     findings: [],
     changed: false,
     committed: false,
     pushed: false,
-    tests: [{ command: "node --test", status: "passed", output: "ok" }],
+    tests: [{ command: "node --test", status: TestStatus.Passed, output: "ok" }],
     blockers: [],
     ...overrides,
   };

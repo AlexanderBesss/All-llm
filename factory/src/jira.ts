@@ -1,4 +1,5 @@
 import { assertNonEmpty } from "./types.js";
+import { JiraErrorCode } from "./model/jira.js";
 import type { JiraApiResponse, JiraFetch, JiraIssue, JiraIssueLike, JiraTransition } from "./model/jira.js";
 import type { JiraConfig } from "./model/config.js";
 import type { JsonValue } from "./model/common.js";
@@ -29,7 +30,7 @@ export class JiraIssueNotFoundError extends Error {
   constructor(issueKey, cause = undefined) {
     super(`Jira issue ${issueKey} no longer exists.`, { cause });
     this.name = "JiraIssueNotFoundError";
-    this.code = "JIRA_ISSUE_NOT_FOUND";
+    this.code = JiraErrorCode.IssueNotFound;
     this.issueKey = issueKey;
   }
 }

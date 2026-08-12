@@ -10,15 +10,17 @@ import { GitAdapter, isAbortError, runProcess } from "./git.js";
 import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
 import { FactoryWorker, runLoop } from "./worker.js";
-import type { FactoryConfig, GitConfig, GitHubConfig, JiraConfig } from "./model/config.js";
+import { CliCommand } from "./model/cli.js";
+import { AgentProvider, JiraAdapterKind } from "./model/config.js";
 import type { CheckReport, CliArgs, DoctorReport, RepositoryCheck } from "./model/cli.js";
+import type { FactoryConfig, GitConfig, GitHubConfig, JiraConfig } from "./model/config.js";
 
 function defaultRepoPath() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const result: CliArgs = { command: argv[0] || "help" };
+  const result: CliArgs = { command: argv[0] || CliCommand.Help };
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--config") result.config = argv[++i];
@@ -63,7 +65,7 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
     const { agent, reviewer } = createAgentExecutors(config, signal);
-    const jira = config.jira.adapter === "rest"
+    const jira = config.jira.adapter === JiraAdapterKind.Rest
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
       : new CodexJiraAdapter(normalizedJiraConfig(config, signal), agent);
     return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, reviewer, signal }) };
@@ -185,9 +187,9 @@ async function checkGitHub(config: FactoryConfig): Promise<CheckReport> {
   }
 }
 
-function checkJira(config: FactoryConfig, agentCheck: CheckReport): CheckReport {
-  if (config.jira.adapter === "codex-mcp") {
-    const mcpRegistered = config.provider === "codex"
+export function checkJira(config: FactoryConfig, agentCheck: CheckReport): CheckReport {
+  if (config.jira.adapter === JiraAdapterKind.CodexMcp) {
+    const mcpRegistered = config.provider === AgentProvider.Codex
       && agentCheck.ok === true
       && agentCheck.mcp === "Atlassian-Rovo-MCP";
     const configured = Boolean(config.jira.projectKey);
@@ -200,9 +202,25 @@ function checkJira(config: FactoryConfig, agentCheck: CheckReport): CheckReport 
       ...(configured && mcpRegistered ? {} : {
         error: !configured
           ? "jira.projectKey is required."
-          : config.provider !== "codex"
+          : config.provider !== AgentProvider.Codex
             ? "jira.adapter=codex-mcp requires provider=codex; use jira.adapter=rest with OpenCode."
             : "Atlassian-Rovo-MCP is not available through Codex.",
+      }),
+    };
+  }
+  if (config.jira.adapter === JiraAdapterKind.OpenCodeMcp) {
+    const providerReady = config.provider === AgentProvider.OpenCode && agentCheck.ok === true;
+    const configured = Boolean(config.jira.projectKey);
+    return {
+      ok: Boolean(configured && providerReady),
+      configured,
+      adapter: config.jira.adapter,
+      projectKey: config.jira.projectKey || "",
+      providerReady,
+      ...(configured && providerReady ? {} : {
+        error: !configured
+          ? "jira.projectKey is required."
+          : "jira.adapter=opencode-mcp requires a healthy OpenCode provider.",
       }),
     };
   }
@@ -223,7 +241,7 @@ async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
     repoPath: config.repoPath,
     stateDir: config.stateDir,
     provider: config.provider,
-    model: config.provider === "opencode" ? config.opencode.model : config.codex.model,
+    model: config.provider === AgentProvider.OpenCode ? config.opencode.model : config.codex.model,
     reasoningEffort: config.codex.reasoningEffort,
     sandbox: config.codex.sandbox,
     approvalPolicy: config.codex.approvalPolicy,
@@ -282,25 +300,25 @@ async function commandInstall(config: FactoryConfig) {
 export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
-  if (args.command === "help") {
+  if (args.command === CliCommand.Help) {
     console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|status|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
-  if (args.command === "doctor") {
+  if (args.command === CliCommand.Doctor) {
     const report = await commandDoctor(config);
     console.log(JSON.stringify(report, null, 2));
     if (!report.ok) process.exitCode = 1;
     return report.ok ? 0 : 1;
   }
-  if (args.command === "status") {
+  if (args.command === CliCommand.Status) {
     await commandStatus(config, args.json);
     return 0;
   }
-  if (args.command === "install") {
+  if (args.command === CliCommand.Install) {
     await commandInstall(config);
     return 0;
   }
-  if (!["run-once", "start"].includes(args.command)) throw new Error(`Unknown command: ${args.command}`);
+  if (![CliCommand.RunOnce, CliCommand.Start].includes(args.command as CliCommand)) throw new Error(`Unknown command: ${args.command}`);
   const errors = validateConfig(config, { live: true });
   if (errors.length) throw new Error(`Factory is not configured:\n- ${errors.join("\n- ")}`);
   const controller = new AbortController();
@@ -316,7 +334,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   let runtimeWorker;
   try {
     ({ db, worker: runtimeWorker } = await makeWorker(config, controller.signal));
-    if (args.command === "run-once") console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
+    if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
     else await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
   } finally {
     shutdownSignals.forEach((name) => process.removeListener(name, onShutdown));

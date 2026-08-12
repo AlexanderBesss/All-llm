@@ -36,9 +36,15 @@ export interface ImplementationPlan {
   tests: string[];
 }
 
+export enum TestStatus {
+  Passed = "passed",
+  Failed = "failed",
+  Skipped = "skipped",
+}
+
 export interface ExecutionTestResult {
   command: string;
-  status: "passed" | "failed" | "skipped";
+  status: TestStatus;
   output: string;
 }
 
@@ -56,16 +62,28 @@ export interface CodexExecutionResult {
   raw: CodexJsonLinesResult;
 }
 
+export enum FindingSeverity {
+  Critical = "critical",
+  Major = "major",
+  Minor = "minor",
+  Suggestion = "suggestion",
+}
+
 export interface ReviewFinding {
-  severity: "critical" | "major" | "minor" | "suggestion";
+  severity: FindingSeverity;
   file: string;
   line?: number;
   description: string;
   resolution: string;
 }
 
+export enum ReviewVerdict {
+  Passed = "passed",
+  Blocked = "blocked",
+}
+
 export interface ReviewResult {
-  verdict: "passed" | "blocked";
+  verdict: ReviewVerdict;
   summary: string;
   findings: ReviewFinding[];
   changed: boolean;

@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
-import { RUN_STATUSES, STAGES } from "../types.js";
+import { RUN_STATUSES, STAGES, RunAction, ArtifactKind } from "../types.js";
 import { executionFor, fixture, makeWorker, planFor, reviewFor } from "./support.js";
+import { ReviewVerdict } from "../model/codex.js";
 import { pullRequestDescription } from "../worker.js";
 test("processes one parent ticket with one agent and one aggregate PR", async () => {
   const fixtureData = await fixture();
@@ -21,7 +22,7 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   };
   const worker = makeWorker(fixtureData, agent, { events, logs, reviewer });
   const result = await worker.runOnce();
-  assert.equal(result.action, "claimed");
+  assert.equal(result.action, RunAction.Claimed);
   assert.equal(agentCalls, 1);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.deepEqual(events.filter((event) => event.startsWith("status:")), ["status:In Progress", "status:In Review"]);
@@ -45,7 +46,7 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.ok(description.indexOf("## Implementation plan") > description.indexOf("[factory-run:"));
   assert.equal(agentInput.specPath, "specs/factory-FACT-1.md");
   assert.match(await readFile(path.join(agentInput.cwd, agentInput.specPath), "utf8"), /# Specification: \[FACT-1\]/);
-  assert.equal(fixtureData.db.findArtifact("spec", "factory/FACT-1").artifact_value, "specs/factory-FACT-1.md");
+  assert.equal(fixtureData.db.findArtifact(ArtifactKind.Spec, "factory/FACT-1").artifact_value, "specs/factory-FACT-1.md");
   assert.match(description, /specs\/factory-FACT-1\.md/);
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
   assert.ok(logs.some((entry) => entry.includes("implementation:spec-ready")));
@@ -89,7 +90,7 @@ test("independent review corrections are committed before the pull request", asy
   };
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
   const result = await worker.runOnce();
-  assert.equal(result.action, "claimed");
+  assert.equal(result.action, RunAction.Claimed);
   assert.equal(reviewInput.branchName, "factory/FACT-1");
   assert.equal(reviewInput.baseBranch, "main");
   assert.equal(fixtureData.github.pullRequests.length, 1);
@@ -101,12 +102,12 @@ test("a review blocker prevents pull-request creation", async () => {
   const fixtureData = await fixture({ maxAttempts: 1 });
   const reviewer = {
     async review() {
-      return { result: reviewFor({ verdict: "blocked", blockers: ["The implementation does not satisfy the acceptance criteria."] }), raw: {} };
+      return { result: reviewFor({ verdict: ReviewVerdict.Blocked, blockers: ["The implementation does not satisfy the acceptance criteria."] }), raw: {} };
     },
   };
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
   const result = await worker.runOnce();
-  assert.equal(result.action, "blocked");
+  assert.equal(result.action, RunAction.Blocked);
   assert.equal(fixtureData.github.pullRequests.length, 0);
   assert.equal(fixtureData.db.getLastFailedStage(result.runId), STAGES.CODE_REVIEW);
   fixtureData.db.close();
@@ -116,7 +117,7 @@ test("dry-run still records the code-review stage before pull-request generation
   const fixtureData = await fixture();
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce({ dryRun: true });
-  assert.equal(result.action, "claimed");
+  assert.equal(result.action, RunAction.Claimed);
   assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.IMPLEMENTATION), 1);
   assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.CODE_REVIEW), 1);
   assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.PULL_REQUEST), 1);
@@ -131,7 +132,7 @@ test("blocks a pull request when the Jira type is unsupported", async () => {
   fixtureData.jira.issues.set("FACT-1", issue);
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
-  assert.equal(result.action, "blocked");
+  assert.equal(result.action, RunAction.Blocked);
   assert.equal(fixtureData.github.pullRequests.length, 0);
   assert.match(fixtureData.db.getRun(result.runId).last_error, /Unsupported Jira task type/);
   fixtureData.db.close();
@@ -293,7 +294,7 @@ test("retains terminal Jira reporting failures in durable diagnostics", async ()
   const worker = makeWorker(fixtureData, { async execute() { throw new Error("implementation failure"); } }, { logs });
   const result = await worker.runOnce();
   const run = fixtureData.db.getRun(result.runId);
-  assert.equal(result.action, "blocked");
+  assert.equal(result.action, RunAction.Blocked);
   assert.match(run.last_error, /implementation failure/);
   assert.match(run.last_error, /Jira comment outage/);
   assert.match(run.last_error, /Error transition unavailable/);
@@ -332,7 +333,7 @@ test("a new worker reclaims an expired active lease and resumes the parent agent
   let agentCalls = 0;
   const worker = makeWorker(fixtureData, { async execute() { agentCalls += 1; return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
-  assert.equal(result.action, "resumed");
+  assert.equal(result.action, RunAction.Resumed);
   assert.equal(agentCalls, 1);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.db.getRun("FACT-1-recovery").status, RUN_STATUSES.AWAITING_REVIEW);
@@ -359,7 +360,7 @@ test("legacy planning runs migrate without invoking an agent or creating subtask
   let agentCalls = 0;
   const worker = makeWorker(fixtureData, { async execute() { agentCalls += 1; return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
-  assert.equal(result.action, "resumed");
+  assert.equal(result.action, RunAction.Resumed);
   assert.equal(agentCalls, 1);
   assert.equal(fixtureData.jira.issues.size, 1);
   assert.equal(fixtureData.db.getRun("FACT-1-legacy").status, RUN_STATUSES.AWAITING_REVIEW);
@@ -382,7 +383,7 @@ test("cancels a persisted run when its Jira parent was deleted", async () => {
   let implementationStarted = false;
   const worker = makeWorker(fixtureData, { async execute() { implementationStarted = true; return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
-  assert.equal(result.action, "cancelled");
+  assert.equal(result.action, RunAction.Cancelled);
   assert.equal(implementationStarted, false);
   assert.equal(fixtureData.github.pullRequests.length, 0);
   assert.equal(fixtureData.db.getRun("FACT-1-deleted").status, RUN_STATUSES.CANCELLED);

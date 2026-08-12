@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { nowIso } from "./types.js";
+import { nowIso, EventType } from "./types.js";
 import type { FactoryRun, RunPatch } from "./model/database.js";
 
 export async function openStateDatabase(stateDir) {
@@ -153,7 +153,7 @@ export class StateDatabase {
       INSERT INTO stage_runs (run_id, stage, attempt, status, input_hash, started_at)
       VALUES (?, ?, ?, 'running', ?, ?)
     `).run(runId, stage, attempt, inputHash, startedAt);
-    this.recordEvent(runId, "stage_started", { stage, attempt });
+    this.recordEvent(runId, EventType.StageStarted, { stage, attempt });
     return attempt;
   }
 
@@ -163,7 +163,7 @@ export class StateDatabase {
       SET status = ?, output_json = ?, error = ?, completed_at = ?
       WHERE run_id = ? AND stage = ? AND attempt = ?
     `).run(status, output == null ? null : JSON.stringify(output), error, nowIso(), runId, stage, attempt);
-    this.recordEvent(runId, "stage_finished", { stage, attempt, status, error });
+    this.recordEvent(runId, EventType.StageFinished, { stage, attempt, status, error });
   }
 
   countStageAttempts(runId, stage) {

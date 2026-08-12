@@ -1,7 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
-import type { AgentProvider, FactoryConfig, JiraAdapterKind } from "./model/config.js";
+import { AgentProvider, JiraAdapterKind, JiraStatusKey } from "./model/config.js";
+import type { FactoryConfig } from "./model/config.js";
 import type { UnknownRecord } from "./model/common.js";
 
 function localAppData() {
@@ -13,9 +14,13 @@ function resolveConfiguredPath(value: string, baseDir: string) {
 }
 
 export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
+  const provider = (process.env.FACTORY_AGENT_PROVIDER || AgentProvider.Codex) as AgentProvider;
+  const jiraAdapter = (process.env.FACTORY_JIRA_ADAPTER || (
+    provider === AgentProvider.OpenCode ? JiraAdapterKind.OpenCodeMcp : JiraAdapterKind.CodexMcp
+  )) as JiraAdapterKind;
   const stateDir = path.join(localAppData(), "AllLlmFactory");
   return {
-    provider: (process.env.FACTORY_AGENT_PROVIDER || "codex") as AgentProvider,
+    provider,
     repoPath: path.resolve(repoPath),
     stateDir,
     pollIntervalMs: 60_000,
@@ -27,7 +32,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       branchPrefix: "factory",
     },
     jira: {
-      adapter: (process.env.FACTORY_JIRA_ADAPTER || "codex-mcp") as JiraAdapterKind,
+      adapter: jiraAdapter,
       baseUrl: process.env.JIRA_BASE_URL || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "KAN",
       email: process.env.JIRA_EMAIL || "",
@@ -101,13 +106,17 @@ export async function loadConfig(configPath = process.env.FACTORY_CONFIG, repoPa
   result.repoPath = resolveConfiguredPath(result.repoPath || repoPath, base.repoPath);
   result.stateDir = resolveConfiguredPath(result.stateDir || base.stateDir, result.repoPath);
   result.git.repoPath = result.repoPath;
+  const rawJira = isRecord(raw) && isRecord(raw.jira) ? raw.jira : undefined;
+  if (!rawJira?.adapter && !process.env.FACTORY_JIRA_ADAPTER) {
+    result.jira.adapter = result.provider === AgentProvider.OpenCode ? JiraAdapterKind.OpenCodeMcp : JiraAdapterKind.CodexMcp;
+  }
   return result;
 }
 
 export function validateConfig(config: FactoryConfig, { live = true }: { live?: boolean } = {}): string[] {
   const errors = [];
   if (!config.repoPath) errors.push("repoPath is required");
-  if (!config.provider || !["codex", "opencode"].includes(config.provider)) {
+  if (!config.provider || ![AgentProvider.Codex, AgentProvider.OpenCode].includes(config.provider)) {
     errors.push("provider must be codex or opencode");
   }
   if (!config.stateDir) errors.push("stateDir is required");
@@ -130,18 +139,21 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
   if (!config.opencode?.agent) errors.push("opencode.agent is required");
   if (live) {
     if (!config.jira?.projectKey) errors.push("jira.projectKey is required");
-    if (!config.jira?.adapter || !["codex-mcp", "rest"].includes(config.jira.adapter)) {
-      errors.push("jira.adapter must be codex-mcp or rest");
+    if (!config.jira?.adapter || ![JiraAdapterKind.CodexMcp, JiraAdapterKind.OpenCodeMcp, JiraAdapterKind.Rest].includes(config.jira.adapter)) {
+      errors.push("jira.adapter must be codex-mcp, opencode-mcp, or rest");
     }
-    if (config.provider === "opencode" && config.jira?.adapter === "codex-mcp") {
-      errors.push("jira.adapter=codex-mcp requires provider=codex; use jira.adapter=rest with OpenCode");
+    if (config.provider === AgentProvider.Codex && config.jira?.adapter === JiraAdapterKind.OpenCodeMcp) {
+      errors.push("jira.adapter=opencode-mcp requires provider=opencode; use jira.adapter=codex-mcp with Codex");
     }
-    if (config.jira?.adapter === "rest") {
+    if (config.provider === AgentProvider.OpenCode && config.jira?.adapter === JiraAdapterKind.CodexMcp) {
+      errors.push("jira.adapter=codex-mcp requires provider=codex; use jira.adapter=opencode-mcp with OpenCode");
+    }
+    if (config.jira?.adapter === JiraAdapterKind.Rest) {
       if (!config.jira?.baseUrl) errors.push("jira.baseUrl is required when jira.adapter=rest");
       if (!config.jira?.email) errors.push("jira.email is required when jira.adapter=rest");
       if (!config.jira?.apiToken) errors.push("jira.apiToken is required when jira.adapter=rest");
     }
-    for (const statusName of ["ready", "implementation", "review", "done", "error"]) {
+    for (const statusName of Object.values(JiraStatusKey)) {
       if (!config.jira?.statuses?.[statusName]) errors.push(`jira.statuses.${statusName} is required`);
     }
     if (!config.github?.repositoryFullName) errors.push("github.repositoryFullName is required");

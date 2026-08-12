@@ -1,21 +1,53 @@
-export const STAGES = Object.freeze({
-  PLANNING: "planning",
-  IMPLEMENTATION: "implementation",
-  CODE_REVIEW: "code_review",
-  PULL_REQUEST: "pull_request",
-  REVIEW: "review",
-  BLOCKED: "blocked",
-});
+export enum StageName {
+  PLANNING = "planning",
+  IMPLEMENTATION = "implementation",
+  CODE_REVIEW = "code_review",
+  PULL_REQUEST = "pull_request",
+  REVIEW = "review",
+  BLOCKED = "blocked",
+}
 
-export const RUN_STATUSES = Object.freeze({
-  ACTIVE: "active",
-  RETRY_WAIT: "retry_wait",
-  AWAITING_REVIEW: "awaiting_review",
-  BLOCKED: "blocked",
-  CANCELLED: "cancelled",
-});
+export const STAGES = StageName;
 
-export const TERMINAL_STAGES = new Set([STAGES.REVIEW, STAGES.BLOCKED]);
+export enum RunStatus {
+  ACTIVE = "active",
+  RETRY_WAIT = "retry_wait",
+  AWAITING_REVIEW = "awaiting_review",
+  BLOCKED = "blocked",
+  CANCELLED = "cancelled",
+}
+
+export const RUN_STATUSES = RunStatus;
+
+export const TERMINAL_STAGES = new Set([StageName.REVIEW, StageName.BLOCKED]);
+
+export enum StageRunStatus {
+  Running = "running",
+  Completed = "completed",
+  Failed = "failed",
+}
+
+export enum ArtifactKind {
+  Spec = "spec",
+  PullRequest = "pull_request",
+}
+
+export enum EventType {
+  StageStarted = "stage_started",
+  StageFinished = "stage_finished",
+  RunCancelled = "run_cancelled",
+}
+
+export enum RunAction {
+  RetryScheduled = "retry_scheduled",
+  Blocked = "blocked",
+  Cancelled = "cancelled",
+  Busy = "busy",
+  Idle = "idle",
+  Resumed = "resumed",
+  Disabled = "disabled",
+  Claimed = "claimed",
+}
 
 export function nowIso() {
   return new Date().toISOString();

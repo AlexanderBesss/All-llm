@@ -1,5 +1,9 @@
 import type { JsonValue } from "./common.js";
 
+export enum JiraErrorCode {
+  IssueNotFound = "JIRA_ISSUE_NOT_FOUND",
+}
+
 export interface JiraStatus {
   name: string;
 }

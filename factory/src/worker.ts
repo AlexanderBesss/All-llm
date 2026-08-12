@@ -4,12 +4,14 @@ import { abortError, isAbortError } from "./git.js";
 import { adfToText } from "./jira.js";
 import { buildPullRequestTitle } from "./pull-request-title.js";
 import { ensureSpecFile } from "./spec.js";
-import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.js";
+import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart, StageRunStatus, ArtifactKind, EventType, RunAction } from "./types.js";
 import type { FactoryRun } from "./model/database.js";
 import type { FactoryConfig } from "./model/config.js";
+import { ReviewVerdict } from "./model/codex.js";
 import type { CodexAgent, ImplementationPlan } from "./model/codex.js";
 import type { GitAdapterLike } from "./model/git.js";
 import type { GitHubAdapter } from "./model/github.js";
+import { JiraErrorCode } from "./model/jira.js";
 import type { JiraAdapter, JiraIssue } from "./model/jira.js";
 import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 
@@ -24,7 +26,7 @@ function due(value: string | null | undefined): boolean {
 function isJiraIssueMissing(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: string; status?: number };
-  return candidate.code === "JIRA_ISSUE_NOT_FOUND" || candidate.status === 404;
+  return candidate.code === JiraErrorCode.IssueNotFound || candidate.status === 404;
 }
 
 function nextRetryAt(backoffMs: number, attempts: number): string {
@@ -168,9 +170,9 @@ export class FactoryWorker {
 
   runResult(action: string, run: FactoryRun | null, issueKey?: string): FactoryRunResult {
     const effectiveAction = run?.status === RUN_STATUSES.RETRY_WAIT
-      ? "retry_scheduled"
+      ? RunAction.RetryScheduled
       : run?.status === RUN_STATUSES.BLOCKED
-        ? "blocked"
+        ? RunAction.Blocked
         : action;
     return {
       action: effectiveAction,
@@ -206,7 +208,7 @@ export class FactoryWorker {
       });
       const issue = await this.verifyResumableIssue(resumable);
       if (!issue) {
-        return { action: "cancelled", runId: resumable.id, issueKey: resumable.issue_key, reason: "Jira issue no longer exists." };
+        return { action: RunAction.Cancelled, runId: resumable.id, issueKey: resumable.issue_key, reason: "Jira issue no longer exists." };
       }
       if (!this.db.acquireLease(
         resumable.id,
@@ -214,7 +216,7 @@ export class FactoryWorker {
         new Date(Date.now() + this.config.leaseMs).toISOString(),
       )) {
         this.log("info", "run:busy", { runId: resumable.id });
-        return { action: "busy", runId: resumable.id };
+        return { action: RunAction.Busy, runId: resumable.id };
       }
       let leased = this.db.getRun(resumable.id);
       if (leased.status === RUN_STATUSES.BLOCKED) {
@@ -226,7 +228,7 @@ export class FactoryWorker {
             issueKey: leased.issue_key,
             reason: "No supported failed stage was recorded.",
           });
-          return { action: "idle" };
+            return { action: RunAction.Idle };
         }
         try {
           await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
@@ -249,12 +251,12 @@ export class FactoryWorker {
       }
       this.log("info", "run:resume", { runId: leased.id, stage: leased.stage });
       await this.advanceRun(leased, { dryRun });
-      return this.runResult("resumed", this.db.getRun(leased.id), leased.issue_key);
+      return this.runResult(RunAction.Resumed, this.db.getRun(leased.id), leased.issue_key);
     }
 
     if (!this.jira.enabled()) {
       this.log("warn", "jira:disabled", { reason: "Jira adapter is not configured." });
-      return { action: "disabled", reason: "Jira adapter is not configured." };
+      return { action: RunAction.Disabled, reason: "Jira adapter is not configured." };
     }
     this.throwIfStopping();
     const issues = await this.jira.searchReady();
@@ -286,10 +288,10 @@ export class FactoryWorker {
       }
       this.log("info", "issue:claimed", { issueKey, runId, stage: STAGES.IMPLEMENTATION, dryRun });
       await this.advanceRun(claimed.run, { dryRun });
-      return this.runResult("claimed", this.db.getRun(runId), issueKey);
+      return this.runResult(RunAction.Claimed, this.db.getRun(runId), issueKey);
     }
     this.log("info", "poll:idle");
-    return { action: "idle" };
+    return { action: RunAction.Idle };
   }
 
   async advanceRun(run, { dryRun = false } = {}) {
@@ -332,7 +334,7 @@ export class FactoryWorker {
         lease_until: null,
         next_attempt_at: null,
       });
-      this.db.recordEvent(run.id, "run_cancelled", {
+      this.db.recordEvent(run.id, EventType.RunCancelled, {
         reason: "jira_issue_missing",
         issueKey: run.issue_key,
         message,
@@ -399,7 +401,7 @@ export class FactoryWorker {
           tests: [],
         });
         this.db.updateRun(run.id, { plan_json: JSON.stringify(plan), issue_json: JSON.stringify(issue) });
-        this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, "completed");
+        this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, StageRunStatus.Completed);
         this.db.updateRun(run.id, { stage: STAGES.CODE_REVIEW, branch_name: branchName, worktree_path: worktreePath });
         return { stage: STAGES.IMPLEMENTATION, dryRun: true };
       }
@@ -420,7 +422,7 @@ export class FactoryWorker {
         branchName,
         generatedAt: run.created_at || nowIso(),
       });
-      this.db.recordArtifact(run.id, "spec", branchName, spec.relativePath);
+      this.db.recordArtifact(run.id, ArtifactKind.Spec, branchName, spec.relativePath);
       this.log("info", "implementation:spec-ready", {
         runId: run.id,
         branchName,
@@ -466,7 +468,7 @@ export class FactoryWorker {
         makeRunMarker(run.id),
         spec.relativePath,
       ));
-      this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, "completed");
+      this.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, StageRunStatus.Completed);
       this.db.updateRun(run.id, {
         stage: STAGES.CODE_REVIEW,
         status: RUN_STATUSES.ACTIVE,
@@ -495,7 +497,7 @@ export class FactoryWorker {
     const plan = normalizePlan(JSON.parse(run.plan_json));
     const branchName = run.branch_name;
     const worktreePath = run.worktree_path;
-    const specPath = this.db.findArtifact("spec", branchName)?.artifact_value || "specification unavailable";
+    const specPath = this.db.findArtifact(ArtifactKind.Spec, branchName)?.artifact_value || "specification unavailable";
     const attempt = this.db.startStage(run.id, STAGES.CODE_REVIEW, hashInput({
       issue,
       plan,
@@ -512,7 +514,7 @@ export class FactoryWorker {
     });
     try {
       if (dryRun) {
-        this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { dryRun: true }, "completed");
+        this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { dryRun: true }, StageRunStatus.Completed);
         this.db.updateRun(run.id, { stage: STAGES.PULL_REQUEST });
         return { stage: STAGES.CODE_REVIEW, dryRun: true };
       }
@@ -542,7 +544,7 @@ export class FactoryWorker {
         tests: review.tests.length,
         blockers: review.blockers.length,
       });
-      if (review.verdict !== "passed") {
+      if (review.verdict !== ReviewVerdict.Passed) {
         throw new Error(`Independent code review blocked the run: ${review.blockers.join("; ") || review.summary}`);
       }
       if (changed && (!review.committed || !review.pushed)) {
@@ -554,7 +556,7 @@ export class FactoryWorker {
       if (typeof this.git.assertFileCommitted === "function" && specPath !== "specification unavailable") {
         await this.git.assertFileCommitted(worktreePath, specPath);
       }
-      this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { ...review, commitSha: afterSha }, "completed");
+      this.db.finishStage(run.id, STAGES.CODE_REVIEW, attempt, { ...review, commitSha: afterSha }, StageRunStatus.Completed);
       this.db.updateRun(run.id, {
         stage: STAGES.PULL_REQUEST,
         status: RUN_STATUSES.ACTIVE,
@@ -593,7 +595,7 @@ export class FactoryWorker {
       const taskName = issue.fields?.summary;
       const taskType = issue.fields?.issuetype?.name;
       const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
-      const specPath = this.db.findArtifact("spec", branchName)?.artifact_value || "";
+      const specPath = this.db.findArtifact(ArtifactKind.Spec, branchName)?.artifact_value || "";
       if (!dryRun) this.log("info", "pull-request:creating", { runId: run.id, branchName });
       const pr = dryRun
         ? { number: 0, html_url: "dry-run", head: { ref: branchName } }
@@ -624,8 +626,8 @@ export class FactoryWorker {
         await this.jira.addComment(run.issue_key, `${makeRunMarker(run.id)}\nPull request created: ${pr.html_url}`);
         await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.review);
       }
-      this.db.finishStage(run.id, STAGES.PULL_REQUEST, attempt, pr, "completed");
-      this.db.recordArtifact(run.id, "pull_request", `${this.config.github.repositoryFullName}:${branchName}`, pr.html_url || "dry-run");
+      this.db.finishStage(run.id, STAGES.PULL_REQUEST, attempt, pr, StageRunStatus.Completed);
+      this.db.recordArtifact(run.id, ArtifactKind.PullRequest, `${this.config.github.repositoryFullName}:${branchName}`, pr.html_url || "dry-run");
       this.db.updateRun(run.id, {
         stage: STAGES.REVIEW,
         status: RUN_STATUSES.AWAITING_REVIEW,
@@ -662,7 +664,7 @@ export class FactoryWorker {
       attempts,
       error: error?.message || String(error),
     });
-    this.db.finishStage(run.id, stage, attempt, null, "failed", message.slice(0, 10_000));
+    this.db.finishStage(run.id, stage, attempt, null, StageRunStatus.Failed, message.slice(0, 10_000));
     if (attempts >= this.config.maxAttempts) {
       this.db.updateRun(run.id, {
         stage: STAGES.BLOCKED,
