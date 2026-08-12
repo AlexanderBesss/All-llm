@@ -95,5 +95,5 @@ For each factory run, we should create spec file. The spec file in investigate w
 - Added `factory/src/spec.mjs` for portable branch filenames, structured spec content, and idempotent worktree creation.
 - Integrated spec creation, artifact recording, agent prompt context, and production Git verification into `factory/src/worker.mjs` and `factory/src/git.mjs`.
 - Updated `factory/src/codex.mjs`, tests, and `factory/README.md` to document and enforce the unattended workflow.
-- Validation completed: `npm.cmd test` passes all 23 tests, including filename mapping, idempotent creation, workflow integration, retry behavior, and tracked/clean Git verification.
+- Validation completed on the factory supervisor's Windows machine: `npm.cmd test` passes all 23 tests, including filename mapping, idempotent creation, workflow integration, retry behavior, and tracked/clean Git verification.
 - Validation completed: the supported factory status command and JavaScript syntax checks pass; `git diff --check` reports no whitespace errors.
