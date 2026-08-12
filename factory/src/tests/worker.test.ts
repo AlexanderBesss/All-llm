@@ -138,6 +138,21 @@ test("blocks a pull request when the Jira type is unsupported", async () => {
   fixtureData.db.close();
 });
 
+test("pull-request stage normalizes a legacy persisted Jira type object", async () => {
+  const fixtureData = await fixture();
+  const issue = await fixtureData.jira.getIssue("FACT-1");
+  issue.fields.issuetype = { name: { name: "Task" } as unknown as string };
+  fixtureData.jira.issues.set("FACT-1", issue);
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  const result = await worker.runOnce();
+
+  assert.equal(result.action, RunAction.Claimed);
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  assert.match(fixtureData.github.pullRequests[0].title, /\(Task\)$/);
+  fixtureData.db.close();
+});
+
 test("retries the same parent run without creating child work", async () => {
   const fixtureData = await fixture({ maxAttempts: 2 });
   let calls = 0;

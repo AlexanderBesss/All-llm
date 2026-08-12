@@ -15,6 +15,18 @@ import { JiraErrorCode } from "./model/jira.js";
 import type { JiraAdapter, JiraIssue } from "./model/jira.js";
 import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 
+function jiraText(value: unknown, property: "name" | "key" | "summary" = "name"): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  const direct = record[property];
+  if (typeof direct === "string") return direct;
+  if (direct && typeof direct === "object") return jiraText(direct, property);
+  if (property !== "name" && typeof record.name === "string") return record.name;
+  if (property !== "key" && typeof record.key === "string") return record.key;
+  return "";
+}
+
 function hashInput(value: unknown): string {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -622,8 +634,11 @@ export class FactoryWorker {
     this.log("info", "pull-request:attempt", { runId: run.id, attempt });
     try {
       const taskNumber = run.issue_key;
-      const taskName = issue.fields?.summary;
-      const taskType = issue.fields?.issuetype?.name;
+      // A run may persist an older MCP response where fields such as
+      // issuetype.name were themselves Jira objects. Normalize again at the
+      // stage boundary so resumed runs do not turn them into [object Object].
+      const taskName = jiraText(issue.fields?.summary, "summary");
+      const taskType = jiraText(issue.fields?.issuetype);
       const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
       const specPath = this.db.findArtifact(ArtifactKind.Spec, branchName)?.artifact_value || "";
       const persistedPr = !dryRun && run.pr_number && run.pr_url
