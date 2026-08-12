@@ -5,6 +5,7 @@ import { assertPullRequestTitle } from "./pull-request-title.js";
 import type { ProcessRunner, ProcessOptions } from "./model/process.js";
 import type { GitHubConfig } from "./model/config.js";
 import type { PullRequest, PullRequestInput } from "./model/github.js";
+import { nowIso } from "./types.js";
 
 function parseJson(stdout, operation) {
   try {
@@ -136,6 +137,25 @@ export class GitHubCliAdapter {
     return pullRequest;
   }
 
+  async getPullRequest(prNumber: number): Promise<PullRequest | null> {
+    const result = await this.run([
+      "pr", "view", String(prNumber),
+      "--repo", this.repository,
+      "--json", "number,url,headRefName,baseRefName,title,body,merged,mergedAt",
+    ]);
+    const data = parseJson(result.stdout, "reading pull request");
+    return {
+      number: data.number,
+      html_url: data.url,
+      head: { ref: data.headRefName },
+      base: data.baseRefName ? { ref: data.baseRefName } : undefined,
+      title: data.title,
+      body: data.body,
+      merged: data.merged,
+      mergedAt: data.mergedAt,
+    };
+  }
+
   async getCommitStatus(commitSha) {
     const result = await this.run(["api", `repos/${this.repository}/commits/${commitSha}/status`]);
     return parseJson(result.stdout, "reading commit status");
@@ -168,6 +188,20 @@ export class InMemoryGitHubAdapter {
     };
     this.pullRequests.push(pr);
     return pr;
+  }
+
+  async getPullRequest(prNumber: number): Promise<PullRequest | null> {
+    const pr = this.pullRequests.find((p) => p.number === prNumber);
+    return pr ? { ...pr } : null;
+  }
+
+  async mergePullRequest(prNumber: number): Promise<PullRequest> {
+    const pr = this.pullRequests.find((p) => p.number === prNumber);
+    if (!pr) throw new Error(`PR #${prNumber} not found`);
+    pr.merged = true;
+    pr.mergedAt = nowIso();
+    pr.state = "closed";
+    return { ...pr };
   }
 
   async getCommitStatus() {

@@ -5,6 +5,7 @@ import { adfToText } from "./jira.js";
 import { buildPullRequestTitle } from "./pull-request-title.js";
 import { ensureSpecFile } from "./spec.js";
 import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart, StageRunStatus, ArtifactKind, EventType, RunAction } from "./types.js";
+import type { PullRequest } from "./model/github.js";
 import type { FactoryRun } from "./model/database.js";
 import type { FactoryConfig } from "./model/config.js";
 import { ReviewVerdict } from "./model/codex.js";
@@ -175,6 +176,7 @@ export class FactoryWorker {
   logger: FactoryLogger;
   signal?: AbortSignal;
   leaseOwner: string;
+  loopLabel?: string;
 
   constructor({ config, db, jira, github, git, agent, reviewer, logger = console, signal }: FactoryWorkerOptions) {
     this.config = config;
@@ -196,8 +198,9 @@ export class FactoryWorker {
   }
 
   log(level: keyof FactoryLogger, event: string, details?: Record<string, unknown>) {
+    const prefix = this.loopLabel ? `[${this.loopLabel}] ` : "";
     const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
-    this.logger[level]?.(formatFactoryLog(`${event}${suffix}`));
+    this.logger[level]?.(formatFactoryLog(`${prefix}${event}${suffix}`));
   }
 
   runResult(action: string, run: FactoryRun | null, issueKey?: string): FactoryRunResult {
@@ -716,6 +719,89 @@ export class FactoryWorker {
     }
   }
 
+  async checkMergedPullRequests(): Promise<{ closed: number }> {
+    this.throwIfStopping();
+    this.log("info", "merge-check:start");
+    const runs = this.db.getAwaitingReviewRuns(50);
+    this.log("info", "merge-check:pending", { count: runs.length });
+    let closed = 0;
+    for (const run of runs) {
+      this.throwIfStopping();
+      try {
+        const pr = await this.github.getPullRequest(run.pr_number);
+        if (!pr) {
+          this.log("warn", "merge-check:pr-not-found", {
+            runId: run.id,
+            issueKey: run.issue_key,
+            prNumber: run.pr_number,
+          });
+          continue;
+        }
+        if (pr.number !== run.pr_number) {
+          this.log("warn", "merge-check:pr-mismatch", {
+            runId: run.id,
+            expected: run.pr_number,
+            found: pr.number,
+          });
+          continue;
+        }
+        if (!pr.merged) {
+          this.log("info", "merge-check:not-merged", {
+            runId: run.id,
+            issueKey: run.issue_key,
+            prNumber: pr.number,
+          });
+          continue;
+        }
+        this.log("info", "merge-check:merged", {
+          runId: run.id,
+          issueKey: run.issue_key,
+          prNumber: pr.number,
+          prUrl: pr.html_url,
+          mergedAt: pr.mergedAt,
+        });
+        try {
+          await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.done);
+        } catch (error) {
+          this.log("error", "merge-check:transition-failed", {
+            runId: run.id,
+            issueKey: run.issue_key,
+            error: error?.message || String(error),
+          });
+          continue;
+        }
+        this.log("info", "merge-check:task-closed", {
+          runId: run.id,
+          issueKey: run.issue_key,
+          prNumber: pr.number,
+        });
+        try {
+          await this.jira.addComment(run.issue_key, `${makeRunMarker(run.id)}\nTask auto-closed: pull request #${pr.number} was merged (${pr.html_url}).`);
+        } catch (error) {
+          this.log("warn", "merge-check:comment-failed", {
+            runId: run.id,
+            issueKey: run.issue_key,
+            error: error?.message || String(error),
+          });
+        }
+        this.db.updateRun(run.id, {
+          status: RUN_STATUSES.COMPLETED,
+          last_error: null,
+        });
+        closed += 1;
+      } catch (error) {
+        this.log("error", "merge-check:error", {
+          runId: run.id,
+          issueKey: run.issue_key,
+          prNumber: run.pr_number,
+          error: error?.message || String(error),
+        });
+      }
+    }
+    this.log("info", "merge-check:complete", { closed });
+    return { closed };
+  }
+
   async failStage(run, stage, attempt, error) {
     if (isAbortError(error) || this.signal?.aborted) {
       this.log("warn", "stage:cancelled", { runId: run.id, issueKey: run.issue_key, stage });
@@ -854,4 +940,39 @@ export async function runLoop(worker, { signal = worker.signal, pollIntervalMs =
   }
   signal?.removeEventListener("abort", stop);
   worker.log?.("info", "loop:stopped");
+}
+
+export async function runMergeCheckLoop(worker, { signal = worker.signal, intervalMs = 300_000 } = {}) {
+  let stopped = false;
+  const stop = () => {
+    if (!stopped) worker.log?.("info", "merge-check-loop:shutdown-requested");
+    stopped = true;
+  };
+  signal?.addEventListener("abort", stop, { once: true });
+  worker.log?.("info", "merge-check-loop:started", { intervalMs });
+  while (!stopped) {
+    try {
+      const result = await worker.checkMergedPullRequests();
+      worker.logger.info?.(formatFactoryLog(JSON.stringify(result)));
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) {
+        stop();
+        break;
+      }
+      worker.logger.error?.(formatFactoryLog(`merge-check failed: ${error.stack || error.message || error}`));
+    }
+    if (!stopped) {
+      try {
+        await sleep(intervalMs, signal);
+      } catch (error) {
+        if (isAbortError(error)) {
+          stop();
+          break;
+        }
+        throw error;
+      }
+    }
+  }
+  signal?.removeEventListener("abort", stop);
+  worker.log?.("info", "merge-check-loop:stopped");
 }

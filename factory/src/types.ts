@@ -15,6 +15,7 @@ export enum RunStatus {
   AWAITING_REVIEW = "awaiting_review",
   BLOCKED = "blocked",
   CANCELLED = "cancelled",
+  COMPLETED = "completed",
 }
 
 export const RUN_STATUSES = RunStatus;

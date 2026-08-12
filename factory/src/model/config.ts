@@ -93,6 +93,7 @@ export interface FactoryConfig {
   repoPath: string;
   stateDir: string;
   pollIntervalMs: number;
+  mergeCheckIntervalMs: number;
   leaseMs: number;
   maxAttempts: number;
   continueFailedTasks: boolean;

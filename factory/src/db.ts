@@ -222,4 +222,12 @@ export class StateDatabase {
     `).run(now, ...candidates);
     return Number(result.changes || 0);
   }
+
+  getAwaitingReviewRuns(limit = 50): FactoryRun[] {
+    return this.db.prepare(`
+      SELECT * FROM runs
+      WHERE status = 'awaiting_review' AND pr_number IS NOT NULL
+      ORDER BY created_at ASC LIMIT ?
+    `).all(limit) as unknown as FactoryRun[];
+  }
 }
