@@ -20,6 +20,10 @@ function codexInvocation(command = "") {
   return { command: value, prefix: [] };
 }
 
+function isModelCapacityError(error: unknown) {
+  return error instanceof Error && /selected model is at capacity/i.test(error.message);
+}
+
 export function parseJsonLines(stdout: string): CodexJsonLinesResult {
   const events: CodexEvent[] = [];
   for (const line of String(stdout || "").split(/\r?\n/)) {
@@ -54,9 +58,9 @@ export class CodexAgentExecutor {
     };
   }
 
-  baseArgs() {
+  baseArgs(serviceTier = this.config.codex.serviceTier) {
     const codex = this.config.codex;
-    return [
+    const args = [
       ...this.invocation().prefix,
       "exec",
       "--ephemeral",
@@ -71,6 +75,12 @@ export class CodexAgentExecutor {
       `model_context_window=${codex.contextWindowTokens}`,
       "-c",
       `model_auto_compact_token_limit=${codex.autoCompactTokenLimit}`,
+    ];
+    if (serviceTier) {
+      args.push("-c", `service_tier=${JSON.stringify(serviceTier)}`);
+    }
+    return [
+      ...args,
       "--sandbox",
       codex.sandbox,
       "-C",
@@ -79,20 +89,29 @@ export class CodexAgentExecutor {
 
   async run({ task, context = "", cwd, outputSchema }: CodexRunInput) {
     const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
-    const args = [...this.baseArgs(), cwd];
-    if (outputSchema) args.push("--output-schema", outputSchema);
-    args.push("-");
-    const result = await this.processRunner(this.invocation().command, args, {
-      // Keep the process rooted at the repository so Codex loads the existing
-      // .codex/config.toml MCP registration. The -C argument above is the
-      // actual source worktree used by the agent.
-      cwd: this.config.repoPath,
-      input: prompt,
-      timeoutMs: this.config.codex.timeoutMs,
-      signal: this.config.signal,
-      env: this.runtimeEnv(),
-    });
-    return parseJsonLines(result.stdout);
+    const runWithTier = async (serviceTier = this.config.codex.serviceTier) => {
+      const args = [...this.baseArgs(serviceTier), cwd];
+      if (outputSchema) args.push("--output-schema", outputSchema);
+      args.push("-");
+      const result = await this.processRunner(this.invocation().command, args, {
+        // Keep the process rooted at the repository so Codex loads the existing
+        // .codex/config.toml MCP registration. The -C argument above is the
+        // actual source worktree used by the agent.
+        cwd: this.config.repoPath,
+        input: prompt,
+        timeoutMs: this.config.codex.timeoutMs,
+        signal: this.config.signal,
+        env: this.runtimeEnv(),
+      });
+      return parseJsonLines(result.stdout);
+    };
+    try {
+      return await runWithTier();
+    } catch (error) {
+      const fallbackTier = this.config.codex.highCapacityServiceTier;
+      if (!isModelCapacityError(error) || !fallbackTier || fallbackTier === this.config.codex.serviceTier) throw error;
+      return runWithTier(fallbackTier);
+    }
   }
 
   async health() {

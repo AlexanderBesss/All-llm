@@ -104,13 +104,16 @@ section.
 The factory invokes the installed Codex CLI, not OpenCode or the local Qwen
 bridge. Defaults are `gpt-5.6-luna` with maximum reasoning effort. Override
 them in the JSON config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
-`CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
+`CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
 `CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. The factory defaults to
 a 250,000-token context ceiling and starts automatic compaction at 225,000
 tokens. The `danger-full-access` sandbox and `never` approval policy are
 intentionally high trust because an unattended worker must use local Git and
 the configured MCP server; keep the repository branch restrictions and human
-PR review in place.
+PR review in place. When Codex reports that the selected model is at capacity,
+the factory immediately makes one additional attempt using the `priority`
+service tier (configurable through `highCapacityServiceTier`); other failures
+continue through the normal bounded stage-retry policy.
 
 ## Commands
 

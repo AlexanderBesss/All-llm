@@ -50,6 +50,29 @@ test("Codex executor uses configurable Luna max-effort settings", async () => {
   assert.equal(calls[0].options.timeoutMs, 1234);
 });
 
+test("Codex executor retries a capacity error once with the high-capacity tier", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: {
+      command: "codex",
+      serviceTier: "default",
+      highCapacityServiceTier: "priority",
+      timeoutMs: 1234,
+    },
+  }, async (command, args, options) => {
+    calls.push({ command, args, options });
+    if (calls.length === 1) throw new Error("Selected model is at capacity. Please try a different model.");
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{}" } }), stderr: "" };
+  });
+
+  await executor.run({ task: "Return a JSON health result.", cwd: "../factory-worktree" });
+
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].args.includes('service_tier="default"'));
+  assert.ok(calls[1].args.includes('service_tier="priority"'));
+});
+
 test("the single-agent prompt forbids subtasks and delegates the complete parent task", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new CodexAgentExecutor({

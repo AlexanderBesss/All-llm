@@ -52,6 +52,8 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     codex: {
       model: process.env.CODEX_MODEL || "gpt-5.6-luna",
       reasoningEffort: process.env.CODEX_REASONING_EFFORT || "max",
+      serviceTier: process.env.CODEX_SERVICE_TIER || "default",
+      highCapacityServiceTier: process.env.CODEX_HIGH_CAPACITY_SERVICE_TIER || "priority",
       sandbox: process.env.CODEX_SANDBOX || "danger-full-access",
       approvalPolicy: process.env.CODEX_APPROVAL_POLICY || "never",
       contextWindowTokens: Number(process.env.CODEX_CONTEXT_WINDOW_TOKENS || 250_000),
