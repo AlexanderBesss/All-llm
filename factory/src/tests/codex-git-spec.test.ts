@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { defaultConfig, validateConfig } from "../config.js";
 import { GitAdapter, isAbortError, processInvocation, runProcess } from "../git.js";
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
@@ -249,6 +250,38 @@ test("process cancellation terminates an active child process", async () => {
   const running = runProcess(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { timeoutMs: 60_000, signal: controller.signal });
   setTimeout(() => controller.abort(), 50);
   await assert.rejects(running, (error: unknown) => isAbortError(error));
+});
+
+test("process cancellation waits for the Windows process tree cleanup", async () => {
+  if (process.platform !== "win32") return;
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "all-llm-process-tree-"));
+  const pidFile = path.join(tempDir, "grandchild.pid");
+  const controller = new AbortController();
+  try {
+    const running = runProcess(process.execPath, ["-e", "const fs=require('node:fs'); const c=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'ignore'}); fs.writeFileSync(process.argv[1],String(c.pid)); setTimeout(()=>{},30000);", pidFile], {
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+    for (let attempt = 0; attempt < 20 && !existsSync(pidFile); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(existsSync(pidFile), true);
+    const grandchildPid = Number(await readFile(pidFile, "utf8"));
+    setTimeout(() => controller.abort(), 10);
+    await assert.rejects(running, (error: unknown) => isAbortError(error));
+    let grandchildAlive = true;
+    for (let attempt = 0; attempt < 40 && grandchildAlive; attempt += 1) {
+      try {
+        process.kill(grandchildPid, 0);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      } catch {
+        grandchildAlive = false;
+      }
+    }
+    assert.equal(grandchildAlive, false);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("Windows command shims are launched through Git Bash with preserved arguments", () => {

@@ -14,6 +14,7 @@ export interface CodexRunInput {
   cwd: string;
   outputSchema?: string;
   timeoutMs?: number;
+  agent?: string;
 }
 
 export interface CodexEvent {

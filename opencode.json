@@ -8,6 +8,27 @@
             "enabled": true
         }
     },
+    "agent": {
+        "factory-jira": {
+            "description": "Performs one bounded Jira MCP operation and returns its structured result.",
+            "mode": "primary",
+            "steps": 3,
+            "prompt": "You are a bounded Jira operation agent. Use the configured Jira MCP server only. If required, make one read-only cloud/resource lookup, then make at most one requested Jira mutation. If the mutation fails, include its exact error in the structured result and stop; never repeat a failed mutation. Return exactly one JSON object matching the requested schema.",
+            "permission": {
+                "read": "deny",
+                "edit": "deny",
+                "bash": "deny",
+                "glob": "deny",
+                "grep": "deny",
+                "list": "deny",
+                "task": "deny",
+                "webfetch": "deny",
+                "websearch": "deny",
+                "question": "deny",
+                "jira_*": "allow"
+            }
+        }
+    },
     "formatter": true,
     "compaction": {
         "auto": true,

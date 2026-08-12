@@ -35,6 +35,8 @@ export interface JiraConfig {
   projectKey?: string;
   /** Maximum time for one provider-backed Jira MCP request. */
   mcpTimeoutMs?: number;
+  /** OpenCode agent used for provider-backed Jira MCP requests. */
+  mcpAgent?: string;
   email?: string;
   apiToken?: string;
   readyStatus?: string;

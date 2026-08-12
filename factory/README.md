@@ -64,6 +64,8 @@ OpenCode accepts `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
 Provider-backed Jira MCP operations are bounded by `jira.mcpTimeoutMs`
 (120 seconds by default, or `FACTORY_JIRA_MCP_TIMEOUT_MS`).
+OpenCode uses the dedicated `factory-jira` agent for these calls; its agentic
+steps are capped so a failed MCP mutation cannot spin indefinitely.
 
 `repoPath` may be relative; it is resolved from the detected repository root.
 `stateDir` may also be relative and is resolved from the configured repository
@@ -218,7 +220,10 @@ should remain terminal.
 
 Press `Ctrl+C` to request a graceful shutdown. The worker aborts active agent,
 Git, GitHub CLI, Jira HTTP, and retry-wait operations, terminates their child
-processes, and closes the state database after cancellation completes.
+process trees, waits for descendant cleanup to complete, and closes the state
+database after cancellation completes. On Windows this uses `taskkill /T /F`
+before terminating the Git Bash or command-shim parent, preventing OpenCode
+descendants from continuing after the console stops.
 
 On PowerShell installations that block the `npm.ps1` shim, use the equivalent
 `npm.cmd` form, for example `npm.cmd start`.

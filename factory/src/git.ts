@@ -15,18 +15,39 @@ export function isAbortError(error) {
   return error?.code === "ABORT_ERR" || error?.name === "AbortError";
 }
 
-function killProcessTree(child) {
-  if (!child?.pid) return;
-  try { child.kill(); } catch {}
+function killProcessTree(child): Promise<void> {
+  if (!child?.pid) return Promise.resolve();
   if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-      windowsHide: true,
-      shell: false,
-      stdio: "ignore",
+    // Kill the tree before terminating the shell parent. Calling child.kill()
+    // first can orphan OpenCode when the child is Git Bash or a .cmd shim.
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        shell: false,
+        stdio: "ignore",
+      });
+      const fallback = () => {
+        try { child.kill(); } catch {}
+        finish();
+      };
+      killer.once("error", fallback);
+      killer.once("close", (code) => code === 0 ? finish() : fallback());
+      setTimeout(fallback, 5_000).unref();
     });
-    killer.on("error", () => {});
-    return;
   }
+
+  // Non-Windows children are started in their own process group below, so a
+  // negative PID terminates the child and all descendants together.
+  try { process.kill(-child.pid, "SIGTERM"); } catch {
+    try { child.kill(); } catch {}
+  }
+  return Promise.resolve();
 }
 
 function defaultGitBashEntry() {
@@ -70,11 +91,13 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       env,
       windowsHide: true,
       shell: false,
+      detached: process.platform !== "win32",
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let terminating = false;
     const cleanup = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
@@ -85,13 +108,16 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       cleanup();
       reject(error);
     };
+    const terminate = (error) => {
+      if (settled || terminating) return;
+      terminating = true;
+      killProcessTree(child).finally(() => fail(error));
+    };
     const onAbort = () => {
-      killProcessTree(child);
-      fail(abortError(`Operation aborted while running: ${command} ${args.join(" ")}`));
+      terminate(abortError(`Operation aborted while running: ${command} ${args.join(" ")}`));
     };
     const timer = setTimeout(() => {
-      killProcessTree(child);
-      fail(new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs} ms.`));
+      terminate(new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs} ms.`));
     }, timeoutMs);
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -101,6 +127,7 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       fail(error);
     });
     child.on("close", (code) => {
+      if (terminating) return;
       if (settled) return;
       cleanup();
       if (code !== 0) {

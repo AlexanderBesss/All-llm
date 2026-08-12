@@ -33,6 +33,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       baseUrl: process.env.JIRA_BASE_URL || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "KAN",
       mcpTimeoutMs: Number(process.env.FACTORY_JIRA_MCP_TIMEOUT_MS || 120_000),
+      mcpAgent: process.env.FACTORY_JIRA_MCP_AGENT || "factory-jira",
       email: process.env.JIRA_EMAIL || "",
       apiToken: process.env.JIRA_API_TOKEN || "",
       statuses: {

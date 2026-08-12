@@ -12,6 +12,7 @@
   },
   "jira": {
     "mcpTimeoutMs": 120000,
+    "mcpAgent": "factory-jira",
     "projectKey": "KAN",
     "statuses": {
       "ready": "Ready",

@@ -85,7 +85,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     };
   }
 
-  async run({ task, context = "", cwd, outputSchema, timeoutMs }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent }: CodexRunInput) {
     const settings = this.config.opencode || {};
     let schemaInstruction = "";
     if (outputSchema) {
@@ -101,7 +101,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     const args = [
       "run",
       "--model", settings.model || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
-      "--agent", settings.agent || "build",
+      "--agent", agent || settings.agent || "build",
       "--format", "json",
       "--auto",
       "--dir", directory,
