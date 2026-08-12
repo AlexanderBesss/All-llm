@@ -2,10 +2,12 @@ import { mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import type { ProcessOptions, ProcessResult, ProcessRunner } from "./model/process.js";
+import type { GitAdapterConfig } from "./model/git.js";
 
 export function abortError(message = "Operation aborted.") {
   const error = new Error(message);
-  error.code = "ABORT_ERR";
+  (error as Error & { code?: string }).code = "ABORT_ERR";
   return error;
 }
 
@@ -27,7 +29,7 @@ function killProcessTree(child) {
   }
 }
 
-export function runProcess(command, args, { cwd, env = process.env, timeoutMs = 120_000, signal } = {}) {
+export function runProcess(command: string, args: string[], { cwd, env = process.env, timeoutMs = 120_000, signal }: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError(`Operation aborted before starting: ${command}`));
@@ -77,7 +79,10 @@ export function runProcess(command, args, { cwd, env = process.env, timeoutMs = 
 }
 
 export class GitAdapter {
-  constructor(config, processRunner = runProcess) {
+  config: GitAdapterConfig;
+  runProcess: ProcessRunner;
+
+  constructor(config: GitAdapterConfig, processRunner: ProcessRunner = runProcess) {
     this.config = config;
     this.runProcess = processRunner;
   }

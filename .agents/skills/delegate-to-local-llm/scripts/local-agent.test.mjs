@@ -107,7 +107,7 @@ test("buildRunArguments uses the verified OpenCode parameters", () => {
   const config = {
     model: REQUIRED_LOCAL_MODEL,
     agent: "build",
-    cwd: "C:\\workspace",
+    cwd: "workspace",
   };
   const task = { role: "reviewer", assignment: "Inspect the project", context: "" };
   const args = buildRunArguments(config, task);
@@ -122,7 +122,7 @@ test("buildRunArguments uses the verified OpenCode parameters", () => {
     "json",
     "--auto",
     "--dir",
-    "C:\\workspace",
+    "workspace",
   ]);
   assert.match(args[10], /ASSIGNMENT:\nInspect the project/);
 });

@@ -1,7 +1,10 @@
 import os from "node:os";
 import path from "node:path";
-import { extractJson } from "./json-output.mjs";
-import { runProcess } from "./git.mjs";
+import { extractJson } from "./json-output.js";
+import { runProcess } from "./git.js";
+import type { ProcessRunner } from "./model/process.js";
+import type { CodexAgentConfig, CodexEvent, CodexJsonLinesResult, CodexRunInput, CodexExecutionResult, ExecutionResult } from "./model/codex.js";
+import type { JiraIssue } from "./model/jira.js";
 
 function defaultCodexEntry() {
   if (process.env.CODEX_COMMAND) return process.env.CODEX_COMMAND;
@@ -11,17 +14,17 @@ function defaultCodexEntry() {
   return "codex";
 }
 
-function codexInvocation(command) {
+function codexInvocation(command = "") {
   const value = command || defaultCodexEntry();
   if (value.toLowerCase().endsWith(".js")) return { command: process.execPath, prefix: [value] };
   return { command: value, prefix: [] };
 }
 
-export function parseJsonLines(stdout) {
-  const events = [];
+export function parseJsonLines(stdout: string): CodexJsonLinesResult {
+  const events: CodexEvent[] = [];
   for (const line of String(stdout || "").split(/\r?\n/)) {
     if (!line.trim()) continue;
-    try { events.push(JSON.parse(line)); } catch {}
+    try { events.push(JSON.parse(line) as CodexEvent); } catch {}
   }
   const messages = events
     .filter((event) => event.type === "item.completed" && event.item?.type === "agent_message")
@@ -32,7 +35,10 @@ export function parseJsonLines(stdout) {
 }
 
 export class CodexAgentExecutor {
-  constructor(config, processRunner = runProcess) {
+  config: CodexAgentConfig;
+  processRunner: ProcessRunner;
+
+  constructor(config: CodexAgentConfig, processRunner: ProcessRunner = runProcess) {
     this.config = config;
     this.processRunner = processRunner;
   }
@@ -71,7 +77,7 @@ export class CodexAgentExecutor {
     ];
   }
 
-  async run({ task, context = "", cwd, outputSchema }) {
+  async run({ task, context = "", cwd, outputSchema }: CodexRunInput) {
     const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
     const args = [...this.baseArgs(), cwd];
     if (outputSchema) args.push("--output-schema", outputSchema);
@@ -114,7 +120,14 @@ export class CodexAgentExecutor {
     };
   }
 
-  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "" }) {
+  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "" }: {
+    issue: JiraIssue;
+    runId: string;
+    branchName: string;
+    cwd: string;
+    previousPlan?: import("./model/codex.js").ImplementationPlan | null;
+    specPath?: string;
+  }): Promise<CodexExecutionResult> {
     const task = `You are the only software implementation agent for an AI software factory.\n\n` +
       `Parent Jira issue: ${issue.key}\nSummary: ${issue.fields?.summary || ""}\n` +
       `Description:\n${JSON.stringify(issue.fields?.description || "")}\n` +
@@ -149,21 +162,22 @@ export class CodexAgentExecutor {
   }
 }
 
-function assertExecution(execution) {
+function assertExecution(execution: unknown): ExecutionResult {
   if (!execution || typeof execution !== "object") throw new Error("Implementation result must be an object.");
-  if (!execution.plan || typeof execution.plan !== "object") throw new Error("Implementation result must include a plan.");
-  const plan = execution.plan;
+  const candidate = execution as Partial<ExecutionResult>;
+  if (!candidate.plan || typeof candidate.plan !== "object") throw new Error("Implementation result must include a plan.");
+  const plan = candidate.plan;
   if (typeof plan.summary !== "string") throw new Error("Implementation plan must include a summary.");
   if (!Array.isArray(plan.acceptanceCriteria) || plan.acceptanceCriteria.length === 0) throw new Error("Planner result must include acceptanceCriteria.");
   if (!Array.isArray(plan.risks) || !Array.isArray(plan.files) || !Array.isArray(plan.tests)) {
     throw new Error("Implementation plan must include risks, files, and tests arrays.");
   }
-  if (typeof execution.summary !== "string") throw new Error("Implementation result must include a summary.");
-  if (typeof execution.committed !== "boolean" || typeof execution.pushed !== "boolean") {
+  if (typeof candidate.summary !== "string") throw new Error("Implementation result must include a summary.");
+  if (typeof candidate.committed !== "boolean" || typeof candidate.pushed !== "boolean") {
     throw new Error("Implementation result must confirm committed and pushed.");
   }
-  if (!Array.isArray(execution.tests) || !Array.isArray(execution.blockers)) {
+  if (!Array.isArray(candidate.tests) || !Array.isArray(candidate.blockers)) {
     throw new Error("Implementation result must include tests and blockers arrays.");
   }
-  return execution;
+  return candidate as ExecutionResult;
 }

@@ -1,12 +1,18 @@
 import os from "node:os";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
+import type { FactoryConfig, JiraAdapterKind } from "./model/config.js";
+import type { UnknownRecord } from "./model/common.js";
 
 function localAppData() {
   return process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 }
 
-export function defaultConfig(repoPath = process.cwd()) {
+function resolveConfiguredPath(value: string, baseDir: string) {
+  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(baseDir, value);
+}
+
+export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
   const stateDir = path.join(localAppData(), "AllLlmFactory");
   return {
     repoPath: path.resolve(repoPath),
@@ -20,7 +26,7 @@ export function defaultConfig(repoPath = process.cwd()) {
       branchPrefix: "factory",
     },
     jira: {
-      adapter: process.env.FACTORY_JIRA_ADAPTER || "codex-mcp",
+      adapter: (process.env.FACTORY_JIRA_ADAPTER || "codex-mcp") as JiraAdapterKind,
       baseUrl: process.env.JIRA_BASE_URL || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "KAN",
       email: process.env.JIRA_EMAIL || "",
@@ -41,6 +47,7 @@ export function defaultConfig(repoPath = process.cwd()) {
     git: {
       remote: "origin",
       baseBranch: process.env.FACTORY_BASE_BRANCH || "main",
+      repoPath: path.resolve(repoPath),
     },
     codex: {
       model: process.env.CODEX_MODEL || "gpt-5.6-luna",
@@ -55,30 +62,36 @@ export function defaultConfig(repoPath = process.cwd()) {
   };
 }
 
-function merge(base, override) {
-  if (!override || typeof override !== "object" || Array.isArray(override)) return base;
-  const result = { ...base };
+function isRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function merge<T extends object>(base: T, override: unknown): T {
+  if (!isRecord(override)) return base;
+  const result = { ...base } as unknown as UnknownRecord;
   for (const [key, value] of Object.entries(override)) {
-    if (value && typeof value === "object" && !Array.isArray(value) && result[key] && typeof result[key] === "object") {
-      result[key] = merge(result[key], value);
+    const existing = result[key];
+    if (isRecord(value) && isRecord(existing)) {
+      result[key] = merge(existing, value) as UnknownRecord;
     } else {
       result[key] = value;
     }
   }
-  return result;
+  return result as T;
 }
 
-export async function loadConfig(configPath = process.env.FACTORY_CONFIG, repoPath = process.cwd()) {
+export async function loadConfig(configPath = process.env.FACTORY_CONFIG, repoPath = process.cwd()): Promise<FactoryConfig> {
   const base = defaultConfig(repoPath);
   if (!configPath) return base;
-  const raw = JSON.parse(await readFile(configPath, "utf8"));
+  const raw: unknown = JSON.parse(await readFile(path.resolve(configPath), "utf8"));
   const result = merge(base, raw);
-  result.repoPath = path.resolve(result.repoPath || repoPath);
-  result.stateDir = path.resolve(result.stateDir || base.stateDir);
+  result.repoPath = resolveConfiguredPath(result.repoPath || repoPath, base.repoPath);
+  result.stateDir = resolveConfiguredPath(result.stateDir || base.stateDir, result.repoPath);
+  result.git.repoPath = result.repoPath;
   return result;
 }
 
-export function validateConfig(config, { live = true } = {}) {
+export function validateConfig(config: FactoryConfig, { live = true }: { live?: boolean } = {}): string[] {
   const errors = [];
   if (!config.repoPath) errors.push("repoPath is required");
   if (!config.stateDir) errors.push("stateDir is required");

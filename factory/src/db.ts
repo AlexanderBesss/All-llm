@@ -1,7 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { nowIso } from "./types.mjs";
+import { nowIso } from "./types.js";
+import type { FactoryRun, RunPatch } from "./model/database.js";
 
 export async function openStateDatabase(stateDir) {
   await mkdir(stateDir, { recursive: true });
@@ -67,6 +68,8 @@ export async function openStateDatabase(stateDir) {
 }
 
 export class StateDatabase {
+  db: DatabaseSync;
+
   constructor(db) {
     this.db = db;
   }
@@ -87,16 +90,16 @@ export class StateDatabase {
     }
   }
 
-  getRun(id) {
-    return this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) || null;
+  getRun(id: string): FactoryRun | null {
+    return (this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as unknown as FactoryRun) || null;
   }
 
-  getActiveRunForIssue(issueKey) {
+  getActiveRunForIssue(issueKey: string): FactoryRun | null {
     return this.db.prepare(`
       SELECT * FROM runs
       WHERE issue_key = ? AND status IN ('active', 'retry_wait', 'awaiting_review')
       ORDER BY created_at DESC LIMIT 1
-    `).get(issueKey) || null;
+    `).get(issueKey) as unknown as FactoryRun || null;
   }
 
   acquireLease(id, leaseOwner, leaseUntil) {
@@ -108,8 +111,8 @@ export class StateDatabase {
     return Number(result.changes || 0) === 1;
   }
 
-  listRuns(limit = 20) {
-    return this.db.prepare("SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?").all(limit);
+  listRuns(limit = 20): FactoryRun[] {
+    return this.db.prepare("SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?").all(limit) as unknown as FactoryRun[];
   }
 
   claimRun({ id, issueKey, projectKey, issue, stage, leaseOwner, leaseUntil }) {
@@ -126,7 +129,7 @@ export class StateDatabase {
     });
   }
 
-  updateRun(id, patch) {
+  updateRun(id: string, patch: RunPatch): FactoryRun | null {
     const allowed = new Set([
       "status", "stage", "attempts", "next_attempt_at", "lease_owner", "lease_until",
       "issue_json", "plan_json", "branch_name", "worktree_path", "commit_sha",
@@ -169,12 +172,12 @@ export class StateDatabase {
     ).get(runId, stage).count);
   }
 
-  getLastFailedStage(runId) {
+  getLastFailedStage(runId: string): string | null {
     return this.db.prepare(`
       SELECT stage FROM stage_runs
       WHERE run_id = ? AND status = 'failed'
       ORDER BY id DESC LIMIT 1
-    `).get(runId)?.stage || null;
+    `).get(runId)?.stage as string | undefined || null;
   }
 
   recordArtifact(runId, kind, artifactKey, artifactValue) {
@@ -187,10 +190,10 @@ export class StateDatabase {
     `).run(runId, kind, artifactKey, String(artifactValue), nowIso());
   }
 
-  findArtifact(kind, artifactKey) {
+  findArtifact(kind: string, artifactKey: string): { artifact_value: string } | null {
     return this.db.prepare(
       "SELECT * FROM artifacts WHERE kind = ? AND artifact_key = ?",
-    ).get(kind, artifactKey) || null;
+    ).get(kind, artifactKey) as { artifact_value: string } | null;
   }
 
   recordEvent(runId, eventType, payload) {

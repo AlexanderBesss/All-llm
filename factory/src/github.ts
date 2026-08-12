@@ -1,7 +1,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { runProcess } from "./git.mjs";
-import { assertPullRequestTitle } from "./pull-request-title.mjs";
+import { runProcess } from "./git.js";
+import { assertPullRequestTitle } from "./pull-request-title.js";
+import type { ProcessRunner, ProcessOptions } from "./model/process.js";
+import type { GitHubConfig } from "./model/config.js";
+import type { PullRequest, PullRequestInput } from "./model/github.js";
 
 function parseJson(stdout, operation) {
   try {
@@ -35,15 +38,21 @@ export function resolveGhCommand(explicitCommand = process.env.FACTORY_GH_COMMAN
   const candidates = [
     process.env.ProgramFiles && path.join(process.env.ProgramFiles, "GitHub CLI", "gh.exe"),
     process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Programs", "GitHub CLI", "gh.exe"),
-    "C:\\Program Files\\GitHub CLI\\gh.exe",
   ].filter(Boolean);
   return candidates.find((candidate) => existsSync(candidate)) || "gh.exe";
 }
 
 export class GitHubCliAdapter {
-  constructor(config, processRunner = runProcess) {
+  config: GitHubConfig;
+  processRunner: ProcessRunner;
+  command: string;
+  repository: string;
+  baseBranch: string;
+  host: string;
+
+  constructor(config: GitHubConfig, processRunner?: ProcessRunner) {
     this.config = config;
-    this.processRunner = processRunner;
+    this.processRunner = processRunner || runProcess;
     this.command = resolveGhCommand(config.cliCommand);
     this.repository = config.repositoryFullName;
     this.baseBranch = config.baseBranch || "main";
@@ -54,7 +63,7 @@ export class GitHubCliAdapter {
     return Boolean(this.repository);
   }
 
-  async run(args, options = {}) {
+  async run(args: string[], options: ProcessOptions = {}) {
     return this.processRunner(this.command, args, {
       ...options,
       cwd: options.cwd || this.config.repoPath || process.cwd(),
@@ -95,7 +104,7 @@ export class GitHubCliAdapter {
     return existing ? normalizePullRequest(existing, branchName) : null;
   }
 
-  async createPullRequest({ title, taskNumber, taskName, taskType, body, head, base }) {
+  async createPullRequest({ title, taskNumber, taskName, taskType, body, head, base }: PullRequestInput): Promise<PullRequest> {
     const validatedTitle = assertPullRequestTitle(title, { taskNumber, taskName, taskType });
     const targetBase = base || this.baseBranch;
     const existing = await this.findOpenPullRequest(head);
@@ -134,13 +143,15 @@ export class GitHubCliAdapter {
 }
 
 export class InMemoryGitHubAdapter {
+  pullRequests: PullRequest[];
+
   constructor() {
     this.pullRequests = [];
   }
 
   enabled() { return true; }
 
-  async createPullRequest(input) {
+  async createPullRequest(input: PullRequestInput): Promise<PullRequest> {
     const validatedTitle = assertPullRequestTitle(input.title, input);
     const existing = this.pullRequests.find((pr) => pr.head.ref === input.head);
     if (existing) {

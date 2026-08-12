@@ -1,8 +1,11 @@
-import { assertNonEmpty } from "./types.mjs";
+import { assertNonEmpty } from "./types.js";
+import type { JiraApiResponse, JiraFetch, JiraIssue, JiraIssueLike, JiraTransition } from "./model/jira.js";
+import type { JiraConfig } from "./model/config.js";
+import type { JsonValue } from "./model/common.js";
 
 export const BOARD_TRIGGER_JQL = "sprint IS NOT EMPTY";
 
-export function isIssueOnBoard(issue) {
+export function isIssueOnBoard(issue: JiraIssueLike) {
   const sprint = issue?.fields?.sprint ?? issue?.fields?.customfield_10020 ?? issue?.sprint;
   if (Array.isArray(sprint)) return sprint.length > 0;
   if (sprint && typeof sprint === "object") return Object.keys(sprint).length > 0;
@@ -10,6 +13,9 @@ export function isIssueOnBoard(issue) {
 }
 
 export class JiraApiError extends Error {
+  status: number;
+  body: unknown;
+
   constructor(message, status, body) {
     super(message);
     this.name = "JiraApiError";
@@ -19,6 +25,9 @@ export class JiraApiError extends Error {
 }
 
 export class JiraIssueNotFoundError extends Error {
+  code: string;
+  issueKey: string;
+
   constructor(issueKey, cause = undefined) {
     super(`Jira issue ${issueKey} no longer exists.`, { cause });
     this.name = "JiraIssueNotFoundError";
@@ -27,7 +36,7 @@ export class JiraIssueNotFoundError extends Error {
   }
 }
 
-export function textToAdf(value) {
+export function textToAdf(value: unknown) {
   const text = String(value ?? "");
   const lines = text.split(/\r?\n/);
   return {
@@ -42,7 +51,7 @@ export function textToAdf(value) {
   };
 }
 
-export function adfToText(value) {
+export function adfToText(value: unknown) {
   if (!value) return "";
   if (typeof value === "string") return value;
   const result = [];
@@ -57,7 +66,12 @@ export function adfToText(value) {
 }
 
 export class JiraRestAdapter {
-  constructor(config, fetchImpl = globalThis.fetch) {
+  config: JiraConfig;
+  fetch: JiraFetch;
+  baseUrl: string;
+  auth: string;
+
+  constructor(config: JiraConfig, fetchImpl: JiraFetch = globalThis.fetch as JiraFetch) {
     this.config = config;
     this.fetch = fetchImpl;
     this.baseUrl = String(config.baseUrl || "").replace(/\/+$/, "");
@@ -70,7 +84,7 @@ export class JiraRestAdapter {
     return Boolean(this.baseUrl && this.auth && this.config.projectKey);
   }
 
-  async request(method, endpoint, body = undefined, { searchParams } = {}) {
+  async request(method: string, endpoint: string, body: unknown = undefined, { searchParams }: { searchParams?: Record<string, unknown> } = {}): Promise<JiraApiResponse> {
     assertNonEmpty(this.baseUrl, "Jira base URL");
     const url = new URL(`${this.baseUrl}${endpoint}`);
     for (const [key, value] of Object.entries(searchParams || {})) {
@@ -92,10 +106,10 @@ export class JiraRestAdapter {
     if (!response.ok) {
       throw new JiraApiError(`Jira ${method} ${endpoint} failed (${response.status})`, response.status, parsed);
     }
-    return parsed;
+    return (parsed && typeof parsed === "object" ? parsed : {}) as JiraApiResponse;
   }
 
-  async search(jql, fields = ["summary", "description", "status", "issuetype", "labels", "parent", "project"]) {
+  async search(jql: string, fields = ["summary", "description", "status", "issuetype", "labels", "parent", "project"]): Promise<JiraIssue[]> {
     const result = await this.request("POST", "/rest/api/3/search/jql", {
       jql,
       maxResults: 50,
@@ -111,18 +125,18 @@ export class JiraRestAdapter {
     return this.search(jql);
   }
 
-  async getIssue(issueKey) {
+  async getIssue(issueKey: string): Promise<JiraIssue> {
     try {
       return await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, undefined, {
         searchParams: { fields: "summary,description,status,issuetype,labels,parent,project,comment" },
-      });
+      }) as unknown as JiraIssue;
     } catch (error) {
       if (error?.status === 404) throw new JiraIssueNotFoundError(issueKey, error);
       throw error;
     }
   }
 
-  async getTransitions(issueKey) {
+  async getTransitions(issueKey: string): Promise<JiraTransition[]> {
     const result = await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(issueKey)}/transitions`);
     return result?.transitions || [];
   }
@@ -143,7 +157,7 @@ export class JiraRestAdapter {
     });
   }
 
-  async updateIssue(issueKey, fields) {
+  async updateIssue(issueKey: string, fields: Record<string, unknown>) {
     return this.request("PUT", `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, { fields });
   }
 
@@ -160,7 +174,11 @@ export class JiraRestAdapter {
 }
 
 export class InMemoryJiraAdapter {
-  constructor(issues = []) {
+  issues: Map<string, JiraIssue>;
+  comments: Array<{ issueKey: string; body: string }>;
+  transitions: Array<{ key: string; statusName: string }>;
+
+  constructor(issues: JiraIssue[] = []) {
     this.issues = new Map(issues.map((issue) => [issue.key, structuredClone(issue)]));
     this.comments = [];
     this.transitions = [];
@@ -168,7 +186,7 @@ export class InMemoryJiraAdapter {
 
   enabled() { return true; }
 
-  async searchReady() {
+  async searchReady(): Promise<JiraIssue[]> {
     return [...this.issues.values()].filter((issue) =>
       issue.fields?.status?.name === "Ready" && isIssueOnBoard(issue));
   }

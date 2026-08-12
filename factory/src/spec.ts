@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { adfToText } from "./jira.mjs";
+import { adfToText } from "./jira.js";
 
 const SPEC_DIRECTORY = "specs";
 

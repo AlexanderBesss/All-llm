@@ -1,34 +1,43 @@
 import crypto from "node:crypto";
 import path from "node:path";
-import { abortError, isAbortError } from "./git.mjs";
-import { adfToText } from "./jira.mjs";
-import { buildPullRequestTitle } from "./pull-request-title.mjs";
-import { ensureSpecFile } from "./spec.mjs";
-import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.mjs";
+import { abortError, isAbortError } from "./git.js";
+import { adfToText } from "./jira.js";
+import { buildPullRequestTitle } from "./pull-request-title.js";
+import { ensureSpecFile } from "./spec.js";
+import { formatFactoryLog, makeRunId, makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart } from "./types.js";
+import type { FactoryRun } from "./model/database.js";
+import type { FactoryConfig } from "./model/config.js";
+import type { CodexAgent, ImplementationPlan } from "./model/codex.js";
+import type { GitAdapterLike } from "./model/git.js";
+import type { GitHubAdapter } from "./model/github.js";
+import type { JiraAdapter, JiraIssue } from "./model/jira.js";
+import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 
-function hashInput(value) {
+function hashInput(value: unknown): string {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function due(value) {
+function due(value: string | null | undefined): boolean {
   return !value || new Date(value).getTime() <= Date.now();
 }
 
-function isJiraIssueMissing(error) {
-  return error?.code === "JIRA_ISSUE_NOT_FOUND" || error?.status === 404;
+function isJiraIssueMissing(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: string; status?: number };
+  return candidate.code === "JIRA_ISSUE_NOT_FOUND" || candidate.status === 404;
 }
 
-function nextRetryAt(backoffMs, attempts) {
+function nextRetryAt(backoffMs: number, attempts: number): string {
   return new Date(Date.now() + backoffMs * (2 ** Math.max(0, attempts - 1))).toISOString();
 }
 
-function resumableStage(stage) {
+function resumableStage(stage: string | null): boolean {
   return stage === STAGES.IMPLEMENTATION || stage === STAGES.PULL_REQUEST;
 }
 
 async function sleep(ms, signal) {
   if (signal?.aborted) throw abortError("Factory shutdown requested.");
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
@@ -42,29 +51,30 @@ async function sleep(ms, signal) {
   });
 }
 
-function normalizePlan(plan) {
+function normalizePlan(plan: unknown): ImplementationPlan {
   if (!plan || typeof plan !== "object") throw new Error("Planner result must be an object.");
-  if (typeof plan.summary !== "string" || !plan.summary.trim()) throw new Error("Implementation plan must include a summary.");
-  if (!Array.isArray(plan.acceptanceCriteria) || plan.acceptanceCriteria.length === 0) {
+  const candidate = plan as Partial<ImplementationPlan>;
+  if (typeof candidate.summary !== "string" || !candidate.summary.trim()) throw new Error("Implementation plan must include a summary.");
+  if (!Array.isArray(candidate.acceptanceCriteria) || candidate.acceptanceCriteria.length === 0) {
     throw new Error("Implementation plan must include acceptanceCriteria.");
   }
   return {
-    summary: plan.summary,
-    acceptanceCriteria: plan.acceptanceCriteria,
-    risks: Array.isArray(plan.risks) ? plan.risks : [],
-    files: Array.isArray(plan.files) ? plan.files : [],
-    tests: Array.isArray(plan.tests) ? plan.tests : [],
+    summary: candidate.summary,
+    acceptanceCriteria: candidate.acceptanceCriteria.map(String),
+    risks: Array.isArray(candidate.risks) ? candidate.risks.map(String) : [],
+    files: Array.isArray(candidate.files) ? candidate.files.map(String) : [],
+    tests: Array.isArray(candidate.tests) ? candidate.tests.map(String) : [],
   };
 }
 
-function quotedDescription(description) {
+function quotedDescription(description: unknown): string {
   return adfToText(description)
     .split(/\r?\n/)
     .map((line) => `> ${line}`)
     .join("\n");
 }
 
-function planDescription(originalDescription, plan, marker, specPath = "") {
+function planDescription(originalDescription: unknown, plan: ImplementationPlan, marker: string, specPath = ""): string {
   return [
     quotedDescription(originalDescription),
     "",
@@ -86,7 +96,17 @@ function planDescription(originalDescription, plan, marker, specPath = "") {
 }
 
 export class FactoryWorker {
-  constructor({ config, db, jira, github, git, agent, logger = console, signal }) {
+  config: FactoryConfig;
+  db: FactoryWorkerOptions["db"];
+  jira: JiraAdapter;
+  github: GitHubAdapter;
+  git: GitAdapterLike;
+  agent: CodexAgent;
+  logger: FactoryLogger;
+  signal?: AbortSignal;
+  leaseOwner: string;
+
+  constructor({ config, db, jira, github, git, agent, logger = console, signal }: FactoryWorkerOptions) {
     this.config = config;
     this.db = db;
     this.jira = jira;
@@ -102,12 +122,12 @@ export class FactoryWorker {
     if (this.signal?.aborted) throw abortError("Factory shutdown requested.");
   }
 
-  log(level, event, details = undefined) {
+  log(level: keyof FactoryLogger, event: string, details?: Record<string, unknown>) {
     const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
     this.logger[level]?.(formatFactoryLog(`${event}${suffix}`));
   }
 
-  runResult(action, run, issueKey) {
+  runResult(action: string, run: FactoryRun | null, issueKey?: string): FactoryRunResult {
     const effectiveAction = run?.status === RUN_STATUSES.RETRY_WAIT
       ? "retry_scheduled"
       : run?.status === RUN_STATUSES.BLOCKED
@@ -123,7 +143,7 @@ export class FactoryWorker {
     };
   }
 
-  async runOnce({ dryRun = false } = {}) {
+  async runOnce({ dryRun = false }: { dryRun?: boolean } = {}): Promise<FactoryRunResult> {
     this.throwIfStopping();
     this.log("info", "poll:start", { dryRun });
     this.db.reapExpiredLeases();
@@ -315,7 +335,7 @@ export class FactoryWorker {
 
   async processImplementation(run, { dryRun }) {
     this.throwIfStopping();
-    const issue = JSON.parse(run.issue_json);
+      const issue = JSON.parse(run.issue_json) as JiraIssue;
     const branchName = run.branch_name || `${this.config.factory.branchPrefix}/${sanitizeBranchPart(run.issue_key)}`;
     const worktreePath = run.worktree_path || path.join(this.config.stateDir, "worktrees", run.id);
     this.log("info", "implementation:start", {

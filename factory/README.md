@@ -24,8 +24,9 @@ type is normalized to one of those three supported values. A pull request is
 rejected if any required part is missing or if an existing open pull request has
 an invalid title.
 
-The factory root contains operational files and documentation. Runtime modules,
-schemas, and tests live under `factory/src/`.
+The factory root contains operational files and documentation. TypeScript runtime
+modules, schemas, and tests live under `factory/src/`; TypeScript 7 emits runnable
+JavaScript and declarations into `factory/dist/`.
 
 ## Specification-driven runs
 
@@ -56,6 +57,12 @@ repository. The worker also accepts `FACTORY_JIRA_ADAPTER`,
 variables. `FACTORY_GITHUB_PROVIDER` and `FACTORY_GH_COMMAND` are optional.
 `JIRA_BASE_URL`, `JIRA_EMAIL`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
+
+`repoPath` may be relative; it is resolved from the detected repository root.
+`stateDir` may also be relative and is resolved from the configured repository
+path. Omit `stateDir` to use the per-user `%LOCALAPPDATA%\AllLlmFactory`
+default. The example uses `"repoPath": "."`, so it remains portable across
+machines.
 
 In the default `codex-mcp` mode, the connected Atlassian MCP identity needs
 permission to search, edit, comment, and transition issues. The
@@ -106,11 +113,13 @@ PR review in place.
 
 ## Commands
 
-From the repository root, use the existing `npm run factory:*` scripts. To run
-the factory as a standalone npm project, change into this directory first:
+The factory is the repository's only npm project. Change into this directory
+before installing dependencies or running commands:
 
 ```powershell
 cd factory
+npm install
+npm run build
 npm run doctor
 npm start
 npm test

@@ -1,22 +1,24 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, validateConfig } from "./config.mjs";
-import { openStateDatabase } from "./db.mjs";
-import { JiraRestAdapter } from "./jira.mjs";
-import { CodexJiraAdapter } from "./codex-jira.mjs";
-import { GitHubCliAdapter } from "./github.mjs";
-import { GitAdapter, isAbortError, runProcess } from "./git.mjs";
-import { CodexAgentExecutor } from "./codex.mjs";
-import { formatFactoryLog } from "./types.mjs";
-import { FactoryWorker, runLoop } from "./worker.mjs";
+import { loadConfig, validateConfig } from "./config.js";
+import { openStateDatabase } from "./db.js";
+import { JiraRestAdapter } from "./jira.js";
+import { CodexJiraAdapter } from "./codex-jira.js";
+import { GitHubCliAdapter } from "./github.js";
+import { GitAdapter, isAbortError, runProcess } from "./git.js";
+import { CodexAgentExecutor } from "./codex.js";
+import { formatFactoryLog } from "./types.js";
+import { FactoryWorker, runLoop } from "./worker.js";
+import type { FactoryConfig, GitConfig, GitHubConfig, JiraConfig } from "./model/config.js";
+import type { CheckReport, CliArgs, DoctorReport, RepositoryCheck } from "./model/cli.js";
 
 function defaultRepoPath() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
-function parseArgs(argv) {
-  const result = { command: argv[0] || "help" };
+function parseArgs(argv: string[]): CliArgs {
+  const result: CliArgs = { command: argv[0] || "help" };
   for (let i = 1; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--config") result.config = argv[++i];
@@ -27,7 +29,7 @@ function parseArgs(argv) {
   return result;
 }
 
-function normalizedJiraConfig(config, signal) {
+function normalizedJiraConfig(config: FactoryConfig, signal?: AbortSignal): JiraConfig {
   return {
     ...config.jira,
     repoPath: config.repoPath,
@@ -36,7 +38,7 @@ function normalizedJiraConfig(config, signal) {
   };
 }
 
-function normalizedGitConfig(config, signal) {
+function normalizedGitConfig(config: FactoryConfig, signal?: AbortSignal): GitConfig {
   return {
     ...config.git,
     repoPath: config.repoPath,
@@ -45,7 +47,7 @@ function normalizedGitConfig(config, signal) {
   };
 }
 
-function normalizedGitHubConfig(config, signal) {
+function normalizedGitHubConfig(config: FactoryConfig, signal?: AbortSignal): GitHubConfig {
   return {
     ...config.github,
     baseBranch: config.git.baseBranch,
@@ -53,7 +55,7 @@ function normalizedGitHubConfig(config, signal) {
   };
 }
 
-async function makeWorker(config, signal) {
+async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
   const git = new GitAdapter(normalizedGitConfig(config, signal));
   await git.syncBaseBranch();
   const db = await openStateDatabase(config.stateDir);
@@ -64,7 +66,7 @@ async function makeWorker(config, signal) {
     const jira = config.jira.adapter === "rest"
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
       : new CodexJiraAdapter(normalizedJiraConfig(config, signal), agent);
-    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent }) };
+    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, signal }) };
   } catch (error) {
     db.close();
     throw error;
@@ -75,7 +77,7 @@ function redactRemoteUrl(value) {
   return String(value || "").replace(/(https?:\/\/)[^/@]+@/i, "$1[redacted]@");
 }
 
-async function checkGitTool(config) {
+async function checkGitTool(config: FactoryConfig): Promise<CheckReport> {
   try {
     const result = await runProcess("git", ["--version"], { cwd: config.repoPath, timeoutMs: 10_000 });
     return { ok: true, version: result.stdout.trim() };
@@ -84,8 +86,8 @@ async function checkGitTool(config) {
   }
 }
 
-async function checkRepository(config) {
-  const report = {
+async function checkRepository(config: FactoryConfig): Promise<RepositoryCheck> {
+  const report: RepositoryCheck = {
     path: config.repoPath,
     remoteName: config.git.remote,
     baseBranch: config.git.baseBranch,
@@ -148,7 +150,7 @@ async function checkRepository(config) {
   return report;
 }
 
-async function checkStateDatabase(config) {
+async function checkStateDatabase(config: FactoryConfig): Promise<CheckReport> {
   try {
     const db = await openStateDatabase(config.stateDir);
     db.close();
@@ -158,7 +160,7 @@ async function checkStateDatabase(config) {
   }
 }
 
-async function checkCodex(config) {
+async function checkCodex(config: FactoryConfig): Promise<CheckReport> {
   try {
     const codex = new CodexAgentExecutor(config);
     return { ok: true, ...(await codex.health()) };
@@ -167,7 +169,7 @@ async function checkCodex(config) {
   }
 }
 
-async function checkGitHub(config) {
+async function checkGitHub(config: FactoryConfig): Promise<CheckReport> {
   const github = new GitHubCliAdapter(normalizedGitHubConfig(config));
   const report = {
     configured: Boolean(config.github.repositoryFullName),
@@ -183,7 +185,7 @@ async function checkGitHub(config) {
   }
 }
 
-function checkJira(config, codexCheck) {
+function checkJira(config: FactoryConfig, codexCheck: CheckReport): CheckReport {
   if (config.jira.adapter === "codex-mcp") {
     const mcpRegistered = codexCheck.ok === true && codexCheck.mcp === "Atlassian-Rovo-MCP";
     const configured = Boolean(config.jira.projectKey);
@@ -209,9 +211,9 @@ function checkJira(config, codexCheck) {
   };
 }
 
-async function commandDoctor(config) {
+async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
   const liveErrors = validateConfig(config, { live: true });
-  const report = {
+  const report: DoctorReport = {
     repoPath: config.repoPath,
     stateDir: config.stateDir,
     model: config.codex.model,
@@ -255,7 +257,7 @@ async function commandDoctor(config) {
   return report;
 }
 
-async function commandStatus(config, asJson) {
+async function commandStatus(config: FactoryConfig, asJson = false) {
   const db = await openStateDatabase(config.stateDir);
   const rows = db.listRuns(50);
   db.close();
@@ -264,16 +266,16 @@ async function commandStatus(config, asJson) {
   else console.table(rows.map((row) => ({ id: row.id, issue: row.issue_key, status: row.status, stage: row.stage, pr: row.pr_url || "", error: row.last_error || "" })));
 }
 
-async function commandInstall(config) {
+async function commandInstall(config: FactoryConfig) {
   const scriptPath = path.join(config.repoPath, "factory", "install-task.ps1");
   console.log(`Run this command from an elevated PowerShell prompt to install the restartable worker:\n\n  & '${scriptPath}' -RepoPath '${config.repoPath}' -ConfigPath '${process.env.FACTORY_CONFIG || ""}'`);
 }
 
-export async function main(argv = process.argv.slice(2)) {
+export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
   if (args.command === "help") {
-    console.log("Usage: node factory/src/cli.mjs <doctor|run-once|start|status|install> [--config path] [--dry-run] [--json]");
+    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|status|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
   if (args.command === "doctor") {

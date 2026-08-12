@@ -1,6 +1,5 @@
 {
-  "repoPath": "C:/projects/All-llm",
-  "stateDir": "C:/Users/REPLACE/AppData/Local/AllLlmFactory",
+  "repoPath": ".",
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
   "maxAttempts": 1,

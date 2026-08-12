@@ -5,7 +5,7 @@ param(
 )
 
 $resolvedRepo = (Resolve-Path -LiteralPath $RepoPath).Path
-$cli = Join-Path $resolvedRepo "factory\src\cli.mjs"
+$cli = Join-Path $resolvedRepo "factory\dist\cli.js"
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $arguments = "`"$cli`" start"
 if ($ConfigPath) { $arguments += " --config `"$ConfigPath`"" }

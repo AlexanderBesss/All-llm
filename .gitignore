@@ -14,3 +14,5 @@
 .venv
 /factory/config.local.json
 /factory/worktrees/
+/factory/dist/
+node_modules/

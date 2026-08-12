@@ -3,21 +3,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "factory": "node src/cli.mjs",
-    "start": "node src/cli.mjs start",
-    "run-once": "node src/cli.mjs run-once",
-    "dry-run": "node src/cli.mjs run-once --dry-run",
-    "doctor": "node src/cli.mjs doctor",
-    "status": "node src/cli.mjs status",
-    "status:json": "node src/cli.mjs status --json",
-    "install-task": "node src/cli.mjs install",
-    "test": "node --test src/tests/factory.test.mjs",
-    "factory:start": "node src/cli.mjs start",
-    "factory:run-once": "node src/cli.mjs run-once",
-    "factory:dry-run": "node src/cli.mjs run-once --dry-run",
-    "factory:doctor": "node src/cli.mjs doctor",
-    "factory:status": "node src/cli.mjs status",
-    "factory:install": "node src/cli.mjs install",
-    "factory:test": "node --test src/tests/factory.test.mjs"
+    "clean": "node scripts/clean-dist.js",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "factory": "npm run build && node dist/cli.js",
+    "start": "npm run build && node dist/cli.js start",
+    "run-once": "npm run build && node dist/cli.js run-once",
+    "dry-run": "npm run build && node dist/cli.js run-once --dry-run",
+    "doctor": "npm run build && node dist/cli.js doctor",
+    "status": "npm run build && node dist/cli.js status",
+    "status:json": "npm run build && node dist/cli.js status --json",
+    "install-task": "npm run build && node dist/cli.js install",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "npm:typescript@^7.0.2"
   }
 }

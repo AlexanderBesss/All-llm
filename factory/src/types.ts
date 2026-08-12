@@ -20,20 +20,20 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
-export function formatFactoryLog(message, timestamp = Date.now()) {
+export function formatFactoryLog(message: string, timestamp = Date.now()) {
   return `[${new Date(timestamp).toISOString()}] [factory] ${message}`;
 }
 
-export function makeRunId(issueKey, clock = Date.now()) {
+export function makeRunId(issueKey: string, clock = Date.now()) {
   const safeKey = String(issueKey).replace(/[^A-Za-z0-9_-]+/g, "-");
   return `${safeKey}-${clock.toString(36)}`;
 }
 
-export function makeRunMarker(runId) {
+export function makeRunMarker(runId: string) {
   return `[factory-run:${runId}]`;
 }
 
-export function sanitizeBranchPart(value) {
+export function sanitizeBranchPart(value: string) {
   const result = String(value)
     .trim()
     .replace(/[^A-Za-z0-9._/-]+/g, "-")
@@ -42,7 +42,7 @@ export function sanitizeBranchPart(value) {
   return result || "work";
 }
 
-export function assertNonEmpty(value, name) {
+export function assertNonEmpty(value: unknown, name: string) {
   if (value == null || String(value).trim() === "") {
     throw new Error(`${name} is required.`);
   }
