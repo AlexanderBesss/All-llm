@@ -8,7 +8,7 @@ import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError, runProcess } from "./git.js";
 import { createAgentExecutors, createAgentStrategy } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
-import { FactoryWorker, runLoop } from "./worker.js";
+import { FactoryWorker, runLoop, runMergeCheckLoop } from "./worker.js";
 import { CliCommand } from "./model/cli.js";
 import { AgentProvider, JiraAdapterKind } from "./model/config.js";
 import type { CheckReport, CliArgs, DoctorReport, RepositoryCheck } from "./model/cli.js";
@@ -360,7 +360,12 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   try {
     ({ db, worker: runtimeWorker } = await makeWorker(config, controller.signal));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
-    else await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
+    else {
+      await Promise.all([
+        runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
+        runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),
+      ]);
+    }
   } finally {
     shutdownSignals.forEach((name) => process.removeListener(name, onShutdown));
     db?.close();

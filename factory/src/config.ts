@@ -21,6 +21,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     repoPath: resolvedRepoPath,
     stateDir,
     pollIntervalMs: 60_000,
+    mergeCheckIntervalMs: 5 * 60_000,
     leaseMs: 15 * 60_000,
     maxAttempts: Number(process.env.FACTORY_MAX_ATTEMPTS || 1),
     continueFailedTasks: process.env.FACTORY_CONTINUE_FAILED_TASKS !== "false",

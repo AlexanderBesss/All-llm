@@ -485,6 +485,9 @@ test("pull request retries are idempotent after a GitHub outage", async () => {
       if (githubAttempts === 1) throw new Error("GitHub rate limit");
       return fixtureData.github.createPullRequest(input);
     },
+    async getPullRequest(prNumber) {
+      return fixtureData.github.getPullRequest(prNumber);
+    },
   };
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
   worker.github = github;
@@ -493,5 +496,40 @@ test("pull request retries are idempotent after a GitHub outage", async () => {
   await worker.runOnce();
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("merged pull request auto-closes the task and marks run completed", async () => {
+  const fixtureData = await fixture();
+  const worker = makeWorker(
+    fixtureData,
+    { async execute() { return { result: executionFor(), raw: {} }; } },
+    { events: [], logs: [] }
+  );
+  const result = await worker.runOnce();
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  const run = fixtureData.db.getRun(result.runId);
+  assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
+  await fixtureData.github.mergePullRequest(run.pr_number);
+  const checkResult = await worker.checkMergedPullRequests();
+  assert.equal(checkResult.closed, 1);
+  assert.equal(fixtureData.db.getRun(result.runId).status, RUN_STATUSES.COMPLETED);
+  assert.ok(fixtureData.jira.comments.find(c => c.body.includes("Task auto-closed")));
+  fixtureData.db.close();
+});
+
+test("merge check skips pull requests that are not yet merged", async () => {
+  const fixtureData = await fixture();
+  const worker = makeWorker(
+    fixtureData,
+    { async execute() { return { result: executionFor(), raw: {} }; } },
+    { events: [], logs: [] }
+  );
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+  assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
+  const checkResult = await worker.checkMergedPullRequests();
+  assert.equal(checkResult.closed, 0);
+  assert.equal(fixtureData.db.getRun(result.runId).status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
 });

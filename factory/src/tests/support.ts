@@ -109,6 +109,9 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [], reviewe
       events.push("pull-request");
       return fixtureData.github.createPullRequest(input);
     },
+    async getPullRequest(prNumber) {
+      return fixtureData.github.getPullRequest(prNumber);
+    },
   };
   return new FactoryWorker({
     ...fixtureData,

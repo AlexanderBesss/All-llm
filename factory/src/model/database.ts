@@ -64,4 +64,5 @@ export interface StateDatabaseLike {
   recordArtifact(runId: string, kind: string, artifactKey: string, artifactValue: string): void;
   findArtifact(kind: string, artifactKey: string): { artifact_value: string } | null;
   recordEvent(runId: string, eventType: string, payload: unknown): void;
+  getAwaitingReviewRuns(limit?: number): FactoryRun[];
 }
