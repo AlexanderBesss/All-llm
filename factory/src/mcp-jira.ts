@@ -18,7 +18,7 @@ function normalizeIssue(item: JiraSearchItem): JiraIssue {
   return { key: item.key, fields };
 }
 
-export class CodexJiraAdapter {
+export class McpJiraAdapter {
   config: JiraConfig;
   executor: JiraExecutor;
   issuesSchema: string;
@@ -49,7 +49,7 @@ export class CodexJiraAdapter {
     const status = String(this.config.readyStatus || "Ready").replace(/"/g, '\\"');
     const project = String(this.config.projectKey || "").replace(/[^A-Za-z0-9_-]/g, "");
     const result = await this.structured(
-      `Use the connected Atlassian-Rovo-MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema, including sprint metadata when available. Do not filter by labels.`,
+      `Use the configured Jira MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema, including sprint metadata when available. Do not filter by labels.`,
       this.issuesSchema,
     );
     return (result.issues || []).map(normalizeIssue);
@@ -57,7 +57,7 @@ export class CodexJiraAdapter {
 
   async getIssue(issueKey) {
     const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to read exactly Jira issue ${issueKey}. Return that one issue normalized to the requested JSON schema. Do not search broadly.`,
+      `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. Return that one issue normalized to the requested JSON schema. Do not search broadly.`,
       this.issuesSchema,
     );
     const item = result.issues?.[0];
@@ -67,29 +67,28 @@ export class CodexJiraAdapter {
 
   async transition(issueKey, statusName) {
     const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
+      `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
       this.mutationSchema,
     );
-    if (!result.ok) throw new Error(`Codex Jira transition failed for ${issueKey}: ${result.details || "unknown error"}`);
+    if (!result.ok) throw new Error(`Jira transition failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
   }
 
   async updateDescription(issueKey, description) {
     const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to replace the description of Jira issue ${issueKey} with this exact text:\n\n${description}\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
+      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey} with this exact text:\n\n${description}\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
       this.mutationSchema,
     );
-    if (!result.ok) throw new Error(`Codex Jira description update failed for ${issueKey}: ${result.details || "unknown error"}`);
+    if (!result.ok) throw new Error(`Jira description update failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
   }
 
   async addComment(issueKey, body) {
     const result = await this.structured(
-      `Use Atlassian-Rovo-MCP to add exactly one comment to Jira issue ${issueKey} with this exact body:\n\n${body}\n\nReturn ok=true only after the comment succeeds. Do not change any other issue.`,
+      `Use the configured Jira MCP server to add exactly one comment to Jira issue ${issueKey} with this exact body:\n\n${body}\n\nReturn ok=true only after the comment succeeds. Do not change any other issue.`,
       this.mutationSchema,
     );
-    if (!result.ok) throw new Error(`Codex Jira comment failed for ${issueKey}: ${result.details || "unknown error"}`);
+    if (!result.ok) throw new Error(`Jira comment failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
   }
-
 }

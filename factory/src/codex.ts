@@ -115,7 +115,7 @@ export class CodexAgentExecutor {
     }
   }
 
-  async health(): Promise<{ command: string; version: string; codexHome?: string; mcp?: string; model?: string; config?: string }> {
+  async health({ requireJiraMcp = true }: { requireJiraMcp?: boolean } = {}): Promise<{ command: string; version: string; codexHome?: string; mcp?: string; model?: string; config?: string }> {
     const invocation = this.invocation();
     const version = await this.processRunner(invocation.command, [...invocation.prefix, "--version"], {
       cwd: this.config.repoPath,
@@ -123,6 +123,12 @@ export class CodexAgentExecutor {
       signal: this.config.signal,
       env: this.runtimeEnv(),
     });
+    const result = {
+      command: invocation.command,
+      version: version.stdout.trim(),
+      codexHome: this.runtimeEnv().CODEX_HOME,
+    };
+    if (!requireJiraMcp) return result;
     const mcp = await this.processRunner(invocation.command, [...invocation.prefix, "mcp", "list"], {
       cwd: this.config.repoPath,
       timeoutMs: 30_000,
@@ -133,12 +139,7 @@ export class CodexAgentExecutor {
     if (!mcpOutput.includes("Atlassian-Rovo-MCP")) {
       throw new Error("Codex MCP registry does not contain Atlassian-Rovo-MCP.");
     }
-    return {
-      command: invocation.command,
-      version: version.stdout.trim(),
-      codexHome: this.runtimeEnv().CODEX_HOME,
-      mcp: "Atlassian-Rovo-MCP",
-    };
+    return { ...result, mcp: "Atlassian-Rovo-MCP" };
   }
 
   async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "" }: {

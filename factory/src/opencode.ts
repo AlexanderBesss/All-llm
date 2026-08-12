@@ -58,9 +58,20 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
   }
 
   runtimeEnv() {
+    const configuredPath = this.config.opencode?.configPath || "opencode.json";
+    const configPath = path.isAbsolute(configuredPath)
+      ? path.normalize(configuredPath)
+      : path.resolve(this.config.repoPath, configuredPath);
+    const configHome = this.config.stateDir
+      ? path.join(this.config.stateDir, "opencode-config")
+      : undefined;
     return {
       ...process.env,
       CODEX_HOME: process.env.CODEX_HOME || "",
+      OPENCODE_CONFIG: process.env.OPENCODE_CONFIG || configPath,
+      // Keep OpenCode config discovery isolated from a stale global Windows
+      // config directory while preserving the user's data/auth location.
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || configHome,
       // `--auto` handles prompts; this setting grants the build agent the
       // same unattended tool access as the Codex strategy.
       OPENCODE_PERMISSION: process.env.OPENCODE_PERMISSION || JSON.stringify("allow"),
@@ -89,7 +100,14 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     return parseOpenCodeOutput(result.stdout);
   }
 
-  async health() {
+  async health({ requireJiraMcp = true }: { requireJiraMcp?: boolean } = {}): Promise<{
+    command: string;
+    version: string;
+    model?: string;
+    config?: string;
+    mcp?: string;
+    mcpStatus?: string;
+  }> {
     const invocation = this.invocation();
     const version = await this.processRunner(invocation.command, ["--version"], {
       cwd: this.config.repoPath,
@@ -97,11 +115,34 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
       signal: this.config.signal,
       env: this.runtimeEnv(),
     });
-    return {
+    const result = {
       command: invocation.command,
       version: version.stdout.trim(),
       model: this.config.opencode?.model,
-      config: path.join(this.config.repoPath, "opencode.json"),
+      config: this.runtimeEnv().OPENCODE_CONFIG,
     };
+    if (!requireJiraMcp) return result;
+    const mcp = await this.processRunner(invocation.command, ["mcp", "list"], {
+      cwd: this.config.repoPath,
+      timeoutMs: 30_000,
+      signal: this.config.signal,
+      env: this.runtimeEnv(),
+    });
+    const mcpOutput = `${mcp.stdout || ""}\n${mcp.stderr || ""}`;
+    const jiraLine = mcpOutput.split(/\r?\n/).find((line) => /(^|\s|[|])jira(\s|$|[|])/i.test(line));
+    if (!jiraLine) {
+      throw new Error("OpenCode MCP configuration does not contain the configured Jira server 'jira'.");
+    }
+    const mcpStatus = /needs authentication|needs auth/i.test(jiraLine)
+      ? "needs-authentication"
+      : /connected/i.test(jiraLine)
+        ? "connected"
+        : /failed|error/i.test(jiraLine)
+          ? "failed"
+          : "unknown";
+    if (mcpStatus !== "connected") {
+      throw new Error(`OpenCode Jira MCP server 'jira' is ${mcpStatus}.`);
+    }
+    return { ...result, mcp: "jira", mcpStatus };
   }
 }

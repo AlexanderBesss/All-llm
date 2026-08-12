@@ -51,11 +51,15 @@ Factory log lines begin with an ISO-8601 UTC timestamp, for example
 
 ## Configure
 
-Copy `config.example.json` to a user-owned location outside the repository and
-set `FACTORY_CONFIG` to that path. Keep Jira and GitHub credentials out of the
-repository. The worker also accepts `FACTORY_JIRA_ADAPTER`,
+The checked-in `factory/config.json` is the default runtime configuration.
+Edit it directly, or set `FACTORY_CONFIG`/`--config` to a different user-owned
+configuration file. Keep Jira and GitHub credentials out of the repository.
+The worker also accepts `FACTORY_AGENT_PROVIDER`,
+`FACTORY_JIRA_ADAPTER`,
 `JIRA_PROJECT_KEY`, `GITHUB_REPOSITORY`, and `FACTORY_BASE_BRANCH` environment
 variables. `FACTORY_GITHUB_PROVIDER` and `FACTORY_GH_COMMAND` are optional.
+OpenCode accepts `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`,
+`OPENCODE_DIRECTORY`, and `OPENCODE_CONFIG` overrides.
 `JIRA_BASE_URL`, `JIRA_EMAIL`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
 
@@ -65,8 +69,11 @@ path. Omit `stateDir` to use the per-user `%LOCALAPPDATA%\AllLlmFactory`
 default. The example uses `"repoPath": "."`, so it remains portable across
 machines.
 
-In the default `codex-mcp` mode, the connected Atlassian MCP identity needs
-permission to search, edit, comment, and transition issues. The
+Changing `provider` is sufficient to switch between Codex and OpenCode. The
+factory automatically aligns an existing MCP Jira adapter with the selected
+provider; omit `jira.adapter` for the simplest configuration. The `rest`
+adapter remains an explicit opt-in fallback. The configured Jira MCP identity
+needs permission to search, edit, comment, and transition issues. The
 Authenticate GitHub CLI once for the same Windows user account that will run
 the scheduled task:
 
@@ -87,13 +94,25 @@ and runs `git pull --ff-only <remote> <baseBranch>`. A local change or Git
 failure stops startup so existing work is not overwritten and runs do not use
 an out-of-date base branch.
 
-Complete the Atlassian MCP OAuth login once for the same Windows user account
+Complete the configured MCP OAuth login once for the same Windows user account
 that will run the scheduled task. Codex uses the existing
-`.codex/config.toml` registration for `Atlassian-Rovo-MCP`; the factory supervisor
-performs Jira reads and mutations through that connected MCP server. The single
+`.codex/config.toml` registration for `Atlassian-Rovo-MCP`. OpenCode uses the
+`jira` server from the repository-root `opencode.json`; authenticate it with
+OpenCode before running unattended work. The factory supervisor performs Jira
+reads and mutations through the selected provider's MCP server. The single
 implementation agent only changes the repository and returns plan metadata.
 
-Codex is launched with the repository as its process directory so this MCP
+Both providers are launched with the repository configuration available even
+when file and Git tools operate in an external factory worktree. OpenCode gets
+the absolute repository-root config through `OPENCODE_CONFIG`; leave
+`opencode.configPath` unset to use `<repoPath>\opencode.json`. Its
+`directory` setting controls the worktree execution directory, not config
+discovery. The factory routes Windows npm command shims through `cmd.exe` and
+uses an isolated OpenCode config directory under `stateDir` unless
+`XDG_CONFIG_HOME` is already set. OpenCode's existing data and MCP OAuth
+credentials remain in their normal user data location.
+
+Codex is launched with the repository as its process directory so its MCP
 registration remains visible, while `-C` points its file and Git tools at the
 run’s external worktree.
 
@@ -108,9 +127,7 @@ the local model configured in `opencode.json`; the default is
 `llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL`. Override Codex settings in the JSON
 config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
 `CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
-`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. OpenCode can be
-overridden with `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`, and
-`OPENCODE_DIRECTORY`. The factory defaults to
+`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. The factory defaults to
 a 250,000-token context ceiling and starts automatic compaction at 225,000
 tokens. The `danger-full-access` sandbox and `never` approval policy are
 intentionally high trust because an unattended worker must use local Git and
@@ -120,9 +137,9 @@ the factory immediately makes one additional attempt using the `priority`
 service tier (configurable through `highCapacityServiceTier`); other failures
 continue through the normal bounded stage-retry policy.
 
-OpenCode uses the same implementation and review strategy contract as Codex.
-Because Jira's `codex-mcp` adapter is provided by Codex's MCP registry,
-OpenCode configurations must use the `rest` Jira adapter with its credentials.
+OpenCode uses the same implementation, review, and structured-Jira strategy
+contract as Codex. The Jira prompts are provider-neutral; each strategy checks
+its own MCP server during `doctor` and before live processing.
 
 ## Commands
 
@@ -139,29 +156,29 @@ npm test
 ```
 
 ```powershell
-npm run factory:doctor
-npm run factory:status
-npm run factory:run-once
+npm run status
+npm run run-once
 npm start
-npm run factory:install
+npm run install-task
 ```
 
-Useful additional commands are `npm run factory:dry-run`,
-`npm run factory:status:json`, `npm test`, and `npm run factory:test`. The generic
+Useful additional commands are `npm run dry-run`,
+`npm run status:json`, and `npm test`. The generic
 `npm run factory -- <command>` form also forwards any supported CLI command or
 option.
 
-`factory:doctor` is a preflight check for the Node runtime, Git executable and
+`npm run doctor` is a preflight check for the Node runtime, Git executable and
 clean repository state, configured remote and base branch, writable SQLite
-state, Codex and `Atlassian-Rovo-MCP`, authenticated GitHub CLI repository
-access, and Jira configuration.
+state, the selected agent and its configured Jira MCP server, authenticated
+GitHub CLI repository access, and Jira configuration. Live startup repeats the
+agent/MCP health check before polling.
 
 `npm start` emits progress logs for polling, issue discovery and claiming,
-Jira status changes, worktree creation, the Codex implementation agent, the
+Jira status changes, worktree creation, the selected implementation agent, the
 fresh-context code reviewer, commit and push confirmation, pull-request creation,
 Jira comments, retries, and blocked runs.
 
-`factory:run-once` performs one poll and reports `retry_scheduled` when a stage
+`npm run run-once` performs one poll and reports `retry_scheduled` when a stage
 fails before the retry limit. It does not wait for the retry; use `npm start`
 for continuous polling and automatic continuation.
 
@@ -172,14 +189,14 @@ the configured implementation status (normally `In Progress`), and continues
 using the existing branch and worktree. Set it to `false` when blocked tasks
 should remain terminal.
 
-Press `Ctrl+C` to request a graceful shutdown. The worker aborts active Codex,
+Press `Ctrl+C` to request a graceful shutdown. The worker aborts active agent,
 Git, GitHub CLI, Jira HTTP, and retry-wait operations, terminates their child
 processes, and closes the state database after cancellation completes.
 
 On PowerShell installations that block the `npm.ps1` shim, use the equivalent
 `npm.cmd` form, for example `npm.cmd start`.
 
-`factory install` prints the elevated PowerShell command needed to register a
+`npm run install-task` prints the elevated PowerShell command needed to register a
 restartable Windows Scheduled Task. State and logs belong under
 `%LOCALAPPDATA%\AllLlmFactory`, not in the repository.
 
@@ -207,13 +224,14 @@ restartable Windows Scheduled Task. State and logs belong under
   code-review, or pull-request stage that failed, moves the Jira issue from `Error` to the
   configured implementation status, and returns to `Error` if the continuation
   fails again.
-- Codex health, including the `Atlassian-Rovo-MCP` registration, and GitHub CLI
-  authentication are checked by `doctor` before live processing. If either
-  fails, the worker remains disabled.
-- Codex performs source changes through local Git in the factory worktree. The
+- The selected agent's executable and configured Jira MCP registration, and
+  GitHub CLI authentication are checked by `doctor` and at live startup. If
+  either fails, the worker remains disabled.
+- The selected agent performs source changes through local Git in the factory worktree. The
   worker uses GitHub CLI only for the hosting-platform pull-request object;
   local Git remains responsible for source mutations and branch publication.
-- After implementation and its reported tests, a separate ephemeral Codex
+- After implementation and its reported tests, a separate ephemeral invocation
+  of the selected provider
   invocation independently reviews the specification and complete branch diff.
   It may fix actionable defects on the same branch, but must commit and push
   those corrections before the pull request stage can proceed. A review blocker

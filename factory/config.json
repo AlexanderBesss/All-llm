@@ -10,7 +10,6 @@
     "branchPrefix": "factory"
   },
   "jira": {
-    "adapter": "opencode-mcp",
     "projectKey": "KAN",
     "statuses": {
       "ready": "Ready",

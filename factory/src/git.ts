@@ -38,7 +38,17 @@ export function runProcess(command: string, args: string[], { cwd, env = process
     // Keep stdin detached for ordinary commands. Codex prompts opt into a
     // pipe explicitly below because newer Codex CLIs read stdin when passed
     // the `-` prompt marker.
-    const child = spawn(command, args, {
+    // Windows cannot spawn npm-generated `.cmd`/`.bat` shims with shell=false.
+    // Route only those scripts through cmd.exe; keeping ordinary executables
+    // shell-free avoids interpreting task prompts as shell syntax.
+    const useWindowsCommandShim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+    const spawnCommand = useWindowsCommandShim
+      ? (process.env.ComSpec || process.env.COMSPEC || "cmd.exe")
+      : command;
+    const spawnArgs = useWindowsCommandShim
+      ? ["/d", "/s", "/c", command, ...args]
+      : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd,
       env,
       windowsHide: true,

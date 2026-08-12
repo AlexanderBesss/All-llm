@@ -1,13 +1,12 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, validateConfig } from "./config.js";
+import { loadConfig, readOpenCodeDoctorSettings, validateConfig } from "./config.js";
 import { openStateDatabase } from "./db.js";
 import { JiraRestAdapter } from "./jira.js";
-import { CodexJiraAdapter } from "./codex-jira.js";
 import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError, runProcess } from "./git.js";
-import { createAgentExecutors } from "./agent-strategy.js";
+import { createAgentExecutors, createAgentStrategy } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
 import { FactoryWorker, runLoop } from "./worker.js";
 import { CliCommand } from "./model/cli.js";
@@ -64,10 +63,11 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
-    const { agent, reviewer } = createAgentExecutors(config, signal);
+    const { strategy, agent, reviewer } = createAgentExecutors(config, signal);
+    await agent.health({ requireJiraMcp: config.jira.adapter !== JiraAdapterKind.Rest });
     const jira = config.jira.adapter === JiraAdapterKind.Rest
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
-      : new CodexJiraAdapter(normalizedJiraConfig(config, signal), agent);
+      : strategy.createJiraAdapter(normalizedJiraConfig(config, signal), agent);
     return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, reviewer, signal }) };
   } catch (error) {
     db.close();
@@ -165,7 +165,11 @@ async function checkStateDatabase(config: FactoryConfig): Promise<CheckReport> {
 async function checkAgent(config: FactoryConfig): Promise<CheckReport> {
   try {
     const { agent } = createAgentExecutors(config);
-    return { ok: true, provider: config.provider, ...(await agent.health()) };
+    return {
+      ok: true,
+      provider: config.provider,
+      ...(await agent.health({ requireJiraMcp: config.jira.adapter !== JiraAdapterKind.Rest })),
+    };
   } catch (error) {
     return { ok: false, error: error.message };
   }
@@ -188,10 +192,11 @@ async function checkGitHub(config: FactoryConfig): Promise<CheckReport> {
 }
 
 export function checkJira(config: FactoryConfig, agentCheck: CheckReport): CheckReport {
+  const expectedMcp = createAgentStrategy(config.provider).jiraMcpServer;
   if (config.jira.adapter === JiraAdapterKind.CodexMcp) {
     const mcpRegistered = config.provider === AgentProvider.Codex
       && agentCheck.ok === true
-      && agentCheck.mcp === "Atlassian-Rovo-MCP";
+      && agentCheck.mcp === expectedMcp;
     const configured = Boolean(config.jira.projectKey);
     return {
       ok: Boolean(configured && mcpRegistered),
@@ -204,23 +209,27 @@ export function checkJira(config: FactoryConfig, agentCheck: CheckReport): Check
           ? "jira.projectKey is required."
           : config.provider !== AgentProvider.Codex
             ? "jira.adapter=codex-mcp requires provider=codex; use jira.adapter=rest with OpenCode."
-            : "Atlassian-Rovo-MCP is not available through Codex.",
+            : `Configured Jira MCP server '${expectedMcp}' is not available.`,
       }),
     };
   }
   if (config.jira.adapter === JiraAdapterKind.OpenCodeMcp) {
-    const providerReady = config.provider === AgentProvider.OpenCode && agentCheck.ok === true;
+    const mcpRegistered = config.provider === AgentProvider.OpenCode
+      && agentCheck.ok === true
+      && agentCheck.mcp === expectedMcp;
     const configured = Boolean(config.jira.projectKey);
     return {
-      ok: Boolean(configured && providerReady),
+      ok: Boolean(configured && mcpRegistered),
       configured,
       adapter: config.jira.adapter,
       projectKey: config.jira.projectKey || "",
-      providerReady,
-      ...(configured && providerReady ? {} : {
+      providerReady: mcpRegistered,
+      mcpRegistered,
+      ...(mcpRegistered ? { mcp: expectedMcp } : {}),
+      ...(configured && mcpRegistered ? {} : {
         error: !configured
           ? "jira.projectKey is required."
-          : "jira.adapter=opencode-mcp requires a healthy OpenCode provider.",
+          : `Configured Jira MCP server '${expectedMcp}' is not available through OpenCode.`,
       }),
     };
   }
@@ -237,19 +246,33 @@ export function checkJira(config: FactoryConfig, agentCheck: CheckReport): Check
 
 async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
   const liveErrors = validateConfig(config, { live: true });
+  let providerDetails: Partial<DoctorReport> = {};
+  let providerConfigError = "";
+  if (config.provider === AgentProvider.OpenCode) {
+    try {
+      providerDetails = await readOpenCodeDoctorSettings(config);
+    } catch (error) {
+      providerConfigError = `OpenCode configuration could not be read: ${error.message}`;
+    }
+  }
+  const configurationErrors = providerConfigError ? [...liveErrors, providerConfigError] : liveErrors;
   const report: DoctorReport = {
     repoPath: config.repoPath,
     stateDir: config.stateDir,
     provider: config.provider,
-    model: config.provider === AgentProvider.OpenCode ? config.opencode.model : config.codex.model,
-    reasoningEffort: config.codex.reasoningEffort,
-    sandbox: config.codex.sandbox,
-    approvalPolicy: config.codex.approvalPolicy,
-    contextWindowTokens: config.codex.contextWindowTokens,
-    autoCompactTokenLimit: config.codex.autoCompactTokenLimit,
+    ...(config.provider === AgentProvider.OpenCode
+      ? providerDetails
+      : {
+          model: config.codex.model,
+          reasoningEffort: config.codex.reasoningEffort,
+          sandbox: config.codex.sandbox,
+          approvalPolicy: config.codex.approvalPolicy,
+          contextWindowTokens: config.codex.contextWindowTokens,
+          autoCompactTokenLimit: config.codex.autoCompactTokenLimit,
+        }),
     jiraAdapter: config.jira.adapter,
-    configured: liveErrors.length === 0,
-    configurationErrors: liveErrors,
+    configured: configurationErrors.length === 0,
+    configurationErrors,
     checks: {},
   };
   report.checks.node = {
@@ -269,12 +292,14 @@ async function commandDoctor(config: FactoryConfig): Promise<DoctorReport> {
   report.checks.sqlite = stateCheck;
   report.checks.agent = agentCheck;
   report.checks[config.provider] = agentCheck;
+  if (typeof agentCheck.mcp === "string") report.mcp = agentCheck.mcp;
+  if (typeof agentCheck.mcpStatus === "string") report.mcpStatus = agentCheck.mcpStatus;
   report.checks.github = githubCheck;
   report.checks.jira = checkJira(config, agentCheck);
   report.checks.configuration = {
-    ok: liveErrors.length === 0,
-    errors: liveErrors,
-    ...(liveErrors.length ? { error: liveErrors.join("; ") } : {}),
+    ok: configurationErrors.length === 0,
+    errors: configurationErrors,
+    ...(configurationErrors.length ? { error: configurationErrors.join("; ") } : {}),
   };
   report.failures = Object.entries(report.checks)
     .filter(([, check]) => check && check.ok === false)

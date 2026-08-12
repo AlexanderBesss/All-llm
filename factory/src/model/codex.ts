@@ -2,6 +2,7 @@ import type { JiraIssue } from "./jira.js";
 
 export interface CodexAgentConfig {
   repoPath: string;
+  stateDir?: string;
   codex: import("./config.js").CodexSettings;
   opencode?: import("./config.js").OpenCodeSettings;
   signal?: AbortSignal;

@@ -78,6 +78,7 @@ export interface OpenCodeSettings {
   command?: string;
   timeoutMs?: number;
   directory?: string;
+  configPath?: string;
 }
 
 export interface FactoryConfig {

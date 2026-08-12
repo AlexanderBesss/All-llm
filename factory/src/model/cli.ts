@@ -23,6 +23,7 @@ export interface CheckReport {
   host?: string;
   repository?: string;
   mcp?: string;
+  mcpStatus?: string;
   [key: string]: unknown;
 }
 
@@ -41,12 +42,19 @@ export interface DoctorReport {
   repoPath: string;
   stateDir: string;
   provider?: string;
+  configPath?: string;
   model?: string;
+  mcp?: string;
+  mcpStatus?: string;
   reasoningEffort?: string;
   sandbox?: string;
   approvalPolicy?: string;
   contextWindowTokens?: number;
+  outputTokens?: number;
   autoCompactTokenLimit?: number;
+  compactionAuto?: boolean;
+  compactionPrune?: boolean;
+  compactionReservedTokens?: number;
   jiraAdapter?: string;
   configured: boolean;
   configurationErrors: string[];

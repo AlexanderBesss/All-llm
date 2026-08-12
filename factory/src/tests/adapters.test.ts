@@ -4,7 +4,7 @@ import { defaultConfig, validateConfig } from "../config.js";
 import { InMemoryJiraAdapter, JiraRestAdapter } from "../jira.js";
 import { GitHubCliAdapter } from "../github.js";
 import { buildPullRequestTitle, normalizePullRequestTaskType } from "../pull-request-title.js";
-import { CodexJiraAdapter } from "../codex-jira.js";
+import { McpJiraAdapter } from "../mcp-jira.js";
 import type { ProcessOptions, ProcessResult, ProcessRunner } from "../model/process.js";
 import type { JiraExecutor } from "../model/jira.js";
 import { executionFor, fixture, makeWorker } from "./support.js";
@@ -93,9 +93,9 @@ test("pull-request title contract preserves the exact Jira name and canonical ta
   );
 });
 
-test("Codex Jira adapter has no subtask mutation or lookup operations", async () => {
+test("MCP Jira adapter has no subtask mutation or lookup operations", async () => {
   const executor: JiraExecutor = { async run() { return { output: JSON.stringify({ issues: [] }) }; } };
-  const adapter = new CodexJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
   const adapterShape = adapter as unknown as Record<string, unknown>;
   assert.equal(adapterShape.createSubtask, undefined);
   assert.equal(adapterShape.findRunSubtasks, undefined);
@@ -169,7 +169,7 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
       };
     },
   };
-  const adapter = new CodexJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
   const issues = await adapter.searchReady();
   assert.match(calls[0].task, /status = "Ready" ORDER BY priority DESC/);
   assert.deepEqual(issues.map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);

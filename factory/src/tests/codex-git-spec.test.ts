@@ -18,12 +18,15 @@ test("provider strategy defaults to Codex and can select OpenCode", () => {
   assert.equal(createAgentStrategy(AgentProvider.Codex).name, AgentProvider.Codex);
   assert.equal(createAgentStrategy(AgentProvider.OpenCode).name, AgentProvider.OpenCode);
   assert.equal(createAgentStrategy(undefined).name, AgentProvider.Codex);
+  assert.equal(createAgentStrategy(AgentProvider.Codex).jiraMcpServer, "Atlassian-Rovo-MCP");
+  assert.equal(createAgentStrategy(AgentProvider.OpenCode).jiraMcpServer, "jira");
 });
 
 test("OpenCode executor invokes the configured local model and parses JSON events", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new OpenCodeAgentExecutor({
     repoPath: ".",
+    stateDir: "C:\\factory-state",
     codex: {},
     opencode: { command: "opencode", model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", agent: "build", timeoutMs: 1234 },
   }, async (command, args, options) => {
@@ -43,6 +46,49 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   assert.deepEqual(calls[0].args.slice(0, 8), ["run", "--model", "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", "--agent", "build", "--format", "json", "--auto"]);
   assert.equal(calls[0].args.at(-2), "../factory-worktree");
   assert.equal(calls[0].options?.timeoutMs, 1234);
+  assert.equal(calls[0].options?.env?.OPENCODE_CONFIG, path.resolve("opencode.json"));
+  assert.equal(calls[0].options?.env?.XDG_CONFIG_HOME, path.resolve("C:\\factory-state\\opencode-config"));
+});
+
+test("OpenCode health verifies the configured Jira MCP server", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const executor = new OpenCodeAgentExecutor({
+    repoPath: "C:\\factory-root",
+    codex: {},
+    opencode: { command: "opencode", configPath: "C:\\factory-root\\opencode.json" },
+  }, async (command, args, options) => {
+    calls.push({ command, args, options });
+    return args[0] === "--version"
+      ? { stdout: "1.18.16\n", stderr: "" }
+      : { stdout: "jira connected\n", stderr: "" };
+  });
+  const health = await executor.health();
+  assert.equal(health.mcp, "jira");
+  assert.equal(health.mcpStatus, "connected");
+  assert.deepEqual(calls.map((call) => call.args), [["--version"], ["mcp", "list"]]);
+  assert.equal(calls[1].options?.env?.OPENCODE_CONFIG, "C:\\factory-root\\opencode.json");
+});
+
+test("OpenCode health rejects a missing Jira MCP server", async () => {
+  const executor = new OpenCodeAgentExecutor({
+    repoPath: "C:\\factory-root",
+    codex: {},
+    opencode: { command: "opencode", configPath: "C:\\factory-root\\opencode.json" },
+  }, async (_command, args) => args[0] === "--version"
+    ? { stdout: "1.18.16\n", stderr: "" }
+    : { stdout: "No MCP servers configured\n", stderr: "" });
+  await assert.rejects(executor.health(), /configured Jira server 'jira'/);
+});
+
+test("OpenCode health rejects a Jira MCP server that needs authentication", async () => {
+  const executor = new OpenCodeAgentExecutor({
+    repoPath: "C:\\factory-root",
+    codex: {},
+    opencode: { command: "opencode", configPath: "C:\\factory-root\\opencode.json" },
+  }, async (_command, args) => args[0] === "--version"
+    ? { stdout: "1.18.16\n", stderr: "" }
+    : { stdout: "⚠ jira needs authentication\n", stderr: "" });
+  await assert.rejects(executor.health(), /needs-authentication/);
 });
 
 test("OpenCode parser rejects output without final text events", () => {
