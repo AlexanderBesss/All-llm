@@ -1,6 +1,7 @@
 export interface ProcessOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  input?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
 }

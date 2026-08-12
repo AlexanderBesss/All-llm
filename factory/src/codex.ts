@@ -81,12 +81,13 @@ export class CodexAgentExecutor {
     const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
     const args = [...this.baseArgs(), cwd];
     if (outputSchema) args.push("--output-schema", outputSchema);
-    args.push(prompt);
+    args.push("-");
     const result = await this.processRunner(this.invocation().command, args, {
       // Keep the process rooted at the repository so Codex loads the existing
       // .codex/config.toml MCP registration. The -C argument above is the
       // actual source worktree used by the agent.
       cwd: this.config.repoPath,
+      input: prompt,
       timeoutMs: this.config.codex.timeoutMs,
       signal: this.config.signal,
       env: this.runtimeEnv(),

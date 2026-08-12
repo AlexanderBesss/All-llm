@@ -43,6 +43,8 @@ test("Codex executor uses configurable Luna max-effort settings", async () => {
   assert.ok(calls[0].args.includes("model_context_window=250000"));
   assert.ok(calls[0].args.includes("model_auto_compact_token_limit=225000"));
   assert.ok(calls[0].args.includes("danger-full-access"));
+  assert.equal(calls[0].args.at(-1), "-");
+  assert.match(calls[0].options?.input || "", /Return a JSON health result/);
   assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
   assert.equal(calls[0].options.cwd, ".");
   assert.equal(calls[0].options.timeoutMs, 1234);
@@ -64,7 +66,7 @@ test("the single-agent prompt forbids subtasks and delegates the complete parent
     cwd: "../factory-worktree",
     specPath: "specs/factory-FACT-1.md",
   });
-  const prompt = calls[0].args.at(-1);
+  const prompt = calls[0].options?.input || "";
   assert.match(prompt, /only software implementation agent/);
   assert.match(prompt, /one parent request, one agent, one factory branch, and one pull request/);
   assert.match(prompt, /Do not create Jira subtasks, child tasks, delegated agents/);
@@ -96,7 +98,7 @@ test("independent reviewer runs in a fresh ephemeral context and may correct the
     plan: executionFor().plan,
     commitSha: "0123456789abcdef",
   });
-  const prompt = calls[0].args.at(-1);
+  const prompt = calls[0].options?.input || "";
   assert.equal(result.result.verdict, "passed");
   assert.match(prompt, /independent software reviewer operating in a fresh context/);
   assert.match(prompt, /complete diff from main to HEAD/);
@@ -133,6 +135,13 @@ test("noninteractive subprocesses receive detached stdin", async () => {
     "const fs = require('node:fs'); process.stdout.write(String(fs.fstatSync(0).isCharacterDevice()));",
   ]);
   assert.equal(result.stdout, "true");
+});
+
+test("subprocesses can receive an explicit stdin payload", async () => {
+  const result = await runProcess(process.execPath, ["-e", "process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => process.stdout.write(chunk));"], {
+    input: "factory prompt",
+  });
+  assert.equal(result.stdout, "factory prompt");
 });
 
 test("GitAdapter switches to and fast-forward pulls the configured base branch", async () => {

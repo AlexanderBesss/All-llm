@@ -29,22 +29,21 @@ function killProcessTree(child) {
   }
 }
 
-export function runProcess(command: string, args: string[], { cwd, env = process.env, timeoutMs = 120_000, signal }: ProcessOptions = {}): Promise<ProcessResult> {
+export function runProcess(command: string, args: string[], { cwd, env = process.env, input, timeoutMs = 120_000, signal }: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError(`Operation aborted before starting: ${command}`));
       return;
     }
-    // None of the factory subprocesses consume stdin. Keep it detached so
-    // Codex does not mistake the supervisor's pipe for an additional prompt
-    // and block while trying to read it (newer Codex CLIs explicitly read
-    // piped stdin even when a prompt argument is supplied).
+    // Keep stdin detached for ordinary commands. Codex prompts opt into a
+    // pipe explicitly below because newer Codex CLIs read stdin when passed
+    // the `-` prompt marker.
     const child = spawn(command, args, {
       cwd,
       env,
       windowsHide: true,
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -70,6 +69,7 @@ export function runProcess(command: string, args: string[], { cwd, env = process
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    if (input !== undefined) child.stdin?.end(input);
     child.on("error", (error) => {
       fail(error);
     });
