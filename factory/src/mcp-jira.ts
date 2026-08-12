@@ -76,9 +76,14 @@ export class McpJiraAdapter {
       timeoutMs,
       agent: this.config.mcpAgent,
     });
-    const correction = (reason: string) => request(
-      `${task}\n\nThe previous one-call attempt failed before returning a usable result. The failure was: ${JSON.stringify(reason)}. This is the one permitted correction attempt. Correct only the request payload using that failure, call the Jira tool exactly once, and then return ok=true only if it succeeds or ok=false with the final error. Do not make any further tool calls. For description updates specifically, fields.description must be the complete Markdown string itself; never send an ADF object, a nested value object, or {} under fields.description.`,
-    );
+    const correction = (reason: string) => {
+      const formatCorrection = /expected a markdown string[\s\S]*got object|pass contentformat[\s\S]*adf/i.test(reason)
+        ? "The MCP error specifically says the description was received as an object while contentFormat was markdown. For this correction, switch contentFormat to \"adf\" and send fields.description as one valid ADF document object (type=doc, version=1, content=[...]); keep the exact requested text as the document's text. This overrides the earlier Markdown-format payload instruction."
+        : "For description updates, fields.description must be the complete Markdown string itself; never send an ADF object, a nested value object, or {} under fields.description.";
+      return request(
+        `${task}\n\nThe previous one-call attempt failed before returning a usable result. The failure was: ${JSON.stringify(reason)}. This is the one permitted correction attempt. Correct only the request payload using that failure, call the Jira tool exactly once, and then return ok=true only if it succeeds or ok=false with the final error. Do not make any further tool calls. ${formatCorrection}`,
+      );
+    };
     const correctedResult = async (reason: string) => {
       const response = await correction(reason);
       try {
@@ -157,8 +162,13 @@ export class McpJiraAdapter {
   }
 
   async updateDescription(issueKey, description) {
+    const markdownPayload = JSON.stringify({
+      issueIdOrKey: issueKey,
+      fields: { description },
+      contentFormat: "markdown",
+    });
     const result = await this.structured(
-      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. The mutation arguments must use this shape: fields is an object and fields.description is the complete Markdown string itself, not an ADF object, not a nested value object, and never {}. Use contentFormat="markdown" if the tool exposes that option. The exact Markdown string to write is delimited below; preserve every character between the delimiters. If the tool returns an error, stop immediately and return ok=false; do not retry the edit.\n\n--- BEGIN EXACT DESCRIPTION ---\n${description}\n--- END EXACT DESCRIPTION ---\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
+      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. Use this exact JSON arguments shape; the value of fields.description is one JSON string, not an object or a set of Markdown-derived keys:\n${markdownPayload}\nDo not alter the serialized description value. The exact Markdown string to write is also delimited below for verification; preserve every character between the delimiters. If the tool returns an error, stop immediately and return ok=false; do not retry the edit.\n\n--- BEGIN EXACT DESCRIPTION ---\n${description}\n--- END EXACT DESCRIPTION ---\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
       this.mutationSchema,
       { retryMutation: true },
     );

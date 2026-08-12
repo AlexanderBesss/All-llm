@@ -122,12 +122,31 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
   assert.equal(requests[1].timeoutMs, 12_345);
   assert.equal(requests[0].agent, "factory-jira");
   assert.equal(requests[1].agent, "factory-jira");
-  assert.match(requests[0].task, /complete Markdown string itself/);
-  assert.match(requests[0].task, /ADF object.*never \{\}/);
+  assert.match(requests[0].task, /one JSON string, not an object/);
+  assert.match(requests[0].task, /"fields":\{"description":"## Plan\\n\\nKeep this exact text\."\}/);
   assert.match(requests[0].task, /BEGIN EXACT DESCRIPTION/);
   assert.match(requests[0].task, /Keep this exact text\./);
   assert.match(requests[1].task, /description must be a Markdown string/);
   assert.match(requests[1].task, /one permitted correction attempt/);
+});
+
+test("MCP Jira description correction follows a format error instead of repeating the bad payload", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      return requests.length === 1
+        ? { output: JSON.stringify({ ok: false, issueKey: "FACT-1", key: "FACT-1", details: "Invalid value for field description: expected a markdown string when contentFormat is markdown, got object. Pass contentFormat: adf when supplying an ADF document object." }) }
+        : { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.updateDescription("FACT-1", "Updated description");
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[1].task, /switch contentFormat to "adf"/);
+  assert.match(requests[1].task, /valid ADF document object/);
 });
 
 test("MCP Jira mutations get one correction request after a provider timeout", async () => {
