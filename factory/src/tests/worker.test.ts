@@ -518,6 +518,31 @@ test("merged pull request auto-closes the task and marks run completed", async (
   fixtureData.db.close();
 });
 
+test("merged pull request forces the Jira transition despite a target-status read", async () => {
+  const fixtureData = await fixture();
+  const worker = makeWorker(
+    fixtureData,
+    { async execute() { return { result: executionFor(), raw: {} }; } },
+    { events: [], logs: [] }
+  );
+  const originalGetIssue = worker.jira.getIssue;
+  worker.jira.getIssue = async (issueKey) => {
+    const issue = await originalGetIssue(issueKey);
+    issue.fields.status = { name: "Done" };
+    return issue;
+  };
+
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+  await fixtureData.github.mergePullRequest(run.pr_number);
+  const checkResult = await worker.checkMergedPullRequests();
+
+  assert.equal(checkResult.closed, 1);
+  assert.equal(fixtureData.jira.transitions.at(-1)?.statusName, "Done");
+  assert.equal(fixtureData.jira.issues.get("FACT-1")?.fields?.status?.name, "Done");
+  fixtureData.db.close();
+});
+
 test("merge check skips pull requests that are not yet merged", async () => {
   const fixtureData = await fixture();
   const worker = makeWorker(

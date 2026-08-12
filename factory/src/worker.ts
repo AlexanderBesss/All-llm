@@ -761,7 +761,11 @@ export class FactoryWorker {
           mergedAt: pr.mergedAt,
         });
         try {
-          await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.done);
+          // A provider-backed Jira read can report the target status without
+          // proving that the issue was actually transitioned. Attempt the
+          // mutation so a merged PR always drives the external state change;
+          // transitionIfNeeded still handles an already-Done issue safely.
+          await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.done, { force: true });
         } catch (error) {
           this.log("error", "merge-check:transition-failed", {
             runId: run.id,
@@ -877,14 +881,17 @@ export class FactoryWorker {
     return { stage, status: RUN_STATUSES.RETRY_WAIT, retryAt, error: message };
   }
 
-  async transitionIfNeeded(issueKey, statusName) {
+  async transitionIfNeeded(issueKey, statusName, { force = false } = {}) {
     this.throwIfStopping();
     this.log("info", "jira:status-check", { issueKey, targetStatus: statusName });
     const issue = await this.jira.getIssue(issueKey);
     const currentStatus = issue.fields?.status?.name || "";
-    if (String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
+    if (!force && String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
       this.log("info", "jira:status-unchanged", { issueKey, status: currentStatus });
       return;
+    }
+    if (force && String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
+      this.log("warn", "jira:status-reported-unchanged", { issueKey, status: currentStatus });
     }
     this.log("info", "jira:status-changing", { issueKey, from: currentStatus, to: statusName });
     try {
