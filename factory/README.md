@@ -10,14 +10,18 @@ Ready -> In Progress -> Code Review -> In Review -> Done (human)
 
 It uses one aggregate `factory/<JIRA-KEY>` branch and one pull request per
 parent ticket. `Ready` means the ticket is waiting to be processed. `In Progress`
-means one implementation agent is working on the complete parent issue in one
-factory worktree. `Code Review` is an internal fresh-context review and
+means one lead implementation agent is working on the complete parent issue in one
+factory worktree. The lead may spawn several bounded sub-agents for read-only
+investigation, repository exploration, test discovery, or independent analysis;
+the lead owns all implementation edits and the final delivery. `Code Review` is an internal fresh-context review and
 correction stage. `In Review` means the pull request has been created and is
 waiting for human review; `Pull Request` is the factory's internal stage while
 creating that pull request, not a Jira status. The worker never merges pull
 requests or writes to the default branch. Every request uses exactly one parent
-task, one implementation agent, one independent reviewer, one branch, and one
-pull request. The factory never creates Jira subtasks or delegates child work.
+task, one lead implementation agent, one independent reviewer, one branch, and one
+pull request. Investigation sub-agents are not child tasks: they must not edit the
+worktree, create branches or pull requests, commit, push, or mutate Jira. The
+factory never creates Jira subtasks or child implementation work.
 
 Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
 (Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
@@ -237,9 +241,10 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 - Tickets in the configured Ready status are claimed from the configured Jira project whether they are on a board or in the backlog; sprint assignment is not required.
 - Runs use stable IDs, branch names, and Jira markers to reconcile retries.
 - On startup, a worker immediately releases active leases owned by a no-longer-running factory process, so an interrupted run does not wait for the normal lease timeout before resuming. Leases owned by live processes remain protected.
-- Each request has one implementation agent and one durable parent run. A retry
-  reuses the same branch/worktree and asks that agent to inspect existing changes
-  and continue; it never creates child tasks.
+- Each request has one lead implementation agent and one durable parent run. The
+  lead may use bounded read-only investigation sub-agents, while a retry reuses the
+  same branch/worktree and asks the lead to inspect existing changes and continue;
+  it never creates Jira subtasks or child implementation work.
 - Before resuming a persisted run, the worker verifies that the Jira parent still
   exists; if it was deleted, the run is marked cancelled and no agent, Git, or
   pull-request work is started.

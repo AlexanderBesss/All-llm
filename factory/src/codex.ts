@@ -150,16 +150,21 @@ export class CodexAgentExecutor {
     previousPlan?: import("./model/codex.js").ImplementationPlan | null;
     specPath?: string;
   }): Promise<CodexExecutionResult> {
-    const task = `You are the only software implementation agent for an AI software factory.\n\n` +
+    const task = `You are the lead software implementation agent for an AI software factory.\n\n` +
       `Parent Jira issue: ${issue.key}\nSummary: ${issue.fields?.summary || ""}\n` +
       `Description:\n${JSON.stringify(issue.fields?.description || "")}\n` +
       `Run ID: ${runId}\nBranch: ${branchName}\n` +
       `${specPath ? `Factory specification: ${specPath}\nRead this file before editing. It is generated for this run; preserve its scope, update its implementation notes or decision log with useful final context, and include it in the commit and push.\n` : ""}` +
       `${previousPlan ? `A previous attempt produced this plan; inspect the current worktree and continue it:\n${JSON.stringify(previousPlan)}\n` : ""}` +
       `Inspect the repository and the current worktree before editing. Form the implementation ` +
-      `plan internally, then implement the entire parent issue as one cohesive task. Do not ` +
-      `create Jira subtasks, child tasks, delegated agents, or additional branches. There is ` +
-      `one parent request, one agent, one factory branch, and one pull request. Keep related ` +
+      `plan internally, then implement the entire parent issue as one cohesive task. Use several ` +
+      `bounded sub-agents when useful for read-only investigation, repository exploration, test ` +
+      `discovery, or independent analysis; parallelize that investigation when it is safe. ` +
+      `Sub-agents must not create Jira subtasks or child implementation tasks, branches, pull ` +
+      `requests, or competing worktree edits, and must not commit, push, or mutate Jira. You ` +
+      `remain responsible for synthesizing their findings, making all implementation edits, ` +
+      `and delivering the final result. There is one parent request, one lead agent, one ` +
+      `factory branch, and one pull request. Keep related ` +
       `changes together even when they touch multiple files. Use local Git tools directly on ` +
       `this PC for status, diff, branch, commit, and push operations. Do not use GitHub REST ` +
       `or a remote repository API for local source changes. Never work on or merge the default ` +

@@ -173,7 +173,7 @@ test("Codex executor retries a capacity error once with the high-capacity tier",
   assert.ok(calls[1].args.includes('service_tier="priority"'));
 });
 
-test("the single-agent prompt forbids subtasks and delegates the complete parent task", async () => {
+test("the lead-agent prompt allows bounded investigation sub-agents without child implementation work", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new CodexAgentExecutor({
     repoPath: ".",
@@ -190,9 +190,12 @@ test("the single-agent prompt forbids subtasks and delegates the complete parent
     specPath: "specs/factory-FACT-1.md",
   });
   const prompt = calls[0].options?.input || "";
-  assert.match(prompt, /only software implementation agent/);
-  assert.match(prompt, /one parent request, one agent, one factory branch, and one pull request/);
-  assert.match(prompt, /Do not create Jira subtasks, child tasks, delegated agents/);
+  assert.match(prompt, /lead software implementation agent/);
+  assert.match(prompt, /Use several bounded sub-agents when useful for read-only investigation/);
+  assert.match(prompt, /parallelize that investigation when it is safe/);
+  assert.match(prompt, /Sub-agents must not create Jira subtasks or child implementation tasks/);
+  assert.match(prompt, /You remain responsible for synthesizing their findings, making all implementation edits/);
+  assert.match(prompt, /one parent request, one lead agent, one factory branch, and one pull request/);
   assert.match(prompt, /Factory specification: specs\/factory-FACT-1\.md/);
   assert.match(prompt, /Do not ask the user questions/);
   assert.match(prompt, /Do not make Jira mutations/);
@@ -400,6 +403,9 @@ test("factory specs use portable branch filenames and preserve their generated s
   assert.match(content, /## Validation plan/);
   assert.match(content, /`factory\/KAN-20`/);
   assert.match(content, /```+text/);
+  assert.match(content, /optional investigation sub-agents/);
+  assert.match(content, /MAY use bounded sub-agents for read-only investigation/);
+  assert.match(content, /no child implementation work/);
 
   const cwd = await mkdtemp(path.join(os.tmpdir(), "all-llm-factory-spec-"));
   const first = await ensureSpecFile({
