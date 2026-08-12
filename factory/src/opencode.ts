@@ -66,13 +66,22 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     const configHome = this.config.stateDir
       ? path.join(this.config.stateDir, "opencode-config")
       : undefined;
+    const dataHome = this.config.stateDir
+      ? path.join(this.config.stateDir, "opencode-data")
+      : undefined;
+    const stateHome = this.config.stateDir
+      ? path.join(this.config.stateDir, "opencode-state")
+      : undefined;
     return {
       ...process.env,
       CODEX_HOME: process.env.CODEX_HOME || "",
       OPENCODE_CONFIG: process.env.OPENCODE_CONFIG || configPath,
-      // Keep OpenCode config discovery isolated from a stale global Windows
-      // config directory while preserving the user's data/auth location.
+      // Keep all OpenCode writable state in the factory state directory. The
+      // Windows CLI may otherwise resolve ~/.local/share/opencode and fail
+      // before it can even list or invoke the configured MCP servers.
       XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME || configHome,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME || dataHome,
+      XDG_STATE_HOME: process.env.XDG_STATE_HOME || stateHome,
       // `--auto` handles prompts; this setting grants the build agent the
       // same unattended tool access as the Codex strategy.
       OPENCODE_PERMISSION: process.env.OPENCODE_PERMISSION || JSON.stringify("allow"),

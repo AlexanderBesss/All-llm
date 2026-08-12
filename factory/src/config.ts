@@ -1,4 +1,3 @@
-import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -6,23 +5,20 @@ import { AgentProvider, JiraAdapterKind, JiraStatusKey } from "./model/config.js
 import type { FactoryConfig } from "./model/config.js";
 import type { UnknownRecord } from "./model/common.js";
 
-function localAppData() {
-  return process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-}
-
 function resolveConfiguredPath(value: string, baseDir: string) {
   return path.isAbsolute(value) ? path.normalize(value) : path.resolve(baseDir, value);
 }
 
 export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
+  const resolvedRepoPath = path.resolve(repoPath);
   const provider = (process.env.FACTORY_AGENT_PROVIDER || AgentProvider.Codex) as AgentProvider;
   const jiraAdapter = (process.env.FACTORY_JIRA_ADAPTER || (
     provider === AgentProvider.OpenCode ? JiraAdapterKind.OpenCodeMcp : JiraAdapterKind.CodexMcp
   )) as JiraAdapterKind;
-  const stateDir = path.join(localAppData(), "AllLlmFactory");
+  const stateDir = path.join(resolvedRepoPath, "tmp", "AllLlmFactory");
   return {
     provider,
-    repoPath: path.resolve(repoPath),
+    repoPath: resolvedRepoPath,
     stateDir,
     pollIntervalMs: 60_000,
     leaseMs: 15 * 60_000,
@@ -54,7 +50,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     git: {
       remote: "origin",
       baseBranch: process.env.FACTORY_BASE_BRANCH || "main",
-      repoPath: path.resolve(repoPath),
+      repoPath: resolvedRepoPath,
     },
     codex: {
       model: process.env.CODEX_MODEL || "gpt-5.6-luna",
@@ -74,7 +70,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       timeoutMs: 1_200_000,
       command: process.env.OPENCODE_COMMAND || "",
       directory: process.env.OPENCODE_DIRECTORY || "",
-      configPath: process.env.OPENCODE_CONFIG || path.join(path.resolve(repoPath), "opencode.json"),
+      configPath: process.env.OPENCODE_CONFIG || path.join(resolvedRepoPath, "opencode.json"),
     },
   };
 }

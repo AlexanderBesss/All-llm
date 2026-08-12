@@ -11,6 +11,7 @@ test("Codex remains the default provider strategy", () => {
   const config = defaultConfig(".");
   assert.equal(config.provider, AgentProvider.Codex);
   assert.equal(config.repoPath, path.resolve("."));
+  assert.equal(config.stateDir, path.resolve("tmp", "AllLlmFactory"));
   assert.equal(config.git.repoPath, path.resolve("."));
   assert.equal(config.jira.adapter, JiraAdapterKind.CodexMcp);
   assert.equal(config.opencode.model, "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");

@@ -202,13 +202,30 @@ test("MCP Jira lookup accepts an existing issue in Error status", async () => {
 });
 
 test("MCP Jira inconclusive lookup is not treated as deletion", async () => {
-  const executor: JiraExecutor = { async run() { return { output: JSON.stringify({ issues: [] }) }; } };
+  let calls = 0;
+  const executor: JiraExecutor = { async run() { calls += 1; return { output: JSON.stringify({ issues: [] }) }; } };
   const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
   await assert.rejects(adapter.getIssue("FACT-404"), (error: Error & { code?: string }) => {
     assert.match(error.message, /lookup was inconclusive/);
     assert.notEqual(error.code, "JIRA_ISSUE_NOT_FOUND");
     return true;
   });
+  assert.equal(calls, 2);
+});
+
+test("MCP Jira lookup retries an empty response before accepting the issue", async () => {
+  let calls = 0;
+  const executor: JiraExecutor = {
+    async run() {
+      calls += 1;
+      return calls === 1
+        ? { output: JSON.stringify({ issues: [] }) }
+        : { output: JSON.stringify({ issues: [{ key: "FACT-1", summary: "Found", status: "In Progress", projectKey: "FACT" }] }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+  assert.equal((await adapter.getIssue("FACT-1")).key, "FACT-1");
+  assert.equal(calls, 2);
 });
 
 test("MCP Jira read retries once after invalid JSON", async () => {

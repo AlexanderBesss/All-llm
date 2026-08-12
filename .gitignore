@@ -15,4 +15,6 @@
 /factory/config.local.json
 /factory/worktrees/
 /factory/dist/
+/tmp/
 node_modules/
+.tmp/

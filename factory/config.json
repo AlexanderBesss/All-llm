@@ -1,6 +1,7 @@
 {
   "provider": "opencode",
   "repoPath": ".",
+  "stateDir": "./tmp/AllLlmFactory",
   "pollIntervalMs": 60000,
   "leaseMs": 900000,
   "maxAttempts": 1,

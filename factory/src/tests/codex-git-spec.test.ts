@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { defaultConfig, validateConfig } from "../config.js";
-import { GitAdapter, isAbortError, runProcess } from "../git.js";
+import { GitAdapter, isAbortError, processInvocation, runProcess } from "../git.js";
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
 import { OpenCodeAgentExecutor, parseOpenCodeOutput } from "../opencode.js";
@@ -27,7 +27,7 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new OpenCodeAgentExecutor({
     repoPath: ".",
-    stateDir: "C:\\factory-state",
+    stateDir: path.resolve("tmp", "AllLlmFactory"),
     codex: {},
     opencode: { command: "opencode", model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", agent: "build", timeoutMs: 1234 },
   }, async (command, args, options) => {
@@ -52,7 +52,9 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   assert.equal(calls[0].args.at(-2), "../factory-worktree");
   assert.equal(calls[0].options?.timeoutMs, 1234);
   assert.equal(calls[0].options?.env?.OPENCODE_CONFIG, path.resolve("opencode.json"));
-  assert.equal(calls[0].options?.env?.XDG_CONFIG_HOME, path.resolve("C:\\factory-state\\opencode-config"));
+  assert.equal(calls[0].options?.env?.XDG_CONFIG_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-config"));
+  assert.equal(calls[0].options?.env?.XDG_DATA_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-data"));
+  assert.equal(calls[0].options?.env?.XDG_STATE_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-state"));
   assert.match(calls[0].args.at(-1) || "", /Output protocol: return exactly one JSON value/);
   assert.match(calls[0].args.at(-1) || "", /JSON Schema/);
 });
@@ -247,6 +249,19 @@ test("process cancellation terminates an active child process", async () => {
   const running = runProcess(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { timeoutMs: 60_000, signal: controller.signal });
   setTimeout(() => controller.abort(), 50);
   await assert.rejects(running, (error: unknown) => isAbortError(error));
+});
+
+test("Windows command shims are launched through Git Bash with preserved arguments", () => {
+  if (process.platform !== "win32") return;
+  const invocation = processInvocation("C:\\tools\\opencode.cmd", ["run", "prompt with $ and `quotes`"]);
+  assert.match(invocation.command, /(?:^|[\\/])Git[\\/]bin[\\/]bash\.exe$/i);
+  assert.deepEqual(invocation.args, [
+    "-lc",
+    'exec "$0" "$@"',
+    "C:\\tools\\opencode.cmd",
+    "run",
+    "prompt with $ and `quotes`",
+  ]);
 });
 
 test("noninteractive subprocesses receive detached stdin", async () => {

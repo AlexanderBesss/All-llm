@@ -29,6 +29,27 @@ function killProcessTree(child) {
   }
 }
 
+function defaultGitBashEntry() {
+  if (process.env.GIT_BASH_COMMAND) return process.env.GIT_BASH_COMMAND;
+  if (process.platform === "win32") {
+    const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+    return path.join(programFiles, "Git", "bin", "bash.exe");
+  }
+  return "bash";
+}
+
+export function processInvocation(command: string, args: string[]) {
+  const useWindowsCommandShim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+  if (!useWindowsCommandShim) return { command, args };
+  // Pass the command and arguments as bash positional parameters. This keeps
+  // OpenCode prompts and JSON payloads intact without interpolating them into
+  // a shell command string.
+  return {
+    command: defaultGitBashEntry(),
+    args: ["-lc", 'exec "$0" "$@"', command, ...args],
+  };
+}
+
 export function runProcess(command: string, args: string[], { cwd, env = process.env, input, timeoutMs = 120_000, signal }: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -38,16 +59,11 @@ export function runProcess(command: string, args: string[], { cwd, env = process
     // Keep stdin detached for ordinary commands. Codex prompts opt into a
     // pipe explicitly below because newer Codex CLIs read stdin when passed
     // the `-` prompt marker.
-    // Windows cannot spawn npm-generated `.cmd`/`.bat` shims with shell=false.
-    // Route only those scripts through cmd.exe; keeping ordinary executables
-    // shell-free avoids interpreting task prompts as shell syntax.
-    const useWindowsCommandShim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
-    const spawnCommand = useWindowsCommandShim
-      ? (process.env.ComSpec || process.env.COMSPEC || "cmd.exe")
-      : command;
-    const spawnArgs = useWindowsCommandShim
-      ? ["/d", "/s", "/c", command, ...args]
-      : args;
+    // Keep ordinary executables shell-free. Windows npm `.cmd`/`.bat` shims
+    // are routed through Git Bash with positional arguments.
+    const invocation = processInvocation(command, args);
+    const spawnCommand = invocation.command;
+    const spawnArgs = invocation.args;
     const child = spawn(spawnCommand, spawnArgs, {
       cwd,
       env,

@@ -65,9 +65,10 @@ and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
 
 `repoPath` may be relative; it is resolved from the detected repository root.
 `stateDir` may also be relative and is resolved from the configured repository
-path. Omit `stateDir` to use the per-user `%LOCALAPPDATA%\AllLlmFactory`
-default. The example uses `"repoPath": "."`, so it remains portable across
-machines.
+path. The checked-in configuration uses `"stateDir": "./tmp/AllLlmFactory"`,
+keeping the factory database, worktrees, logs, and provider state inside the
+project. If `stateDir` is omitted, the same project-local `./tmp/AllLlmFactory`
+default is used.
 
 Changing `provider` is sufficient to switch between Codex and OpenCode. The
 factory automatically aligns an existing MCP Jira adapter with the selected
@@ -107,10 +108,14 @@ when file and Git tools operate in an external factory worktree. OpenCode gets
 the absolute repository-root config through `OPENCODE_CONFIG`; leave
 `opencode.configPath` unset to use `<repoPath>\opencode.json`. Its
 `directory` setting controls the worktree execution directory, not config
-discovery. The factory routes Windows npm command shims through `cmd.exe` and
-uses an isolated OpenCode config directory under `stateDir` unless
-`XDG_CONFIG_HOME` is already set. OpenCode's existing data and MCP OAuth
-credentials remain in their normal user data location.
+discovery. The factory routes Windows npm command shims through Git Bash and
+uses isolated OpenCode config, data, and state directories under `stateDir`
+unless the corresponding `XDG_*` variables are already set. Authenticate the
+`jira` MCP server using the same environment before unattended processing, for
+example by setting `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `XDG_STATE_HOME` to
+the factory paths and running `opencode mcp auth jira`. This keeps logs,
+database files, and MCP OAuth credentials writable and consistent for the
+scheduled worker.
 
 Codex is launched with the repository as its process directory so its MCP
 registration remains visible, while `-C` points its file and Git tools at the
@@ -202,8 +207,8 @@ On PowerShell installations that block the `npm.ps1` shim, use the equivalent
 `npm.cmd` form, for example `npm.cmd start`.
 
 `npm run install-task` prints the elevated PowerShell command needed to register a
-restartable Windows Scheduled Task. State and logs belong under
-`%LOCALAPPDATA%\AllLlmFactory`, not in the repository.
+restartable Windows Scheduled Task. State and logs belong under the project-local
+`tmp\AllLlmFactory` directory.
 
 ## Safety behavior
 

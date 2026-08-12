@@ -68,12 +68,17 @@ export class McpJiraAdapter {
   }
 
   async getIssue(issueKey) {
-    const result = await this.structured(
-      `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. The issue may have any current Jira status, including Error; determine existence only from the exact issue key, never from its status. Return that one issue normalized to the requested JSON schema. Do not search broadly.`,
-      this.issuesSchema,
-      { retryInvalidJson: true },
-    );
-    const item = result.issues?.[0];
+    const task = `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. The issue may have any current Jira status, including Error; determine existence only from the exact issue key, never from its status. Return that one issue normalized to the requested JSON schema. Do not search broadly.`;
+    const result = await this.structured(task, this.issuesSchema, { retryInvalidJson: true });
+    let item = result.issues?.[0];
+    if (!item || item.key !== issueKey) {
+      const retry = await this.structured(
+        `${task}\n\nThe previous response did not contain the requested issue. Repeat the exact read-only lookup now. If the issue exists, include it even if its status is Error. Return exactly one JSON object matching the requested schema, with no Markdown or commentary.`,
+        this.issuesSchema,
+        { retryInvalidJson: true },
+      );
+      item = retry.issues?.[0];
+    }
     if (!item || item.key !== issueKey) {
       // An agent-backed MCP lookup can return an empty/malformed structured
       // result even when Jira contains the issue. Do not turn that ambiguity
