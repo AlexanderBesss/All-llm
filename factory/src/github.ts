@@ -141,7 +141,7 @@ export class GitHubCliAdapter {
     const result = await this.run([
       "pr", "view", String(prNumber),
       "--repo", this.repository,
-      "--json", "number,url,headRefName,baseRefName,title,body,merged,mergedAt",
+      "--json", "number,url,headRefName,baseRefName,title,body,state,mergedAt",
     ]);
     const data = parseJson(result.stdout, "reading pull request");
     return {
@@ -151,7 +151,8 @@ export class GitHubCliAdapter {
       base: data.baseRefName ? { ref: data.baseRefName } : undefined,
       title: data.title,
       body: data.body,
-      merged: data.merged,
+      state: data.state,
+      merged: Boolean(data.mergedAt),
       mergedAt: data.mergedAt,
     };
   }

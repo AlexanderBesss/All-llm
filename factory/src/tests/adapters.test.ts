@@ -81,6 +81,35 @@ test("GitHub CLI adapter rejects an existing pull request with an incomplete tit
   assert.equal(calls.length, 1);
 });
 
+test("GitHub CLI adapter reads merged status from supported pull-request fields", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const runner: ProcessRunner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return {
+      stdout: JSON.stringify({
+        number: 7,
+        url: "https://github.com/example/factory/pull/7",
+        headRefName: "factory/FACT-1",
+        baseRefName: "main",
+        title: "[FACT-1] Add factory coverage (Task)",
+        body: "Details",
+        state: "CLOSED",
+        mergedAt: "2026-08-12T17:00:00Z",
+      }),
+      stderr: "",
+    };
+  };
+  const github = new GitHubCliAdapter({ cliCommand: "gh-test", repositoryFullName: "example/factory", baseBranch: "main", repoPath: "." }, runner);
+
+  const pr = await github.getPullRequest(7);
+
+  assert.equal(pr?.merged, true);
+  assert.equal(pr?.state, "CLOSED");
+  assert.equal(pr?.mergedAt, "2026-08-12T17:00:00Z");
+  assert.ok(calls[0].args.includes("number,url,headRefName,baseRefName,title,body,state,mergedAt"));
+  assert.ok(!calls[0].args.includes("number,url,headRefName,baseRefName,title,body,merged,mergedAt"));
+});
+
 test("pull-request title contract preserves the exact Jira name and canonical task type", () => {
   assert.equal(
     buildPullRequestTitle({ taskNumber: "KAN-16", taskName: "fine tune PR name", taskType: "Feature" }),
