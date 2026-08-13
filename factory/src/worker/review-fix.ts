@@ -29,6 +29,10 @@ async function processPullRequest(worker: FactoryWorker, pullRequest: PullReques
   if (!getThreads) throw new Error("GitHub adapter does not support review threads.");
   const threads = await getThreads.call(worker.github, pullRequest.number);
   if (!threads.length) {
+    if (pullRequest.labels?.includes("ai-fix") && worker.github.requestAiReview) {
+      await worker.github.requestAiReview(pullRequest.number);
+      worker.log("info", "review-fix:requeued-ai-review-no-threads", { prNumber: pullRequest.number });
+    }
     worker.log("info", "review-fix:no-unresolved-threads", { prNumber: pullRequest.number });
     return { addressed: 0, disputed: 0 };
   }
@@ -65,6 +69,12 @@ async function processPullRequest(worker: FactoryWorker, pullRequest: PullReques
       await worker.github.replyToReviewThread(pullRequest.number, outcome.threadId, outcome.reply);
       disputed += 1;
     }
+  }
+  if (addressed > 0) {
+    const requestAiReview = worker.github.requestAiReview;
+    if (!requestAiReview) throw new Error("GitHub adapter cannot requeue AI review.");
+    await requestAiReview.call(worker.github, pullRequest.number);
+    worker.log("info", "review-fix:requeued-ai-review", { prNumber: pullRequest.number });
   }
   worker.log("info", "review-fix:pr-complete", { prNumber: pullRequest.number, beforeSha, afterSha, addressed, disputed });
   return { addressed, disputed };

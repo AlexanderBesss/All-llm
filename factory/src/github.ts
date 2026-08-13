@@ -201,6 +201,15 @@ export class GitHubCliAdapter {
     };
   }
 
+  async requestAiReview(prNumber: number): Promise<void> {
+    await this.run([
+      "pr", "edit", String(prNumber),
+      "--repo", this.repository,
+      "--add-label", "ai-review",
+      "--remove-label", "ai-fix",
+    ]);
+  }
+
   async listOpenPullRequestsByLabel(label: string): Promise<PullRequest[]> {
     const result = await this.run([
       "pr", "list", "--repo", this.repository, "--state", "open", "--label", label,
@@ -289,6 +298,13 @@ export class InMemoryGitHubAdapter {
     };
     this.pullRequests.push(pr);
     return pr;
+  }
+
+  async requestAiReview(prNumber: number): Promise<void> {
+    const pr = this.pullRequests.find((candidate) => candidate.number === prNumber);
+    if (!pr) throw new Error(`PR #${prNumber} not found`);
+    pr.labels = (pr.labels || []).filter((label) => label !== "ai-fix");
+    if (!pr.labels.includes("ai-review")) pr.labels.push("ai-review");
   }
 
   async listOpenPullRequestsByLabel(label: string): Promise<PullRequest[]> {

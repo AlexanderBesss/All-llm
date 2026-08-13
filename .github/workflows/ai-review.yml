@@ -2,15 +2,15 @@ name: AI Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [labeled]
 
 concurrency:
-  group: review-${{ github.head_ref }}
+  group: review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.label.name == 'ai-review' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -48,22 +48,23 @@ jobs:
           model: llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL
           use_github_token: true
           prompt: |
-            Review this pull request thoroughly. Start your response with "## AI Review".
+            Review this pull request for high-relevance, high-impact defects only. Start your response with "## AI Review".
             First list every changed file in the pull request. Review each changed file in a separate subagent.
             Invoke the subagents synchronously, one file at a time, and wait for each subagent to finish before calling the next.
             Do not run file-review subagents in parallel or combine multiple files in one subagent.
             After all file reviews are complete, synthesize their findings into the final pull request review.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
-            The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","body":"Explain the issue and the recommended fix."}]}.
+            The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","relevance":"high","confidence":0.93,"severity":"high","body":"Explain the concrete defect, its impact, and the recommended fix."}]}.
             Use one finding per comment. The path must be relative to the repository root, and line must be a line present in the pull request diff. Use RIGHT for additions or context lines and LEFT for deletions. Omit findings that cannot be anchored to a diff line.
-            If there are no actionable findings, write {"findings":[]} instead. Do not write this file in a tracked repository path, do not wrap it in Markdown fences, and keep the final response concise because the detailed findings will be posted as inline review comments.
-            - Check for code quality issues
-            - Look for potential bugs
-            - Identify security concerns
-            - Check for performance issues
-            - Suggest improvements
+            Only report a finding when it is directly caused by this pull request, has a concrete and actionable correctness, security, data-loss, reliability, or severe-performance impact, and you have at least 0.85 confidence. Set relevance to "high", confidence to a number from 0 to 1, and severity to "high" or "critical". Never report style preferences, naming suggestions, formatting, documentation polish, speculative concerns, or issues already handled elsewhere in the diff.
+            Few-shot calibration examples:
+            - COMMENT: A new authorization branch accepts an expired token and reaches a protected operation. This is directly introduced, reproducible from the diff, high impact, and confidence 0.96, so emit one anchored finding with relevance "high" and severity "critical".
+            - SKIP: A variable could be renamed for clarity but behavior is unchanged. This is a style preference, so emit no finding.
+            - SKIP: A cache might be slower under an unmeasured workload, with no demonstrated regression or fix. This is speculative and below the relevance threshold, so emit no finding.
+            If there are no high-relevance findings, write {"findings":[]} instead. Do not write this file in a tracked repository path, do not wrap it in Markdown fences, and keep the final response concise because the detailed findings will be posted as inline review comments.
 
       - name: Publish inline AI review comments
+        id: publish
         uses: actions/github-script@v7
         env:
           FINDINGS_FILE: ${{ github.workspace }}/.git/ai-review-findings.json
@@ -72,6 +73,8 @@ jobs:
           script: |
             const fs = require("fs");
             const findingsFile = process.env.FINDINGS_FILE;
+            core.setOutput("published_findings", "0");
+            core.setOutput("review_complete", "false");
 
             if (!fs.existsSync(findingsFile)) {
               core.warning(`OpenCode did not create ${findingsFile}; no inline comments were published.`);
@@ -91,6 +94,7 @@ jobs:
 
             if (review.findings.length === 0) {
               core.info("OpenCode reported no actionable findings.");
+              core.setOutput("review_complete", "true");
               return;
             }
 
@@ -146,6 +150,7 @@ jobs:
 
             const comments = [];
             const maxCommentBytes = 60000;
+            const minimumConfidence = 0.85;
             let skipped = 0;
 
             for (const finding of review.findings) {
@@ -153,7 +158,13 @@ jobs:
                 !finding ||
                 typeof finding.path !== "string" ||
                 !Number.isInteger(finding.line) ||
+                finding.line <= 0 ||
                 !["LEFT", "RIGHT"].includes(finding.side) ||
+                finding.relevance !== "high" ||
+                !Number.isFinite(finding.confidence) ||
+                finding.confidence < minimumConfidence ||
+                finding.confidence > 1 ||
+                !["high", "critical"].includes(finding.severity) ||
                 typeof finding.body !== "string" ||
                 finding.body.trim().length === 0
               ) {
@@ -206,3 +217,32 @@ jobs:
 
             core.info(`Published ${comments.length} inline AI review comment(s).`);
             if (skipped > 0) core.warning(`Skipped ${skipped} finding(s) that could not be anchored to the PR diff.`);
+            core.setOutput("published_findings", String(comments.length));
+            core.setOutput("review_complete", "true");
+
+      - name: Advance AI review labels
+        if: success() && steps.publish.outputs.review_complete == 'true'
+        uses: actions/github-script@v7
+        env:
+          PUBLISHED_FINDINGS: ${{ steps.publish.outputs.published_findings }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pullNumber = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+            const publishedFindings = Number(process.env.PUBLISHED_FINDINGS || "0");
+
+            for (const name of ["ai-review", "ai-fix"]) {
+              try {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            if (publishedFindings > 0) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pullNumber, labels: ["ai-fix"] });
+              core.info(`Marked pull request #${pullNumber} as ai-fix for the factory review loop.`);
+            } else {
+              core.info(`Cleared the ai-review trigger label from pull request #${pullNumber}; no high-relevance findings remain.`);
+            }
