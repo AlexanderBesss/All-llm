@@ -24,6 +24,8 @@ export interface CodexRunInput {
   cwd: string;
   outputSchema?: string;
   timeoutMs?: number;
+  model?: string;
+  reasoningEffort?: string;
   agent?: string;
   toolScope?: AgentToolScope;
   workspaceAccess?: AgentWorkspaceAccess;

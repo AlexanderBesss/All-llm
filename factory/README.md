@@ -149,10 +149,16 @@ section.
 
 The factory uses a provider strategy. `provider` defaults to `codex`, which
 invokes the installed Codex CLI with `gpt-5.6-luna` and maximum reasoning
-effort. Set `provider` to `opencode` to invoke the installed OpenCode CLI and
+effort for Jira `Task` and `bug fix` issues. Jira `feature` issues use
+`gpt-5.6-sol` with medium reasoning effort for implementation and pre-PR
+verification. These routes can be overridden with `codex.model`,
+`codex.reasoningEffort`, `codex.featureModel`, and
+`codex.featureReasoningEffort`. Set `provider` to `opencode` to invoke the
+installed OpenCode CLI and
 the local model configured in `opencode.json`; the default is
 `llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL`. Override Codex settings in the JSON
 config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
+`CODEX_FEATURE_MODEL`, `CODEX_FEATURE_REASONING_EFFORT`,
 `CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
 `CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. The factory defaults to
 a 250,000-token context ceiling and starts automatic compaction at 225,000

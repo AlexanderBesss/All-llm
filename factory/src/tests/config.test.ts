@@ -14,6 +14,10 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.stateDir, path.resolve("tmp", "AllLlmFactory"));
   assert.equal(config.git.repoPath, path.resolve("."));
   assert.equal(config.jira.adapter, JiraAdapterKind.CodexMcp);
+  assert.equal(config.codex.model, "gpt-5.6-luna");
+  assert.equal(config.codex.reasoningEffort, "max");
+  assert.equal(config.codex.featureModel, "gpt-5.6-sol");
+  assert.equal(config.codex.featureReasoningEffort, "medium");
   assert.equal(config.opencode.model, "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
 });
 

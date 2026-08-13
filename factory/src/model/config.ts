@@ -66,6 +66,8 @@ export interface GitConfig {
 export interface CodexSettings {
   model?: string;
   reasoningEffort?: string;
+  featureModel?: string;
+  featureReasoningEffort?: string;
   serviceTier?: string;
   highCapacityServiceTier?: string;
   sandbox?: string;

@@ -171,6 +171,76 @@ test("Codex executor uses configurable Luna max-effort settings", async () => {
   assert.equal(calls[0].options.timeoutMs, 1234);
 });
 
+test("Codex executor routes Jira features to Sol with medium reasoning", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: {
+      command: "codex",
+      model: "gpt-5.6-luna",
+      reasoningEffort: "max",
+      featureModel: "gpt-5.6-sol",
+      featureReasoningEffort: "medium",
+      timeoutMs: 1234,
+    },
+  }, async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
+  });
+
+  for (const verificationPass of [false, true]) {
+    await executor.execute({
+      issue: { key: "FACT-1", fields: { summary: "Build capability", issuetype: { name: "Feature" } } },
+      runId: "FACT-1-run",
+      branchName: "factory/FACT-1",
+      cwd: "../factory-worktree",
+      previousPlan: verificationPass ? executionFor().plan : null,
+      specPath: "specs/factory-FACT-1.md",
+      verificationPass,
+    });
+  }
+
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(call.args[call.args.indexOf("--model") + 1], "gpt-5.6-sol");
+    assert.ok(call.args.includes('model_reasoning_effort="medium"'));
+  }
+});
+
+test("Codex executor keeps tasks and bug fixes on Luna with max reasoning", async () => {
+  const calls: string[][] = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: {
+      command: "codex",
+      model: "gpt-5.6-luna",
+      reasoningEffort: "max",
+      featureModel: "gpt-5.6-sol",
+      featureReasoningEffort: "medium",
+      timeoutMs: 1234,
+    },
+  }, async (_command, args) => {
+    calls.push(args);
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
+  });
+
+  for (const issueType of ["Task", "bug fix"]) {
+    await executor.execute({
+      issue: { key: "FACT-1", fields: { summary: "Repair capability", issuetype: { name: issueType } } },
+      runId: "FACT-1-run",
+      branchName: "factory/FACT-1",
+      cwd: "../factory-worktree",
+      specPath: "specs/factory-FACT-1.md",
+    });
+  }
+
+  assert.equal(calls.length, 2);
+  for (const args of calls) {
+    assert.equal(args[args.indexOf("--model") + 1], "gpt-5.6-luna");
+    assert.ok(args.includes('model_reasoning_effort="max"'));
+  }
+});
+
 test("Codex executor retries a capacity error once with the high-capacity tier", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new CodexAgentExecutor({
