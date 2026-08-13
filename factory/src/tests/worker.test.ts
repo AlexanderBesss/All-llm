@@ -575,3 +575,52 @@ test("merge check skips pull requests that are not yet merged", async () => {
   assert.equal(fixtureData.db.getRun(result.runId).status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
 });
+
+test("review-fix loop resolves addressed threads and replies to disputed feedback", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.repoPath = path.resolve(".");
+  const pr = await fixtureData.github.createPullRequest({
+    title: "[FACT-1] Add factory coverage (Task)",
+    taskNumber: "FACT-1",
+    taskName: "Add factory coverage",
+    taskType: "Task",
+    body: "Details",
+    head: "factory/FACT-1",
+    base: "main",
+  });
+  pr.labels = ["ai-fix"];
+  fixtureData.github.reviewThreads.set(pr.number, [
+    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "reviewer", body: "Add validation" }] },
+    { id: "thread-incorrect", isResolved: false, comments: [{ id: "comment-2", author: "reviewer", body: "Remove required behavior" }] },
+  ]);
+  const worker = makeWorker(fixtureData, {
+    async run() {
+      return {
+        output: JSON.stringify({
+          summary: "Handled review feedback",
+          committed: true,
+          pushed: true,
+          threads: [
+            { threadId: "thread-actionable", disposition: "addressed", reply: "" },
+            { threadId: "thread-incorrect", disposition: "disputed", reply: "That change conflicts with the documented requirement." },
+          ],
+          tests: [],
+          blockers: [],
+        }),
+        events: [],
+      };
+    },
+  });
+
+  const result = await worker.fixPullRequestReviews();
+
+  assert.deepEqual(result, { pullRequests: 1, addressed: 1, disputed: 1, failed: 0 });
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.[0].isResolved, true);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.[1].isResolved, false);
+  assert.deepEqual(fixtureData.github.reviewReplies, [{
+    prNumber: pr.number,
+    threadId: "thread-incorrect",
+    body: "That change conflicts with the documented requirement.",
+  }]);
+  fixtureData.db.close();
+});

@@ -113,3 +113,21 @@ export function runMergeCheckLoop(
     execute: () => worker.checkMergedPullRequests(),
   });
 }
+
+export interface ReviewFixLoopWorker extends FactoryLoopWorker {
+  fixPullRequestReviews(): Promise<{ pullRequests: number; addressed: number; disputed: number; failed: number }>;
+}
+
+export function runReviewFixLoop(
+  worker: ReviewFixLoopWorker,
+  { signal = worker.signal, intervalMs = 300_000 }: { signal?: AbortSignal; intervalMs?: number } = {},
+): Promise<void> {
+  return runFactoryLoop(worker, {
+    signal,
+    intervalMs,
+    label: "review-fix",
+    shutdownEvent: "review-fix-loop:shutdown-requested",
+    failureMessage: "review-fix failed",
+    execute: () => worker.fixPullRequestReviews(),
+  });
+}

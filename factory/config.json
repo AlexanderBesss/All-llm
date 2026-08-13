@@ -3,6 +3,8 @@
   "repoPath": ".",
   "stateDir": "./tmp/AllLlmFactory",
   "pollIntervalMs": 60000,
+  "mergeCheckIntervalMs": 300000,
+  "reviewFixIntervalMs": 300000,
   "leaseMs": 900000,
   "maxAttempts": 1,
   "continueFailedTasks": true,

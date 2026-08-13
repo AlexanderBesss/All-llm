@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["summary", "committed", "pushed", "threads", "tests", "blockers"],
+  "properties": {
+    "summary": { "type": "string" },
+    "committed": { "type": "boolean" },
+    "pushed": { "type": "boolean" },
+    "threads": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["threadId", "disposition", "reply"],
+        "properties": {
+          "threadId": { "type": "string" },
+          "disposition": { "type": "string", "enum": ["addressed", "disputed"] },
+          "reply": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "status", "output"],
+        "properties": {
+          "command": { "type": "string" },
+          "status": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+          "output": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "blockers": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

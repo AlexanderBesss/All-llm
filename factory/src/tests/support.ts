@@ -28,6 +28,7 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
   const github = new InMemoryGitHubAdapter();
   const git = {
     async prepareWorktree(runId) { return path.join(stateDir, "worktrees", runId); },
+    async preparePullRequestWorktree(runId) { return path.join(stateDir, "worktrees", runId); },
     async headSha() { return "0123456789abcdef"; },
     async hasChanges() { return false; },
     async assertBranchPublished() { return "0123456789abcdef"; },
@@ -42,6 +43,9 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     stateDir,
     repoPath: stateDir,
     leaseMs: 60_000,
+    reviewFixIntervalMs: 300_000,
+    pollIntervalMs: 60_000,
+    mergeCheckIntervalMs: 300_000,
     maxAttempts,
     continueFailedTasks,
     retryBackoffMs: 0,
@@ -101,6 +105,18 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) 
     },
     async getPullRequest(prNumber) {
       return fixtureData.github.getPullRequest(prNumber);
+    },
+    async listOpenPullRequestsByLabel(label) {
+      return fixtureData.github.listOpenPullRequestsByLabel(label);
+    },
+    async getUnresolvedReviewThreads(prNumber) {
+      return fixtureData.github.getUnresolvedReviewThreads(prNumber);
+    },
+    async resolveReviewThread(threadId) {
+      return fixtureData.github.resolveReviewThread(threadId);
+    },
+    async replyToReviewThread(prNumber, threadId, body) {
+      return fixtureData.github.replyToReviewThread(prNumber, threadId, body);
     },
   };
   return new FactoryWorker({
