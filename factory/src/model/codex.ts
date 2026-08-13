@@ -60,6 +60,26 @@ export enum TestStatus {
   Skipped = "skipped",
 }
 
+export enum ReviewThreadDisposition {
+  Addressed = "addressed",
+  Disputed = "disputed",
+}
+
+export interface ReviewThreadResult {
+  threadId: string;
+  disposition: ReviewThreadDisposition;
+  reply: string;
+}
+
+export interface ReviewFixResult {
+  summary: string;
+  committed: boolean;
+  pushed: boolean;
+  threads: ReviewThreadResult[];
+  tests: ExecutionTestResult[];
+  blockers: string[];
+}
+
 export interface ExecutionTestResult {
   command: string;
   status: TestStatus;

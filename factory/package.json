@@ -9,6 +9,7 @@
     "start": "npm run build && node dist/cli.js start",
     "start:jira-tasks": "npm run build && node dist/cli.js start-jira-tasks",
     "start:pull-request-check": "npm run build && node dist/cli.js start-pull-request-check",
+    "start:review-fix": "npm run build && node dist/cli.js start-review-fix",
     "start:all": "npm run build && node dist/cli.js start",
     "run-once": "npm run build && node dist/cli.js run-once",
     "dry-run": "npm run build && node dist/cli.js run-once --dry-run",

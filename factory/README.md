@@ -25,6 +25,13 @@ pull request. Investigation sub-agents are not child tasks: they must not edit t
 worktree, create branches or pull requests, commit, push, or mutate Jira. The
 factory never creates Jira subtasks or child implementation work.
 
+New pull requests receive the `review` label. A separate review-fix loop scans
+all open pull requests labeled `ai-fix`, gathers their unresolved review threads,
+and sends every thread on a pull request to one implementation-agent pass. After
+the agent commits and pushes its fixes, the supervisor resolves addressed threads.
+Contradictory or incorrect feedback receives a technical reply and stays unresolved
+for the next human review.
+
 Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
 (Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
 type is normalized to one of those three supported values. A pull request is
@@ -203,6 +210,7 @@ npm run run-once
 npm start
 npm run start:jira-tasks
 npm run start:pull-request-check
+npm run start:review-fix
 npm run start:all
 npm run install-task
 ```
@@ -212,7 +220,7 @@ Useful additional commands are `npm run dry-run`,
 only the Jira Ready-ticket polling and implementation loop. Use
 `npm run start:pull-request-check` to run only the GitHub pull-request merge
 checker that closes the Jira ticket after a merge. `npm start` and
-`npm run start:all` run both loops together. The generic
+`npm run start:all` run all three loops together. The generic
 `npm run factory -- <command>` form also forwards any supported CLI command or
 option.
 
@@ -229,10 +237,11 @@ Jira comments, retries, and blocked runs.
 
 `npm run start:pull-request-check` emits progress logs while checking open
 factory pull requests and transitions their Jira issues to `Done` after a
-successful merge. The two loop commands can run in separate consoles or
+successful merge. The individual loop commands can run in separate consoles or
 process managers because they share the same durable SQLite state directory.
 
-`npm start` and `npm run start:all` run both loops in one factory process.
+`npm run start:review-fix` runs only the `ai-fix` review loop. `npm start` and
+`npm run start:all` run the Jira task, review-fix, and merge-check loops together.
 
 `npm run run-once` performs one poll and reports `retry_scheduled` when a stage
 fails before the retry limit. It does not wait for the retry; use `npm start`

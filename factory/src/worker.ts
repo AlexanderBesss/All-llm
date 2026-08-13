@@ -13,6 +13,7 @@ import { normalizePlan } from "./worker/format.js";
 import { processImplementation, processPrePrVerification, processPullRequest } from "./worker/stages.js";
 import { failStage, transitionIfNeeded } from "./worker/failure.js";
 import { checkMergedPullRequests } from "./worker/merge-check.js";
+import { fixPullRequestReviews } from "./worker/review-fix.js";
 
 export class FactoryWorker {
   config: FactoryConfig;
@@ -285,6 +286,10 @@ export class FactoryWorker {
     return checkMergedPullRequests(this);
   }
 
+  async fixPullRequestReviews(): Promise<{ pullRequests: number; addressed: number; disputed: number; failed: number }> {
+    return fixPullRequestReviews(this);
+  }
+
   async failStage(run, stage, attempt, error) {
     return failStage(this, run, stage, attempt, error);
   }
@@ -295,4 +300,4 @@ export class FactoryWorker {
 }
 
 export { pullRequestDescription } from "./worker/format.js";
-export { runLoop, runMergeCheckLoop } from "./worker/loops.js";
+export { runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker/loops.js";

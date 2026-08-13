@@ -4,7 +4,7 @@ import { runProcess } from "./git.js";
 import { assertPullRequestTitle } from "./pull-request-title.js";
 import type { ProcessRunner, ProcessOptions } from "./model/process.js";
 import type { GitHubConfig } from "./model/config.js";
-import type { PullRequest, PullRequestInput } from "./model/github.js";
+import type { PullRequest, PullRequestInput, PullRequestReviewThread } from "./model/github.js";
 import { nowIso } from "./types.js";
 
 function parseJson(stdout, operation) {
@@ -29,6 +29,49 @@ function normalizePullRequest(value, fallbackHead) {
     base: value.baseRefName ? { ref: value.baseRefName } : undefined,
     title: value.title,
     body: value.body,
+    labels: Array.isArray(value.labels) ? value.labels.map((label) => label?.name || label).filter(Boolean) : [],
+  };
+}
+
+function graphQlRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function reviewThreadIdsFromGraphQl(value: unknown): { ids: string[]; cursor: string | null; hasNextPage: boolean } {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const data = graphQlRecord(record.data);
+  const repository = graphQlRecord(data.repository);
+  const pullRequest = graphQlRecord(repository.pullRequest);
+  const connection = graphQlRecord(pullRequest.reviewThreads);
+  const nodes = Array.isArray(connection.nodes) ? connection.nodes : [];
+  const pageInfo = graphQlRecord(connection.pageInfo);
+  return {
+    ids: nodes.map((node) => graphQlRecord(node)).filter((thread) => thread.isResolved !== true).map((thread) => String(thread.id || "")).filter(Boolean),
+    cursor: typeof pageInfo.endCursor === "string" ? pageInfo.endCursor : null,
+    hasNextPage: pageInfo.hasNextPage === true,
+  };
+}
+
+function reviewCommentsFromGraphQl(value: unknown): { comments: PullRequestReviewThread["comments"]; cursor: string | null; hasNextPage: boolean } {
+  const data = graphQlRecord(graphQlRecord(value).data);
+  const connection = graphQlRecord(graphQlRecord(data.node).comments);
+  const nodes = Array.isArray(connection.nodes) ? connection.nodes : [];
+  const pageInfo = graphQlRecord(connection.pageInfo);
+  return {
+    comments: nodes.map((comment) => {
+      const item = graphQlRecord(comment);
+      const author = graphQlRecord(item.author);
+      return {
+        id: String(item.id || ""),
+        author: String(author.login || "unknown"),
+        body: String(item.body || ""),
+        ...(typeof item.path === "string" ? { path: item.path } : {}),
+        ...(typeof item.line === "number" || item.line === null ? { line: item.line as number | null } : {}),
+        ...(typeof item.createdAt === "string" ? { createdAt: item.createdAt } : {}),
+      };
+    }),
+    cursor: typeof pageInfo.endCursor === "string" ? pageInfo.endCursor : null,
+    hasNextPage: pageInfo.hasNextPage === true,
   };
 }
 
@@ -121,6 +164,7 @@ export class GitHubCliAdapter {
       "--base", targetBase,
       "--title", validatedTitle,
       "--body", body,
+      "--label", "review",
     ]);
     const url = String(created.stdout || "")
       .split(/\r?\n/)
@@ -157,6 +201,59 @@ export class GitHubCliAdapter {
     };
   }
 
+  async listOpenPullRequestsByLabel(label: string): Promise<PullRequest[]> {
+    const result = await this.run([
+      "pr", "list", "--repo", this.repository, "--state", "open", "--label", label,
+      "--limit", "1000", "--json", "number,url,headRefName,baseRefName,title,body,labels",
+    ]);
+    const values = parseJson(result.stdout, `listing open pull requests labeled ${label}`);
+    if (!Array.isArray(values)) throw new Error("GitHub CLI did not return a pull-request list.");
+    return values.map((value) => normalizePullRequest(value, value?.headRefName));
+  }
+
+  async getUnresolvedReviewThreads(prNumber: number): Promise<PullRequestReviewThread[]> {
+    const query = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){reviewThreads(first:100,after:$cursor){nodes{id isResolved}pageInfo{hasNextPage endCursor}}}}}`;
+    const commentsQuery = `query($threadId:ID!,$cursor:String){node(id:$threadId){... on PullRequestReviewThread{comments(first:100,after:$cursor){nodes{id author{login} body path line createdAt}pageInfo{hasNextPage endCursor}}}}}`;
+    const [owner, name] = this.repository.split("/").slice(-2);
+    const threadIds: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const args = ["api", "graphql", "-f", `query=${query}`, "-F", `owner=${owner}`, "-F", `name=${name}`, "-F", `number=${prNumber}`];
+      if (cursor) args.push("-F", `cursor=${cursor}`);
+      const result = await this.run(args);
+      const page = reviewThreadIdsFromGraphQl(parseJson(result.stdout, `reading review threads for pull request #${prNumber}`));
+      threadIds.push(...page.ids);
+      cursor = page.hasNextPage ? page.cursor : null;
+      if (page.hasNextPage && !cursor) throw new Error("GitHub review-thread pagination did not return a cursor.");
+    } while (cursor);
+    const threads: PullRequestReviewThread[] = [];
+    for (const threadId of threadIds) {
+      const comments: PullRequestReviewThread["comments"] = [];
+      cursor = null;
+      do {
+        const args = ["api", "graphql", "-f", `query=${commentsQuery}`, "-F", `threadId=${threadId}`];
+        if (cursor) args.push("-F", `cursor=${cursor}`);
+        const result = await this.run(args);
+        const page = reviewCommentsFromGraphQl(parseJson(result.stdout, `reading comments for review thread ${threadId}`));
+        comments.push(...page.comments);
+        cursor = page.hasNextPage ? page.cursor : null;
+        if (page.hasNextPage && !cursor) throw new Error("GitHub review-comment pagination did not return a cursor.");
+      } while (cursor);
+      threads.push({ id: threadId, isResolved: false, comments });
+    }
+    return threads;
+  }
+
+  async resolveReviewThread(threadId: string): Promise<void> {
+    const query = `mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{id isResolved}}}`;
+    await this.run(["api", "graphql", "-f", `query=${query}`, "-F", `threadId=${threadId}`]);
+  }
+
+  async replyToReviewThread(_prNumber: number, threadId: string, body: string): Promise<void> {
+    const query = `mutation($threadId:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$threadId,body:$body}){comment{id}}}`;
+    await this.run(["api", "graphql", "-f", `query=${query}`, "-F", `threadId=${threadId}`, "-f", `body=${body}`]);
+  }
+
   async getCommitStatus(commitSha) {
     const result = await this.run(["api", `repos/${this.repository}/commits/${commitSha}/status`]);
     return parseJson(result.stdout, "reading commit status");
@@ -165,6 +262,8 @@ export class GitHubCliAdapter {
 
 export class InMemoryGitHubAdapter {
   pullRequests: PullRequest[];
+  reviewThreads = new Map<number, PullRequestReviewThread[]>();
+  reviewReplies: Array<{ prNumber: number; threadId: string; body: string }> = [];
 
   constructor() {
     this.pullRequests = [];
@@ -186,9 +285,29 @@ export class InMemoryGitHubAdapter {
       base: { ref: input.base || "main" },
       title: validatedTitle,
       body: input.body,
+      labels: ["review"],
     };
     this.pullRequests.push(pr);
     return pr;
+  }
+
+  async listOpenPullRequestsByLabel(label: string): Promise<PullRequest[]> {
+    return this.pullRequests.filter((pr) => pr.state !== "closed" && pr.labels?.includes(label)).map((pr) => ({ ...pr }));
+  }
+
+  async getUnresolvedReviewThreads(prNumber: number): Promise<PullRequestReviewThread[]> {
+    return (this.reviewThreads.get(prNumber) || []).filter((thread) => !thread.isResolved).map((thread) => ({ ...thread, comments: [...thread.comments] }));
+  }
+
+  async resolveReviewThread(threadId: string): Promise<void> {
+    for (const threads of this.reviewThreads.values()) {
+      const thread = threads.find((candidate) => candidate.id === threadId);
+      if (thread) thread.isResolved = true;
+    }
+  }
+
+  async replyToReviewThread(prNumber: number, threadId: string, body: string): Promise<void> {
+    this.reviewReplies.push({ prNumber, threadId, body });
   }
 
   async getPullRequest(prNumber: number): Promise<PullRequest | null> {

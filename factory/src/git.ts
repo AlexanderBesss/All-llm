@@ -219,6 +219,23 @@ export class GitAdapter {
     return worktreePath;
   }
 
+  async preparePullRequestWorktree(runId: string, branchName: string) {
+    await this.assertRepositoryClean();
+    const listing = await this.runProcess("git", ["worktree", "list", "--porcelain"], { cwd: this.config.repoPath, signal: this.config.signal });
+    const blocks = listing.stdout.split(/\r?\n\r?\n/).map((block) => block.split(/\r?\n/));
+    const branchRef = `branch refs/heads/${branchName}`;
+    const existing = blocks.find((block) => block.includes(branchRef));
+    const existingPath = existing?.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+    if (existingPath) return existingPath;
+
+    const worktreePath = path.join(this.config.stateDir, "worktrees", runId);
+    await mkdir(path.dirname(worktreePath), { recursive: true });
+    if (existsSync(worktreePath)) throw new Error(`Worktree path exists but is not registered with Git: ${worktreePath}`);
+    await this.git(["fetch", this.config.remote, `refs/heads/${branchName}:refs/remotes/${this.config.remote}/${branchName}`], this.config.repoPath);
+    await this.git(["worktree", "add", "-B", branchName, worktreePath, `${this.config.remote}/${branchName}`], this.config.repoPath);
+    return worktreePath;
+  }
+
   async headSha(worktreePath) {
     return this.output(["rev-parse", "HEAD"], worktreePath);
   }

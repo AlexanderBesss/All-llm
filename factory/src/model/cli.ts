@@ -9,6 +9,7 @@ export enum CliCommand {
   Start = "start",
   StartJiraTasks = "start-jira-tasks",
   StartPullRequestCheck = "start-pull-request-check",
+  StartReviewFix = "start-review-fix",
 }
 
 export interface CliArgs {

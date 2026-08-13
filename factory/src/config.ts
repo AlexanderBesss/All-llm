@@ -22,6 +22,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     stateDir,
     pollIntervalMs: 60_000,
     mergeCheckIntervalMs: 5 * 60_000,
+    reviewFixIntervalMs: 5 * 60_000,
     leaseMs: 15 * 60_000,
     maxAttempts: Number(process.env.FACTORY_MAX_ATTEMPTS || 1),
     continueFailedTasks: process.env.FACTORY_CONTINUE_FAILED_TASKS !== "false",
@@ -189,6 +190,9 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
   }
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
+  }
+  if (!Number.isInteger(config.reviewFixIntervalMs) || config.reviewFixIntervalMs <= 0) {
+    errors.push("reviewFixIntervalMs must be a positive integer");
   }
   if (typeof config.continueFailedTasks !== "boolean") {
     errors.push("continueFailedTasks must be a boolean");

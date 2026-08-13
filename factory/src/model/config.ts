@@ -96,6 +96,7 @@ export interface FactoryConfig {
   stateDir: string;
   pollIntervalMs: number;
   mergeCheckIntervalMs: number;
+  reviewFixIntervalMs: number;
   leaseMs: number;
   maxAttempts: number;
   continueFailedTasks: boolean;

@@ -48,6 +48,32 @@ test("GitHub CLI adapter creates an idempotent pull request without a token", as
   assert.equal(pr.number, 7);
   assert.equal(pr.html_url, "https://github.com/example/factory/pull/7");
   assert.equal(calls.length, 3);
+  assert.deepEqual(calls[1].args.slice(-2), ["--label", "review"]);
+});
+
+test("GitHub CLI adapter lists ai-fix pull requests and reads unresolved review threads", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const responses: ProcessResult[] = [
+    { stdout: JSON.stringify([{ number: 7, url: "https://github.com/example/factory/pull/7", headRefName: "factory/FACT-1", baseRefName: "main", title: "Title", body: "", labels: [{ name: "ai-fix" }] }]), stderr: "" },
+    { stdout: JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [
+      { id: "thread-open", isResolved: false },
+      { id: "thread-done", isResolved: true },
+    ], pageInfo: { hasNextPage: false, endCursor: null } } } } } }), stderr: "" },
+    { stdout: JSON.stringify({ data: { node: { comments: { nodes: [{ id: "comment-1", author: { login: "reviewer" }, body: "Fix this", path: "src/a.ts", line: 4, createdAt: "2026-08-13T00:00:00Z" }], pageInfo: { hasNextPage: false, endCursor: null } } } } }), stderr: "" },
+  ];
+  const runner: ProcessRunner = async (command, args, options) => { calls.push({ command, args, options }); return responses.shift() || { stdout: "", stderr: "" }; };
+  const github = new GitHubCliAdapter({ cliCommand: "gh-test", repositoryFullName: "example/factory", baseBranch: "main", repoPath: "." }, runner);
+
+  const pullRequests = await github.listOpenPullRequestsByLabel("ai-fix");
+  const threads = await github.getUnresolvedReviewThreads(7);
+
+  assert.equal(pullRequests.length, 1);
+  assert.deepEqual(pullRequests[0].labels, ["ai-fix"]);
+  assert.deepEqual(threads.map((thread) => thread.id), ["thread-open"]);
+  assert.equal(threads[0].comments[0].body, "Fix this");
+  assert.ok(calls[0].args.includes("ai-fix"));
+  assert.equal(calls[1].args[1], "graphql");
+  assert.equal(calls[2].args[1], "graphql");
 });
 
 test("GitHub CLI adapter rejects an existing pull request with an incomplete title", async () => {

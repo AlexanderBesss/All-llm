@@ -7,7 +7,7 @@ import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError } from "./git.js";
 import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
-import { FactoryWorker, runLoop, runMergeCheckLoop } from "./worker.js";
+import { FactoryWorker, runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker.js";
 import { commandDoctor } from "./cli/doctor.js";
 import { CliCommand } from "./model/cli.js";
 import { JiraAdapterKind } from "./model/config.js";
@@ -95,7 +95,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
   if (args.command === CliCommand.Help) {
-    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-jira-tasks|start-pull-request-check|status|install> [--config path] [--dry-run] [--json]");
+    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-jira-tasks|start-pull-request-check|start-review-fix|status|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
   if (args.command === CliCommand.Doctor) {
@@ -116,6 +116,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
     CliCommand.Start,
     CliCommand.StartJiraTasks,
     CliCommand.StartPullRequestCheck,
+    CliCommand.StartReviewFix,
   ];
   if (![CliCommand.RunOnce, ...loopCommands].includes(args.command as CliCommand)) throw new Error(`Unknown command: ${args.command}`);
   const errors = validateConfig(config, { live: true });
@@ -136,17 +137,20 @@ export async function main(argv: string[] = process.argv.slice(2)) {
       // The pull-request checker only reads GitHub and updates Jira. Avoid
       // making two independently started loops synchronize the repository at
       // the same time.
-      syncBaseBranch: args.command !== CliCommand.StartPullRequestCheck,
+      syncBaseBranch: args.command !== CliCommand.StartPullRequestCheck && args.command !== CliCommand.StartReviewFix,
     }));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
     else if (args.command === CliCommand.StartJiraTasks) {
       await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
     } else if (args.command === CliCommand.StartPullRequestCheck) {
       await runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs });
+    } else if (args.command === CliCommand.StartReviewFix) {
+      await runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs });
     } else {
       await Promise.all([
         runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
         runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),
+        runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs }),
       ]);
     }
   } finally {
