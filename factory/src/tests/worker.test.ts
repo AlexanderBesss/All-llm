@@ -27,6 +27,10 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
           type: "item.completed",
           item: { type: "command_execution", status: "completed" },
         });
+        input.onProgress?.({
+          type: "turn.completed",
+          usage: { input_tokens: 12_345, cached_input_tokens: 10_000, output_tokens: 678 },
+        });
       }
       return { result: executionFor(), raw: {} };
     },
@@ -64,7 +68,9 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
   assert.ok(logs.some((entry) => entry.includes("implementation:spec-ready")));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
-  assert.ok(logs.some((entry) => entry.includes("implementation:agent-progress") && entry.includes('"activity":"command_execution"')));
+  assert.ok(logs.some((entry) => entry.includes("implementation:agent-token-usage") && entry.includes('"generatedTokens":678')));
+  assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete") && entry.includes('"generatedTokens":678')));
+  assert.ok(!logs.some((entry) => entry.includes("implementation:agent-progress")));
   assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);

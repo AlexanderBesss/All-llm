@@ -27,6 +27,17 @@ function agentActivity(event: CodexEvent) {
   };
 }
 
+function agentTokenUsage(event: CodexEvent) {
+  const value = event as Record<string, unknown>;
+  if (value.type !== "turn.completed" || !value.usage || typeof value.usage !== "object") return null;
+  const usage = value.usage as Record<string, unknown>;
+  const inputTokens = Number(usage.input_tokens);
+  const cachedInputTokens = Number(usage.cached_input_tokens);
+  const generatedTokens = Number(usage.output_tokens);
+  if (![inputTokens, cachedInputTokens, generatedTokens].every(Number.isFinite)) return null;
+  return { inputTokens, cachedInputTokens, generatedTokens };
+}
+
 export async function processImplementation(worker: FactoryWorker, run: FactoryRun, { dryRun }: { dryRun: boolean }) {
   worker.throwIfStopping();
   const issue = JSON.parse(run.issue_json) as JiraIssue;
@@ -85,6 +96,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
     const agentStartedAt = Date.now();
     let agentEvents = 0;
     let lastActivity = "starting";
+    let tokenUsage: ReturnType<typeof agentTokenUsage> = null;
     const elapsedSeconds = () => Math.max(0, Math.round((Date.now() - agentStartedAt) / 1000));
     const heartbeat = setInterval(() => {
       worker.db.updateRun(run.id, { lease_until: new Date(Date.now() + worker.config.leaseMs).toISOString() });
@@ -93,6 +105,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
         elapsedSeconds: elapsedSeconds(),
         events: agentEvents,
         lastActivity,
+        ...(tokenUsage ? { generatedTokens: tokenUsage.generatedTokens } : {}),
       });
     }, AGENT_HEARTBEAT_MS);
     heartbeat.unref();
@@ -107,15 +120,19 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
         specPath: spec.relativePath,
         onProgress: (event) => {
           agentEvents += 1;
+          const usage = agentTokenUsage(event);
+          if (usage) {
+            tokenUsage = usage;
+            worker.log("info", "implementation:agent-token-usage", {
+              runId: run.id,
+              elapsedSeconds: elapsedSeconds(),
+              ...usage,
+            });
+            return;
+          }
           const activity = agentActivity(event);
           if (!activity) return;
           lastActivity = activity.activity;
-          worker.log("info", "implementation:agent-progress", {
-            runId: run.id,
-            elapsedSeconds: elapsedSeconds(),
-            eventNumber: agentEvents,
-            ...activity,
-          });
         },
       });
     } finally {
@@ -131,6 +148,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       blockers: result.result?.blockers?.length || 0,
       elapsedSeconds: elapsedSeconds(),
       events: agentEvents,
+      ...(tokenUsage || {}),
     });
     const commitSha = await worker.git.assertBranchPublished(worktree, branchName);
     worker.log("info", "implementation:head", { runId: run.id, commitSha });

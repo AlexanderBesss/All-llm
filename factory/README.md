@@ -242,7 +242,9 @@ agent/MCP health check before polling.
 `npm run start:jira-tasks` emits progress logs for polling, issue discovery and claiming,
 Jira status changes, worktree creation, the selected implementation agent, the
 fresh-context pre-PR verification agent, commit and push confirmation, pull-request creation,
-Jira comments, retries, and blocked runs.
+Jira comments, retries, and blocked runs. Implementation-agent heartbeats remain compact;
+instead of logging every Codex item event, the factory reports exact input, cached-input,
+and generated-token usage when Codex completes the turn.
 
 `npm run start:pull-request-check` emits progress logs while checking open
 factory pull requests and transitions their Jira issues to `Done` after a
