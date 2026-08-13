@@ -90,19 +90,25 @@ export async function failStage(worker: FactoryWorker, run: FactoryRun, stage: s
   return { stage, status: RUN_STATUSES.RETRY_WAIT, retryAt, error: message };
 }
 
-export async function transitionIfNeeded(worker: FactoryWorker, issueKey: string, statusName: string, { force = false }: { force?: boolean } = {}): Promise<void> {
+export async function transitionIfNeeded(worker: FactoryWorker, issueKey: string, statusName: string, { skipStatusCheck = false }: { skipStatusCheck?: boolean } = {}): Promise<void> {
   worker.throwIfStopping();
-  worker.log("info", "jira:status-check", { issueKey, targetStatus: statusName });
-  const issue = await worker.jira.getIssue(issueKey);
-  const currentStatus = issue.fields?.status?.name || "";
-  if (!force && String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
-    worker.log("info", "jira:status-unchanged", { issueKey, status: currentStatus });
-    return;
+  let currentStatus = "";
+  if (!skipStatusCheck) {
+    worker.log("info", "jira:status-check", { issueKey, targetStatus: statusName });
+    const issue = await worker.jira.getIssue(issueKey);
+    currentStatus = issue.fields?.status?.name || "";
+    if (String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
+      worker.log("info", "jira:status-unchanged", { issueKey, status: currentStatus });
+      return;
+    }
+  } else {
+    worker.log("info", "jira:status-check-skipped", { issueKey, targetStatus: statusName });
   }
-  if (force && String(currentStatus).toLowerCase() === String(statusName).toLowerCase()) {
-    worker.log("warn", "jira:status-reported-unchanged", { issueKey, status: currentStatus });
-  }
-  worker.log("info", "jira:status-changing", { issueKey, from: currentStatus, to: statusName });
+  worker.log("info", "jira:status-changing", {
+    issueKey,
+    ...(currentStatus ? { from: currentStatus } : {}),
+    to: statusName,
+  });
   try {
     await worker.jira.transition(issueKey, statusName);
   } catch (error) {

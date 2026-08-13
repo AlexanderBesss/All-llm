@@ -38,6 +38,10 @@ function normalizedJiraConfig(config: FactoryConfig, signal?: AbortSignal): Jira
     repoPath: config.repoPath,
     readyStatus: config.jira.statuses.ready,
     signal,
+    log(level, event, details) {
+      const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
+      console[level]?.(formatFactoryLog(`${event}${suffix}`));
+    },
   };
 }
 

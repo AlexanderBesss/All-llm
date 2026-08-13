@@ -81,7 +81,7 @@ export interface JiraStructuredResponse {
 }
 
 export interface JiraExecutor {
-  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string; toolScope?: AgentToolScope; workspaceAccess?: AgentWorkspaceAccess }): Promise<{
+  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string; model?: string; reasoningEffort?: string; toolScope?: AgentToolScope; workspaceAccess?: AgentWorkspaceAccess }): Promise<{
     output: string;
     events?: Array<Record<string, unknown>>;
   }>;

@@ -37,6 +37,12 @@ export interface JiraConfig {
   mcpTimeoutMs?: number;
   /** OpenCode agent used for provider-backed Jira MCP requests. */
   mcpAgent?: string;
+  /** Dedicated model used for short provider-backed Jira operations. */
+  mcpModel?: string;
+  /** Dedicated reasoning effort used for short provider-backed Jira operations. */
+  mcpReasoningEffort?: string;
+  /** Runtime telemetry sink; populated by the CLI rather than configuration files. */
+  log?: (level: "info" | "warn" | "error", event: string, details?: Record<string, unknown>) => void;
   email?: string;
   apiToken?: string;
   readyStatus?: string;

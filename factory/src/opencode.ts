@@ -89,7 +89,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     };
   }
 
-  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured, onEvent }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent, model, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured, onEvent }: CodexRunInput) {
     const settings = this.config.opencode || {};
     let schemaInstruction = "";
     if (outputSchema) {
@@ -104,7 +104,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     const directory = settings.directory || cwd;
     const args = [
       "run",
-      "--model", settings.model || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+      "--model", model || settings.model || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
       "--agent", toolScope === AgentToolScope.Jira ? agent || "factory-jira" : agent || settings.agent || "build",
       "--format", "json",
       "--auto",

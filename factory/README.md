@@ -77,8 +77,17 @@ OpenCode accepts `OPENCODE_MODEL`, `OPENCODE_AGENT`, `OPENCODE_COMMAND`,
 and `JIRA_API_TOKEN` are only needed for the optional REST fallback.
 Provider-backed Jira MCP operations are bounded by `jira.mcpTimeoutMs`
 (240 seconds by default, or `FACTORY_JIRA_MCP_TIMEOUT_MS`).
+Short Jira operations use dedicated `jira.mcpModel` and
+`jira.mcpReasoningEffort` settings, independently of the implementation model.
+The Codex provider always routes Jira MCP calls through `gpt-5.6-luna` with
+`low` reasoning by default. `FACTORY_JIRA_MCP_MODEL` remains available for the
+OpenCode provider; reasoning can be overridden with
+`FACTORY_JIRA_MCP_REASONING_EFFORT`.
 OpenCode uses the dedicated `factory-jira` agent for these calls; its agentic
 steps are capped so a failed MCP mutation cannot spin indefinitely.
+The adapter serializes MCP operations and gives queued mutations priority over
+polling reads. Logs include queue, provider-request, validation, correction,
+and total durations under `jira:mcp:*` events.
 
 `repoPath` may be relative; it is resolved from the detected repository root.
 `stateDir` may also be relative and is resolved from the configured repository
@@ -237,7 +246,9 @@ Jira comments, retries, and blocked runs.
 
 `npm run start:pull-request-check` emits progress logs while checking open
 factory pull requests and transitions their Jira issues to `Done` after a
-successful merge. The individual loop commands can run in separate consoles or
+successful merge. The successful path transitions directly without a
+preliminary Jira read and does not add a redundant merge comment; ambiguous
+transition results are reconciled with one status read. The individual loop commands can run in separate consoles or
 process managers because they share the same durable SQLite state directory.
 
 `npm run start:review-fix` runs only the `ai-fix` review loop. `npm start` and

@@ -1,4 +1,4 @@
-import { makeRunMarker, RUN_STATUSES } from "../types.js";
+import { RUN_STATUSES } from "../types.js";
 import type { FactoryWorker } from "../worker.js";
 
 export async function checkMergedPullRequests(worker: FactoryWorker): Promise<{ closed: number }> {
@@ -43,11 +43,9 @@ export async function checkMergedPullRequests(worker: FactoryWorker): Promise<{ 
         mergedAt: pr.mergedAt,
       });
       try {
-        // A provider-backed Jira read can report the target status without
-        // proving that the issue was actually transitioned. Attempt the
-        // mutation so a merged PR always drives the external state change;
-        // transitionIfNeeded still handles an already-Done issue safely.
-        await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.done, { force: true });
+        // The adapter reconciles an ambiguous mutation with one authoritative
+        // read, so the normal path does not pay for a redundant status lookup.
+        await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.done, { skipStatusCheck: true });
       } catch (error) {
         worker.log("error", "merge-check:transition-failed", {
           runId: run.id,
@@ -61,15 +59,6 @@ export async function checkMergedPullRequests(worker: FactoryWorker): Promise<{ 
         issueKey: run.issue_key,
         prNumber: pr.number,
       });
-      try {
-        await worker.jira.addComment(run.issue_key, `${makeRunMarker(run.id)}\nTask auto-closed: pull request #${pr.number} was merged (${pr.html_url}).`);
-      } catch (error) {
-        worker.log("warn", "merge-check:comment-failed", {
-          runId: run.id,
-          issueKey: run.issue_key,
-          error: error?.message || String(error),
-        });
-      }
       worker.db.updateRun(run.id, {
         status: RUN_STATUSES.COMPLETED,
         last_error: null,

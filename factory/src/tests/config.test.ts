@@ -14,6 +14,8 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.stateDir, path.resolve("tmp", "AllLlmFactory"));
   assert.equal(config.git.repoPath, path.resolve("."));
   assert.equal(config.jira.adapter, JiraAdapterKind.CodexMcp);
+  assert.equal(config.jira.mcpModel, "gpt-5.6-luna");
+  assert.equal(config.jira.mcpReasoningEffort, "low");
   assert.equal(config.codex.model, "gpt-5.6-luna");
   assert.equal(config.codex.reasoningEffort, "max");
   assert.equal(config.codex.featureModel, "gpt-5.6-sol");
@@ -29,6 +31,8 @@ test("the repository factory/config.json is loaded when no override is supplied"
     const config = await loadConfig(undefined, repoPath);
     assert.equal(config.provider, AgentProvider.OpenCode);
     assert.equal(config.jira.adapter, JiraAdapterKind.OpenCodeMcp);
+    assert.equal(config.jira.mcpModel, undefined);
+    assert.equal(config.jira.mcpReasoningEffort, undefined);
   } finally {
     await rm(repoPath, { recursive: true, force: true });
   }
@@ -71,6 +75,21 @@ test("FACTORY_AGENT_PROVIDER overrides a provider stored in the config file", as
     else process.env.FACTORY_AGENT_PROVIDER = originalProvider;
     if (originalAdapter === undefined) delete process.env.FACTORY_JIRA_ADAPTER;
     else process.env.FACTORY_JIRA_ADAPTER = originalAdapter;
+    await rm(repoPath, { recursive: true, force: true });
+  }
+});
+
+test("Codex Jira MCP always uses Luna despite a configured model override", async () => {
+  const repoPath = await mkdtemp(path.join(os.tmpdir(), "all-llm-config-jira-luna-"));
+  const configPath = path.join(repoPath, "config.json");
+  try {
+    await writeFile(configPath, JSON.stringify({
+      provider: AgentProvider.Codex,
+      jira: { mcpModel: "gpt-5.6-sol" },
+    }));
+    const config = await loadConfig(configPath, repoPath);
+    assert.equal(config.jira.mcpModel, "gpt-5.6-luna");
+  } finally {
     await rm(repoPath, { recursive: true, force: true });
   }
 });

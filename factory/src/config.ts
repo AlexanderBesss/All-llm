@@ -36,6 +36,8 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       projectKey: process.env.JIRA_PROJECT_KEY || "KAN",
       mcpTimeoutMs: Number(process.env.FACTORY_JIRA_MCP_TIMEOUT_MS || 240_000),
       mcpAgent: process.env.FACTORY_JIRA_MCP_AGENT || "factory-jira",
+      mcpModel: provider === AgentProvider.Codex ? "gpt-5.6-luna" : process.env.FACTORY_JIRA_MCP_MODEL || undefined,
+      mcpReasoningEffort: process.env.FACTORY_JIRA_MCP_REASONING_EFFORT || (provider === AgentProvider.Codex ? "low" : undefined),
       email: process.env.JIRA_EMAIL || "",
       apiToken: process.env.JIRA_API_TOKEN || "",
       statuses: {
@@ -135,6 +137,16 @@ export async function loadConfig(configPath: string | undefined = undefined, rep
     ? resolveConfiguredPath(result.opencode.configPath, result.repoPath)
     : path.join(result.repoPath, "opencode.json");
   const rawJira = isRecord(raw) && isRecord(raw.jira) ? raw.jira : undefined;
+  if (result.provider === AgentProvider.Codex) {
+    // Jira MCP work is intentionally fixed to Luna: these are short,
+    // high-volume tool-routing calls and must not inherit a heavier model.
+    result.jira.mcpModel = "gpt-5.6-luna";
+  } else if (rawJira?.mcpModel === undefined && !process.env.FACTORY_JIRA_MCP_MODEL) {
+    result.jira.mcpModel = undefined;
+  }
+  if (rawJira?.mcpReasoningEffort === undefined && !process.env.FACTORY_JIRA_MCP_REASONING_EFFORT) {
+    result.jira.mcpReasoningEffort = result.provider === AgentProvider.Codex ? "low" : undefined;
+  }
   const configuredJiraAdapter = rawJira?.adapter;
   const isProviderMcpAdapter = configuredJiraAdapter === undefined
     || configuredJiraAdapter === JiraAdapterKind.CodexMcp
@@ -187,6 +199,12 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
   if (!config.stateDir) errors.push("stateDir is required");
   if (!Number.isInteger(config.jira?.mcpTimeoutMs) || config.jira.mcpTimeoutMs <= 0) {
     errors.push("jira.mcpTimeoutMs must be a positive integer");
+  }
+  if (config.jira?.mcpModel !== undefined && !String(config.jira.mcpModel).trim()) {
+    errors.push("jira.mcpModel must be a non-empty string when configured");
+  }
+  if (config.jira?.mcpReasoningEffort !== undefined && !String(config.jira.mcpReasoningEffort).trim()) {
+    errors.push("jira.mcpReasoningEffort must be a non-empty string when configured");
   }
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");

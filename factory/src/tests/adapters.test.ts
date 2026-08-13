@@ -169,7 +169,14 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
       };
     },
   };
-  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", mcpTimeoutMs: 12_345, mcpAgent: "factory-jira" }, executor);
+  const adapter = new McpJiraAdapter({
+    repoPath: ".",
+    projectKey: "FACT",
+    mcpTimeoutMs: 12_345,
+    mcpAgent: "factory-jira",
+    mcpModel: "gpt-5.6-luna",
+    mcpReasoningEffort: "low",
+  }, executor);
 
   await adapter.updateDescription("FACT-1", "## Plan\n\nKeep this exact text.");
 
@@ -178,6 +185,10 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
   assert.equal(requests[1].timeoutMs, 12_345);
   assert.equal(requests[0].agent, "factory-jira");
   assert.equal(requests[1].agent, "factory-jira");
+  assert.equal(requests[0].model, "gpt-5.6-luna");
+  assert.equal(requests[1].model, "gpt-5.6-luna");
+  assert.equal(requests[0].reasoningEffort, "low");
+  assert.equal(requests[1].reasoningEffort, "low");
   assert.equal(requests[0].toolScope, AgentToolScope.Jira);
   assert.equal(requests[1].toolScope, AgentToolScope.Jira);
   assert.equal(requests[0].workspaceAccess, AgentWorkspaceAccess.ReadOnly);
@@ -188,6 +199,62 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
   assert.match(requests[0].task, /Keep this exact text\./);
   assert.match(requests[1].task, /description must be a Markdown string/);
   assert.match(requests[1].task, /one permitted correction attempt/);
+});
+
+test("MCP Jira serializes calls and gives queued mutations priority over reads", async () => {
+  const order: string[] = [];
+  let releaseFirst!: () => void;
+  let markFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let calls = 0;
+  const executor: JiraExecutor = {
+    async run(input) {
+      calls += 1;
+      const mutation = /transition Jira issue/.test(input.task);
+      order.push(mutation ? "mutation" : "read");
+      if (calls === 1) {
+        markFirstStarted();
+        await firstBlocked;
+      }
+      return mutation
+        ? { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "transitioned" }) }
+        : { output: JSON.stringify({ issues: [] }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", readyStatus: "Ready" }, executor);
+
+  const activeRead = adapter.searchReady();
+  await firstStarted;
+  const queuedRead = adapter.searchReady();
+  const queuedMutation = adapter.transition("FACT-1", "Done");
+  releaseFirst();
+  await Promise.all([activeRead, queuedRead, queuedMutation]);
+
+  assert.deepEqual(order, ["read", "mutation", "read"]);
+});
+
+test("MCP Jira emits queue, request, validation, and duration telemetry", async () => {
+  const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
+  const executor: JiraExecutor = {
+    async run() {
+      return { output: JSON.stringify({ issues: [] }), events: [{ type: "item.completed" }] };
+    },
+  };
+  const adapter = new McpJiraAdapter({
+    repoPath: ".",
+    projectKey: "FACT",
+    readyStatus: "Ready",
+    log(_level, event, details) { events.push({ event, details }); },
+  }, executor);
+
+  await adapter.searchReady();
+
+  assert.ok(events.some((entry) => entry.event === "jira:mcp:queued"));
+  assert.ok(events.some((entry) => entry.event === "jira:mcp:start" && typeof entry.details?.queueMs === "number"));
+  assert.ok(events.some((entry) => entry.event === "jira:mcp:request-complete" && typeof entry.details?.durationMs === "number"));
+  assert.ok(events.some((entry) => entry.event === "jira:mcp:response-validated"));
+  assert.ok(events.some((entry) => entry.event === "jira:mcp:complete" && typeof entry.details?.durationMs === "number"));
 });
 
 test("MCP Jira description correction follows a format error instead of repeating the bad payload", async () => {
