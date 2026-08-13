@@ -47,6 +47,10 @@ async function processPullRequest(worker: FactoryWorker, pullRequest: PullReques
   const result = assertReviewResult(parsed, threads);
   if (result.blockers.length) throw new Error(`Review-fix agent reported blockers: ${result.blockers.join("; ")}`);
   const afterSha = await worker.git.assertBranchPublished(worktree, pullRequest.head.ref);
+  const hasAddressedThreads = result.threads.some((outcome) => outcome.disposition === ReviewThreadDisposition.Addressed);
+  if (hasAddressedThreads && (!result.committed || !result.pushed || afterSha === beforeSha)) {
+    throw new Error("Review-fix agent must publish a new commit before addressed threads can be resolved.");
+  }
 
   let addressed = 0;
   let disputed = 0;

@@ -99,5 +99,6 @@ So basically if pull request in ai-fix state we should run a loop get all of the
 - Added GitHub CLI support for labeled pull-request discovery, paginated unresolved review-thread reads, thread resolution, and thread replies.
 - Added safe pull-request worktree preparation that reuses an existing branch worktree or fetches the remote PR branch before creating one.
 - Added a strict review-fix agent prompt and JSON Schema. Every supplied thread must be classified exactly once as `addressed` or `disputed`; malformed or partial results cannot resolve or comment on threads.
+- Addressed outcomes are rejected before any thread mutation unless the agent reports both a commit and a push and the Git adapter independently verifies a new, clean branch HEAD published remotely. Disputed-only outcomes do not require an artificial commit.
 - Added the review-fix polling loop, CLI command, package script, configuration interval, runtime documentation, and `review` labeling during pull-request creation.
-- Validation: `npm.cmd test` passed all 90 tests, including adapter and end-to-end review-fix behavior; `node_modules\\.bin\\tsc.cmd -p tsconfig.json --noEmit` passed before final documentation changes and is rerun as final validation.
+- Final validation: `npm.cmd test` passed all 91 tests, including adapter, end-to-end review-fix behavior, and the new-commit resolution gate; `node_modules\\.bin\\tsc.cmd -p tsconfig.json --noEmit` and `git diff --check` passed.

@@ -593,6 +593,8 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
     { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "reviewer", body: "Add validation" }] },
     { id: "thread-incorrect", isResolved: false, comments: [{ id: "comment-2", author: "reviewer", body: "Remove required behavior" }] },
   ]);
+  let publicationChecks = 0;
+  fixtureData.git.assertBranchPublished = async () => publicationChecks++ === 0 ? "before-review-fix" : "after-review-fix";
   const worker = makeWorker(fixtureData, {
     async run() {
       return {
@@ -622,5 +624,44 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
     threadId: "thread-incorrect",
     body: "That change conflicts with the documented requirement.",
   }]);
+  fixtureData.db.close();
+});
+
+test("review-fix loop does not resolve addressed threads without a newly published commit", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.repoPath = path.resolve(".");
+  const pr = await fixtureData.github.createPullRequest({
+    title: "[FACT-1] Add factory coverage (Task)",
+    taskNumber: "FACT-1",
+    taskName: "Add factory coverage",
+    taskType: "Task",
+    body: "Details",
+    head: "factory/FACT-1",
+    base: "main",
+  });
+  pr.labels = ["ai-fix"];
+  fixtureData.github.reviewThreads.set(pr.number, [
+    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "reviewer", body: "Add validation" }] },
+  ]);
+  const worker = makeWorker(fixtureData, {
+    async run() {
+      return {
+        output: JSON.stringify({
+          summary: "Claimed a fix without publishing a new commit",
+          committed: true,
+          pushed: true,
+          threads: [{ threadId: "thread-actionable", disposition: "addressed", reply: "" }],
+          tests: [],
+          blockers: [],
+        }),
+        events: [],
+      };
+    },
+  });
+
+  const result = await worker.fixPullRequestReviews();
+
+  assert.deepEqual(result, { pullRequests: 1, addressed: 0, disputed: 0, failed: 1 });
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.[0].isResolved, false);
   fixtureData.db.close();
 });
