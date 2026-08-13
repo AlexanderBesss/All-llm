@@ -76,6 +76,22 @@ test("GitHub CLI adapter lists ai-fix pull requests and reads unresolved review 
   assert.equal(calls[2].args[1], "graphql");
 });
 
+test("GitHub CLI adapter requeues an AI review by replacing the review-loop labels", async () => {
+  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
+  const runner: ProcessRunner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: "", stderr: "" };
+  };
+  const github = new GitHubCliAdapter({ cliCommand: "gh-test", repositoryFullName: "example/factory", baseBranch: "main", repoPath: "." }, runner);
+
+  await github.requestAiReview(7);
+
+  assert.deepEqual(calls[0].args, [
+    "pr", "edit", "7", "--repo", "example/factory",
+    "--add-label", "ai-review", "--remove-label", "ai-fix",
+  ]);
+});
+
 test("GitHub CLI adapter rejects an existing pull request with an incomplete title", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const runner: ProcessRunner = async (command, args, options) => {

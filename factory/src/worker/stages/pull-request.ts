@@ -64,6 +64,12 @@ export async function processPullRequest(worker: FactoryWorker, run: FactoryRun,
     });
     if (!dryRun) {
       if (!pr?.html_url) throw new Error("GitHub did not return a pull-request URL.");
+      if (!persistedPr && pr.number) {
+        const requestAiReview = worker.github.requestAiReview;
+        if (!requestAiReview) throw new Error("GitHub adapter cannot start the AI review loop.");
+        worker.log("info", "pull-request:ai-review-label", { runId: run.id, number: pr.number });
+        await requestAiReview.call(worker.github, pr.number);
+      }
       // Checkpoint the remote PR before Jira reporting. If the worker is
       // interrupted after GitHub succeeds, the next attempt can resume
       // reporting without recreating the PR.

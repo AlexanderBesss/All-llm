@@ -25,12 +25,19 @@ pull request. Investigation sub-agents are not child tasks: they must not edit t
 worktree, create branches or pull requests, commit, push, or mutate Jira. The
 factory never creates Jira subtasks or child implementation work.
 
-New pull requests receive the `review` label. A separate review-fix loop scans
-all open pull requests labeled `ai-fix`, gathers their unresolved review threads,
-and sends every thread on a pull request to one implementation-agent pass. After
-the agent commits and pushes its fixes, the supervisor resolves addressed threads.
-Contradictory or incorrect feedback receives a technical reply and stays unresolved
-for the next human review.
+New pull requests receive the `review` label and the factory explicitly applies
+`ai-review` once the pull request exists. The repository AI Review workflow listens
+only for that label event, so ordinary pull-request creation, updates, and commits
+do not spend review tokens. It filters findings to high-relevance, high-impact
+issues before publishing inline comments, removes the trigger label, and applies
+`ai-fix` only when a qualifying finding was published.
+
+A separate review-fix loop scans all open pull requests labeled `ai-fix`, gathers
+their unresolved review threads, and sends every thread on a pull request to one
+implementation-agent pass. After the agent commits and pushes its fixes, the
+supervisor resolves addressed threads and re-applies `ai-review`, beginning the
+next review cycle. Contradictory or incorrect feedback receives a technical reply
+and stays unresolved for the next human review.
 
 Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
 (Task|feature|bug fix)`. The task name comes from the Jira summary, and the task

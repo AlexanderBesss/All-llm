@@ -106,6 +106,9 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) 
     async getPullRequest(prNumber) {
       return fixtureData.github.getPullRequest(prNumber);
     },
+    async requestAiReview(prNumber) {
+      return fixtureData.github.requestAiReview(prNumber);
+    },
     async listOpenPullRequestsByLabel(label) {
       return fixtureData.github.listOpenPullRequestsByLabel(label);
     },
