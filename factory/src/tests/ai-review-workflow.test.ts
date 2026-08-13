@@ -16,5 +16,8 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /finding\.relevance !== "high"/);
   assert.match(workflow, /finding\.confidence < minimumConfidence/);
   assert.match(workflow, /includes\(finding\.severity\)/);
+  assert.match(workflow, /core\.setOutput\("review_complete", "false"\)/);
+  assert.match(workflow, /core\.setOutput\("review_complete", "true"\)/);
+  assert.match(workflow, /steps\.publish\.outputs\.review_complete == ['"]true['"]/);
   assert.match(workflow, /labels: \["ai-fix"\]/);
 });

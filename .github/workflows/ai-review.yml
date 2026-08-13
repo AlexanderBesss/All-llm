@@ -74,6 +74,7 @@ jobs:
             const fs = require("fs");
             const findingsFile = process.env.FINDINGS_FILE;
             core.setOutput("published_findings", "0");
+            core.setOutput("review_complete", "false");
 
             if (!fs.existsSync(findingsFile)) {
               core.warning(`OpenCode did not create ${findingsFile}; no inline comments were published.`);
@@ -93,6 +94,7 @@ jobs:
 
             if (review.findings.length === 0) {
               core.info("OpenCode reported no actionable findings.");
+              core.setOutput("review_complete", "true");
               return;
             }
 
@@ -216,9 +218,10 @@ jobs:
             core.info(`Published ${comments.length} inline AI review comment(s).`);
             if (skipped > 0) core.warning(`Skipped ${skipped} finding(s) that could not be anchored to the PR diff.`);
             core.setOutput("published_findings", String(comments.length));
+            core.setOutput("review_complete", "true");
 
       - name: Advance AI review labels
-        if: success()
+        if: success() && steps.publish.outputs.review_complete == 'true'
         uses: actions/github-script@v7
         env:
           PUBLISHED_FINDINGS: ${{ steps.publish.outputs.published_findings }}
