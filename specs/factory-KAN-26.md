@@ -97,3 +97,10 @@ Also, I think we could make setting space a bit bigger so it could contain more 
 - `dotnet build whisper-note\\WhisperNote.csproj -c Debug` passed with 0 warnings and 0 errors.
 - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\whisper-note\\build.ps1 -Kill` passed and completed the Release win-x64 publish.
 - `git diff --check` passed.
+
+### Final verification pass
+
+- Re-inspected the complete `main...HEAD` diff; the implementation remains limited to the settings window, shared button template, and this specification.
+- Structural XAML assertions confirmed exactly two settings action buttons, the 440x520 settings surface, 88px minimum / 36px height action sizing, and `ModernButton` padding forwarding.
+- Re-ran Debug and Release builds with 0 warnings and 0 errors, followed by the Release win-x64 publish script.
+- No dedicated WPF UI test project exists; visual behavior remains covered by XAML parsing, structural assertions, compilation, and publish validation.
