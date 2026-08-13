@@ -52,6 +52,29 @@ test("provider defaults select the matching Jira MCP adapter", () => {
   }
 });
 
+test("FACTORY_AGENT_PROVIDER overrides a provider stored in the config file", async () => {
+  const repoPath = await mkdtemp(path.join(os.tmpdir(), "all-llm-config-env-provider-"));
+  const configPath = path.join(repoPath, "config.json");
+  const originalProvider = process.env.FACTORY_AGENT_PROVIDER;
+  const originalAdapter = process.env.FACTORY_JIRA_ADAPTER;
+  try {
+    process.env.FACTORY_AGENT_PROVIDER = AgentProvider.Codex;
+    delete process.env.FACTORY_JIRA_ADAPTER;
+    await writeFile(configPath, JSON.stringify({ provider: AgentProvider.OpenCode }));
+
+    const config = await loadConfig(configPath, repoPath);
+
+    assert.equal(config.provider, AgentProvider.Codex);
+    assert.equal(config.jira.adapter, JiraAdapterKind.CodexMcp);
+  } finally {
+    if (originalProvider === undefined) delete process.env.FACTORY_AGENT_PROVIDER;
+    else process.env.FACTORY_AGENT_PROVIDER = originalProvider;
+    if (originalAdapter === undefined) delete process.env.FACTORY_JIRA_ADAPTER;
+    else process.env.FACTORY_JIRA_ADAPTER = originalAdapter;
+    await rm(repoPath, { recursive: true, force: true });
+  }
+});
+
 test("OpenCode and Codex require matching Jira adapters", () => {
   const codexConfig = defaultConfig(".");
   codexConfig.provider = AgentProvider.Codex;

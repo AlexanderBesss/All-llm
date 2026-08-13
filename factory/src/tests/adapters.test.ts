@@ -189,7 +189,7 @@ test("MCP Jira mutations do not retry an unknown provider-timeout outcome", asyn
     async run(input) {
       requests.push(input);
       if (requests.length === 1) throw new Error("timed out after 240000 ms");
-      return { output: JSON.stringify({ issues: [{ key: "FACT-1", description: "Old description" }] }) };
+      return { output: JSON.stringify({ issues: [{ key: "FACT-1", summary: "", description: "Old description", status: null, issuetype: null, labels: [], parentKey: null, projectKey: "FACT", sprint: null }] }) };
     },
   };
   const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", mcpTimeoutMs: 12_345, mcpAgent: "factory-jira" }, executor);
@@ -340,7 +340,7 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
       return {
         output: JSON.stringify({
           issues: [
-            { key: "FACT-BOARD", summary: "On board", description: "", status: "Ready", issuetype: "Task", labels: [], parentKey: "", projectKey: "FACT", sprint: [{ id: 1, name: "Sprint 1" }] },
+            { key: "FACT-BOARD", summary: "On board", description: "", status: "Ready", issuetype: "Task", labels: [], parentKey: null, projectKey: "FACT", sprint: [{ id: 1, name: "Sprint 1", state: null, boardId: null, originBoardId: null, startDate: null, endDate: null, completeDate: null, goal: null }] },
             { key: "FACT-BACKLOG", summary: "In backlog", description: "", status: "Ready", issuetype: "Task", labels: [], parentKey: "", projectKey: "FACT", sprint: null },
           ],
         }),
@@ -351,7 +351,7 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
   const issues = await adapter.searchReady();
   assert.match(calls[0].task, /status = "Ready" ORDER BY priority DESC/);
   assert.deepEqual(issues.map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);
-  assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1" }]);
+  assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1", state: null, boardId: null, originBoardId: null, startDate: null, endDate: null, completeDate: null, goal: null }]);
 });
 
 test("MCP Jira lookup accepts an existing issue in Error status", async () => {
@@ -393,6 +393,7 @@ test("MCP Jira lookup normalizes native Jira field objects", async () => {
             labels: [],
             projectKey: { key: "FACT" },
             parentKey: { key: "FACT-0" },
+            sprint: null,
           }],
         }),
       };
@@ -427,7 +428,7 @@ test("MCP Jira lookup retries an empty response before accepting the issue", asy
       calls += 1;
       return calls === 1
         ? { output: JSON.stringify({ issues: [] }) }
-        : { output: JSON.stringify({ issues: [{ key: "FACT-1", summary: "Found", status: "In Progress", projectKey: "FACT" }] }) };
+        : { output: JSON.stringify({ issues: [{ key: "FACT-1", summary: "Found", description: null, status: "In Progress", issuetype: null, labels: [], parentKey: null, projectKey: "FACT", sprint: null }] }) };
     },
   };
   const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);

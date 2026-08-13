@@ -1,5 +1,5 @@
 {
-  "provider": "opencode",
+  "provider": "codex",
   "repoPath": ".",
   "stateDir": "./tmp/AllLlmFactory",
   "pollIntervalMs": 60000,

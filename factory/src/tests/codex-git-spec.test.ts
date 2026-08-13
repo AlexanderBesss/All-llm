@@ -24,6 +24,25 @@ test("provider strategy defaults to Codex and can select OpenCode", () => {
   assert.equal(createAgentStrategy(AgentProvider.OpenCode).jiraMcpServer, "jira");
 });
 
+test("Codex Jira output schema closes every object and requires every declared field", async () => {
+  const schema = JSON.parse(await readFile(path.resolve("src", "schemas", "jira-issues-result.schema.json"), "utf8")) as unknown;
+  const visit = (value: unknown, location = "$") => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const node = value as Record<string, unknown>;
+    if (node.type === "object") {
+      assert.equal(node.additionalProperties, false, `${location} must set additionalProperties=false`);
+      const properties = node.properties && typeof node.properties === "object" && !Array.isArray(node.properties)
+        ? Object.keys(node.properties as Record<string, unknown>).sort()
+        : [];
+      const required = Array.isArray(node.required) ? [...node.required].map(String).sort() : [];
+      assert.deepEqual(required, properties, `${location} must require every declared property`);
+    }
+    for (const [key, child] of Object.entries(node)) visit(child, `${location}.${key}`);
+  };
+
+  visit(schema);
+});
+
 test("OpenCode executor invokes the configured local model and parses JSON events", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new OpenCodeAgentExecutor({

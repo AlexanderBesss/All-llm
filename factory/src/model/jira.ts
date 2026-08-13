@@ -48,11 +48,11 @@ export interface JiraSearchItem {
   key: string;
   summary?: string;
   description?: JiraDescription;
-  status?: string;
-  issuetype?: string;
+  status?: string | JiraStatus | null;
+  issuetype?: string | JiraStatus | null;
   labels?: string[];
-  projectKey?: string;
-  parentKey?: string;
+  projectKey?: string | { key: string } | null;
+  parentKey?: string | { key: string } | null;
   sprint?: JsonValue;
 }
 

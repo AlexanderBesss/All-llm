@@ -119,6 +119,13 @@ export async function loadConfig(configPath: string | undefined = undefined, rep
   if (isRecord(raw) && typeof raw.agentProvider === "string" && raw.provider === undefined) {
     result.provider = raw.agentProvider as AgentProvider;
   }
+  // Environment overrides are applied after the file merge so an operator can
+  // switch a long-running/scheduled installation without editing its config.
+  // Previously FACTORY_AGENT_PROVIDER only affected defaults and was silently
+  // overwritten by factory/config.json.
+  if (process.env.FACTORY_AGENT_PROVIDER) {
+    result.provider = process.env.FACTORY_AGENT_PROVIDER as AgentProvider;
+  }
   result.repoPath = resolveConfiguredPath(result.repoPath || repoPath, base.repoPath);
   result.stateDir = resolveConfiguredPath(result.stateDir || base.stateDir, result.repoPath);
   result.git.repoPath = result.repoPath;
