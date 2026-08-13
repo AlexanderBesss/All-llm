@@ -56,9 +56,9 @@ function normalizedGitHubConfig(config: FactoryConfig, signal?: AbortSignal): Gi
   };
 }
 
-async function makeWorker(config: FactoryConfig, signal?: AbortSignal) {
+async function makeWorker(config: FactoryConfig, signal?: AbortSignal, { syncBaseBranch = true } = {}) {
   const git = new GitAdapter(normalizedGitConfig(config, signal));
-  await git.syncBaseBranch();
+  if (syncBaseBranch) await git.syncBaseBranch();
   const db = await openStateDatabase(config.stateDir);
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
@@ -326,7 +326,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
   if (args.command === CliCommand.Help) {
-    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|status|install> [--config path] [--dry-run] [--json]");
+    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-jira-tasks|start-pull-request-check|status|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
   if (args.command === CliCommand.Doctor) {
@@ -343,7 +343,12 @@ export async function main(argv: string[] = process.argv.slice(2)) {
     await commandInstall(config);
     return 0;
   }
-  if (![CliCommand.RunOnce, CliCommand.Start].includes(args.command as CliCommand)) throw new Error(`Unknown command: ${args.command}`);
+  const loopCommands = [
+    CliCommand.Start,
+    CliCommand.StartJiraTasks,
+    CliCommand.StartPullRequestCheck,
+  ];
+  if (![CliCommand.RunOnce, ...loopCommands].includes(args.command as CliCommand)) throw new Error(`Unknown command: ${args.command}`);
   const errors = validateConfig(config, { live: true });
   if (errors.length) throw new Error(`Factory is not configured:\n- ${errors.join("\n- ")}`);
   const controller = new AbortController();
@@ -358,9 +363,18 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   let db;
   let runtimeWorker;
   try {
-    ({ db, worker: runtimeWorker } = await makeWorker(config, controller.signal));
+    ({ db, worker: runtimeWorker } = await makeWorker(config, controller.signal, {
+      // The pull-request checker only reads GitHub and updates Jira. Avoid
+      // making two independently started loops synchronize the repository at
+      // the same time.
+      syncBaseBranch: args.command !== CliCommand.StartPullRequestCheck,
+    }));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
-    else {
+    else if (args.command === CliCommand.StartJiraTasks) {
+      await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
+    } else if (args.command === CliCommand.StartPullRequestCheck) {
+      await runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs });
+    } else {
       await Promise.all([
         runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
         runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),

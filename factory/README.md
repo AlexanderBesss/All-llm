@@ -192,11 +192,18 @@ npm test
 npm run status
 npm run run-once
 npm start
+npm run start:jira-tasks
+npm run start:pull-request-check
+npm run start:all
 npm run install-task
 ```
 
 Useful additional commands are `npm run dry-run`,
-`npm run status:json`, and `npm test`. The generic
+`npm run status:json`, and `npm test`. Use `npm run start:jira-tasks` to run
+only the Jira Ready-ticket polling and implementation loop. Use
+`npm run start:pull-request-check` to run only the GitHub pull-request merge
+checker that closes the Jira ticket after a merge. `npm start` and
+`npm run start:all` run both loops together. The generic
 `npm run factory -- <command>` form also forwards any supported CLI command or
 option.
 
@@ -206,10 +213,17 @@ state, the selected agent and its configured Jira MCP server, authenticated
 GitHub CLI repository access, and Jira configuration. Live startup repeats the
 agent/MCP health check before polling.
 
-`npm start` emits progress logs for polling, issue discovery and claiming,
+`npm run start:jira-tasks` emits progress logs for polling, issue discovery and claiming,
 Jira status changes, worktree creation, the selected implementation agent, the
 fresh-context code reviewer, commit and push confirmation, pull-request creation,
 Jira comments, retries, and blocked runs.
+
+`npm run start:pull-request-check` emits progress logs while checking open
+factory pull requests and transitions their Jira issues to `Done` after a
+successful merge. The two loop commands can run in separate consoles or
+process managers because they share the same durable SQLite state directory.
+
+`npm start` and `npm run start:all` run both loops in one factory process.
 
 `npm run run-once` performs one poll and reports `retry_scheduled` when a stage
 fails before the retry limit. It does not wait for the retry; use `npm start`
