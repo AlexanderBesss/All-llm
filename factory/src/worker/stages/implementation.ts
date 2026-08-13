@@ -4,7 +4,28 @@ import { makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart, StageR
 import type { FactoryRun } from "../../model/database.js";
 import type { JiraIssue } from "../../model/jira.js";
 import type { FactoryWorker } from "../../worker.js";
+import type { CodexEvent } from "../../model/codex.js";
 import { hashInput, normalizePlan, planDescription } from "../format.js";
+
+const AGENT_HEARTBEAT_MS = 30_000;
+
+function agentActivity(event: CodexEvent) {
+  const value = event as Record<string, unknown>;
+  const item = value.item && typeof value.item === "object" ? value.item as Record<string, unknown> : undefined;
+  const part = value.part && typeof value.part === "object" ? value.part as Record<string, unknown> : undefined;
+  const eventType = typeof value.type === "string" ? value.type : "unknown";
+  if (!/(start|complete|finish|tool)/i.test(eventType) && item?.type !== "command_execution" && part?.type !== "tool") return null;
+  const activity = String(item?.type || part?.type || eventType);
+  const tool = part?.tool || value.tool;
+  const state = part?.state && typeof part.state === "object" ? part.state as Record<string, unknown> : undefined;
+  const status = item?.status || state?.status || value.status;
+  return {
+    event: eventType,
+    activity,
+    ...(typeof tool === "string" ? { tool } : {}),
+    ...(typeof status === "string" ? { status } : {}),
+  };
+}
 
 export async function processImplementation(worker: FactoryWorker, run: FactoryRun, { dryRun }: { dryRun: boolean }) {
   worker.throwIfStopping();
@@ -61,14 +82,45 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       created: spec.created,
     });
     worker.log("info", "implementation:agent-start", { runId: run.id, branchName, worktree });
-    const result = await worker.agent.execute({
-      issue,
-      runId: run.id,
-      branchName,
-      cwd: worktree,
-      previousPlan,
-      specPath: spec.relativePath,
-    });
+    const agentStartedAt = Date.now();
+    let agentEvents = 0;
+    let lastActivity = "starting";
+    const elapsedSeconds = () => Math.max(0, Math.round((Date.now() - agentStartedAt) / 1000));
+    const heartbeat = setInterval(() => {
+      worker.db.updateRun(run.id, { lease_until: new Date(Date.now() + worker.config.leaseMs).toISOString() });
+      worker.log("info", "implementation:agent-heartbeat", {
+        runId: run.id,
+        elapsedSeconds: elapsedSeconds(),
+        events: agentEvents,
+        lastActivity,
+      });
+    }, AGENT_HEARTBEAT_MS);
+    heartbeat.unref();
+    let result;
+    try {
+      result = await worker.agent.execute({
+        issue,
+        runId: run.id,
+        branchName,
+        cwd: worktree,
+        previousPlan,
+        specPath: spec.relativePath,
+        onProgress: (event) => {
+          agentEvents += 1;
+          const activity = agentActivity(event);
+          if (!activity) return;
+          lastActivity = activity.activity;
+          worker.log("info", "implementation:agent-progress", {
+            runId: run.id,
+            elapsedSeconds: elapsedSeconds(),
+            eventNumber: agentEvents,
+            ...activity,
+          });
+        },
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
     worker.throwIfStopping();
     let plan = normalizePlan(result.result?.plan);
     worker.log("info", "implementation:agent-complete", {
@@ -77,6 +129,8 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       pushed: result.result?.pushed === true,
       tests: result.result?.tests?.length || 0,
       blockers: result.result?.blockers?.length || 0,
+      elapsedSeconds: elapsedSeconds(),
+      events: agentEvents,
     });
     const commitSha = await worker.git.assertBranchPublished(worktree, branchName);
     worker.log("info", "implementation:head", { runId: run.id, commitSha });

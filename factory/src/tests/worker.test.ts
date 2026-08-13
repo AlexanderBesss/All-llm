@@ -23,6 +23,10 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
       } else {
         implementationInput = input;
         events.push("implementation");
+        input.onProgress?.({
+          type: "item.completed",
+          item: { type: "command_execution", status: "completed" },
+        });
       }
       return { result: executionFor(), raw: {} };
     },
@@ -60,6 +64,7 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
   assert.ok(logs.some((entry) => entry.includes("implementation:spec-ready")));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
+  assert.ok(logs.some((entry) => entry.includes("implementation:agent-progress") && entry.includes('"activity":"command_execution"')));
   assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);

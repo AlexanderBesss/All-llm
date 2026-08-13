@@ -29,6 +29,7 @@ export interface CodexRunInput {
   agent?: string;
   toolScope?: AgentToolScope;
   workspaceAccess?: AgentWorkspaceAccess;
+  onEvent?(event: CodexEvent): void;
 }
 
 export interface CodexEvent {
@@ -90,5 +91,6 @@ export interface CodexAgent {
     specPath: string;
     baseBranch?: string;
     verificationPass?: boolean;
+    onProgress?(event: CodexEvent): void;
   }): Promise<CodexExecutionResult>;
 }

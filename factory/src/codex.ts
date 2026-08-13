@@ -3,7 +3,7 @@ import path from "node:path";
 import { parseJsonResult } from "./json-output.js";
 import { runProcess } from "./git.js";
 import type { ProcessRunner } from "./model/process.js";
-import { AgentToolScope, AgentWorkspaceAccess, type CodexAgentConfig, type CodexRunInput, type CodexExecutionResult } from "./model/codex.js";
+import { AgentToolScope, AgentWorkspaceAccess, type CodexAgentConfig, type CodexEvent, type CodexRunInput, type CodexExecutionResult } from "./model/codex.js";
 import type { JiraIssue } from "./model/jira.js";
 import { assertExecution, parseJsonLines } from "./agent/codex-protocol.js";
 import { buildExecutionTask } from "./agent/codex-prompts.js";
@@ -88,7 +88,7 @@ export class CodexAgentExecutor {
     ];
   }
 
-  async run({ task, context = "", cwd, outputSchema, timeoutMs, model, reasoningEffort, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs, model, reasoningEffort, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured, onEvent }: CodexRunInput) {
     const prompt = `${task}\n\n${context}\n\nReturn only the requested structured result. Do not include commentary outside the result.`;
     const runWithTier = async (serviceTier = this.config.codex.serviceTier) => {
       const args = [...this.baseArgs(serviceTier, toolScope, workspaceAccess, model, reasoningEffort), cwd];
@@ -103,6 +103,9 @@ export class CodexAgentExecutor {
         timeoutMs: timeoutMs || this.config.codex.timeoutMs,
         signal: this.config.signal,
         env: this.runtimeEnv(),
+        onStdoutLine: onEvent ? (line) => {
+          try { onEvent(JSON.parse(line)); } catch {}
+        } : undefined,
       });
       return parseJsonLines(result.stdout);
     };
@@ -142,7 +145,7 @@ export class CodexAgentExecutor {
     return { ...result, mcp: "Atlassian-Rovo-MCP" };
   }
 
-  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "", baseBranch = "", verificationPass = false }: {
+  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "", baseBranch = "", verificationPass = false, onProgress }: {
     issue: JiraIssue;
     runId: string;
     branchName: string;
@@ -151,6 +154,7 @@ export class CodexAgentExecutor {
     specPath?: string;
     baseBranch?: string;
     verificationPass?: boolean;
+    onProgress?(event: CodexEvent): void;
   }): Promise<CodexExecutionResult> {
     const task = buildExecutionTask({ issue, runId, branchName, baseBranch, specPath, previousPlan, verificationPass });
     const outputSchema = factorySchemaPath(this.config.repoPath, "execution-result.schema.json");
@@ -165,6 +169,7 @@ export class CodexAgentExecutor {
         reasoningEffort: this.config.codex.featureReasoningEffort,
       } : {}),
       toolScope: AgentToolScope.Build,
+      onEvent: onProgress,
     });
     const parsed = parseJsonResult(result.output);
     await assertSchema(parsed, outputSchema);

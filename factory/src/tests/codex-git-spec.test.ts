@@ -458,6 +458,19 @@ test("subprocesses can receive an explicit stdin payload", async () => {
   assert.equal(result.stdout, "factory prompt");
 });
 
+test("subprocess output is reported line-by-line while remaining available to the caller", async () => {
+  const lines: string[] = [];
+  const result = await runProcess(process.execPath, [
+    "-e",
+    "process.stdout.write('first\\nsecond'); setTimeout(() => process.stdout.write(' line\\nlast'), 10);",
+  ], {
+    onStdoutLine: (line) => lines.push(line),
+  });
+
+  assert.equal(result.stdout, "first\nsecond line\nlast");
+  assert.deepEqual(lines, ["first", "second line", "last"]);
+});
+
 test("GitAdapter switches to and fast-forward pulls the configured base branch", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   let currentBranch = "factory/KAN-19";

@@ -89,7 +89,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     };
   }
 
-  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured, onEvent }: CodexRunInput) {
     const settings = this.config.opencode || {};
     let schemaInstruction = "";
     if (outputSchema) {
@@ -116,6 +116,9 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
       timeoutMs: timeoutMs || settings.timeoutMs || 1_200_000,
       signal: this.config.signal,
       env: this.runtimeEnv(toolScope, workspaceAccess),
+      onStdoutLine: onEvent ? (line) => {
+        try { onEvent(JSON.parse(line)); } catch {}
+      } : undefined,
     });
     return parseOpenCodeOutput(result.stdout);
   }

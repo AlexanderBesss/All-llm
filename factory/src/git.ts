@@ -72,7 +72,7 @@ export function processInvocation(command: string, args: string[]) {
   };
 }
 
-export function runProcess(command: string, args: string[], { cwd, env = process.env, input, timeoutMs = 120_000, signal }: ProcessOptions = {}): Promise<ProcessResult> {
+export function runProcess(command: string, args: string[], { cwd, env = process.env, input, timeoutMs = 120_000, signal, onStdoutLine }: ProcessOptions = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(abortError(`Operation aborted before starting: ${command}`));
@@ -95,6 +95,7 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
+    let stdoutLineBuffer = "";
     let stderr = "";
     let settled = false;
     let terminating = false;
@@ -120,7 +121,17 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       terminate(new Error(`${command} ${args.join(" ")} timed out after ${timeoutMs} ms.`));
     }, timeoutMs);
     signal?.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      if (!onStdoutLine) return;
+      stdoutLineBuffer += text;
+      const lines = stdoutLineBuffer.split(/\r?\n/);
+      stdoutLineBuffer = lines.pop() || "";
+      for (const line of lines) {
+        try { onStdoutLine(line); } catch {}
+      }
+    });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     if (input !== undefined) child.stdin?.end(input);
     child.on("error", (error) => {
@@ -130,6 +141,10 @@ export function runProcess(command: string, args: string[], { cwd, env = process
       if (terminating) return;
       if (settled) return;
       cleanup();
+      if (onStdoutLine && stdoutLineBuffer) {
+        try { onStdoutLine(stdoutLineBuffer); } catch {}
+        stdoutLineBuffer = "";
+      }
       if (code !== 0) {
         settled = true;
         const details = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");

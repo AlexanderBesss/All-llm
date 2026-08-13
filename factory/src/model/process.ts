@@ -4,6 +4,7 @@ export interface ProcessOptions {
   input?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  onStdoutLine?(line: string): void;
 }
 
 export interface ProcessResult {
