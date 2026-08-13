@@ -33,7 +33,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       });
       worker.db.updateRun(run.id, { plan_json: JSON.stringify(plan), issue_json: JSON.stringify(issue) });
       worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, StageRunStatus.Completed);
-      worker.db.updateRun(run.id, { stage: STAGES.CODE_REVIEW, branch_name: branchName, worktree_path: worktreePath });
+      worker.db.updateRun(run.id, { stage: STAGES.PRE_PR_VERIFICATION, branch_name: branchName, worktree_path: worktreePath });
       return { stage: STAGES.IMPLEMENTATION, dryRun: true };
     }
     await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.implementation);
@@ -70,7 +70,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       specPath: spec.relativePath,
     });
     worker.throwIfStopping();
-    const plan = normalizePlan(result.result?.plan);
+    let plan = normalizePlan(result.result?.plan);
     worker.log("info", "implementation:agent-complete", {
       runId: run.id,
       committed: result.result?.committed === true,
@@ -78,14 +78,10 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       tests: result.result?.tests?.length || 0,
       blockers: result.result?.blockers?.length || 0,
     });
-    const commitSha = await worker.git.headSha(worktree);
+    const commitSha = await worker.git.assertBranchPublished(worktree, branchName);
     worker.log("info", "implementation:head", { runId: run.id, commitSha });
-    if (!result.result?.committed || !result.result?.pushed) {
-      throw new Error("Implementation agent did not confirm both commit and push.");
-    }
-    if (typeof worker.git.assertFileCommitted === "function") {
-      await worker.git.assertFileCommitted(worktree, spec.relativePath);
-    }
+    await worker.git.assertFileCommitted(worktree, spec.relativePath);
+    plan = { ...plan, files: await worker.git.changedFiles(worktree) };
     worker.log("info", "implementation:plan-persisting", { runId: run.id });
     worker.db.updateRun(run.id, {
       plan_json: JSON.stringify(plan),
@@ -101,7 +97,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
     ));
     worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, StageRunStatus.Completed);
     worker.db.updateRun(run.id, {
-      stage: STAGES.CODE_REVIEW,
+      stage: STAGES.PRE_PR_VERIFICATION,
       status: RUN_STATUSES.ACTIVE,
       branch_name: branchName,
       worktree_path: worktree,
@@ -114,7 +110,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       issueKey: run.issue_key,
       commitSha,
       branchName,
-      nextStage: STAGES.CODE_REVIEW,
+      nextStage: STAGES.PRE_PR_VERIFICATION,
     });
     return { stage: STAGES.IMPLEMENTATION, commitSha };
   } catch (error) {

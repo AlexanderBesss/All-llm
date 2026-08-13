@@ -5,30 +5,37 @@ import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
 import { RUN_STATUSES, STAGES, RunAction, ArtifactKind } from "../types.js";
-import { executionFor, fixture, makeWorker, planFor, reviewFor } from "./support.js";
-import { ReviewVerdict } from "../model/codex.js";
+import { executionFor, fixture, makeWorker, planFor } from "./support.js";
 import { pullRequestDescription } from "../worker.js";
 test("processes one parent ticket with one agent and one aggregate PR", async () => {
   const fixtureData = await fixture();
   const events = [];
   const logs = [];
   let agentCalls = 0;
-  let agentInput;
+  let implementationInput;
+  let verificationInput;
   const agent = {
-    async execute(input) { agentCalls += 1; agentInput = input; events.push("implementation"); return { result: executionFor(), raw: {} }; },
+    async execute(input) {
+      agentCalls += 1;
+      if (input.verificationPass) {
+        verificationInput = input;
+        events.push("pre-pr-verification");
+      } else {
+        implementationInput = input;
+        events.push("implementation");
+      }
+      return { result: executionFor(), raw: {} };
+    },
   };
-  const reviewer = {
-    async review(input) { events.push("code-review"); assert.equal(input.specPath, "specs/factory-FACT-1.md"); return { result: reviewFor(), raw: {} }; },
-  };
-  const worker = makeWorker(fixtureData, agent, { events, logs, reviewer });
+  const worker = makeWorker(fixtureData, agent, { events, logs });
   const result = await worker.runOnce();
   assert.equal(result.action, RunAction.Claimed);
-  assert.equal(agentCalls, 1);
+  assert.equal(agentCalls, 2);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.deepEqual(events.filter((event) => event.startsWith("status:")), ["status:In Progress", "status:In Review"]);
   assert.ok(events.indexOf("status:In Progress") < events.indexOf("implementation"));
-  assert.ok(events.indexOf("implementation") < events.indexOf("code-review"));
-  assert.ok(events.indexOf("code-review") < events.indexOf("pull-request"));
+  assert.ok(events.indexOf("implementation") < events.indexOf("pre-pr-verification"));
+  assert.ok(events.indexOf("pre-pr-verification") < events.indexOf("pull-request"));
   assert.ok(events.indexOf("implementation") < events.indexOf("pull-request"));
   assert.equal(fixtureData.github.pullRequests[0].title, "[FACT-1] Add factory coverage (Task)");
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
@@ -44,8 +51,10 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(description, /^> Implement the requested change\./);
   assert.ok(description.indexOf("[factory-run:") > description.indexOf("> Implement the requested change."));
   assert.ok(description.indexOf("## Implementation plan") > description.indexOf("[factory-run:"));
-  assert.equal(agentInput.specPath, "specs/factory-FACT-1.md");
-  assert.match(await readFile(path.join(agentInput.cwd, agentInput.specPath), "utf8"), /# Specification: \[FACT-1\]/);
+  assert.equal(implementationInput.specPath, "specs/factory-FACT-1.md");
+  assert.equal(verificationInput.verificationPass, true);
+  assert.equal(verificationInput.baseBranch, "main");
+  assert.match(await readFile(path.join(implementationInput.cwd, implementationInput.specPath), "utf8"), /# Specification: \[FACT-1\]/);
   assert.equal(fixtureData.db.findArtifact(ArtifactKind.Spec, "factory/FACT-1").artifact_value, "specs/factory-FACT-1.md");
   assert.match(description, /specs\/factory-FACT-1\.md/);
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
@@ -79,47 +88,53 @@ test("pull-request description presents intent and review context in a predictab
   assert.match(body, /npm test — verifies the factory workflow\./);
 });
 
-test("independent review corrections are committed before the pull request", async () => {
+test("pre-PR verification is an editable autonomous refinement pass", async () => {
   const fixtureData = await fixture();
-  let reviewInput;
-  const reviewer = {
-    async review(input) {
-      reviewInput = input;
-      return { result: reviewFor({ changed: true, committed: true, pushed: true, summary: "Fixed a boundary-condition defect." }), raw: {} };
+  let agentCalls = 0;
+  let verificationInput;
+  const agent = {
+    async execute(input) {
+      agentCalls += 1;
+      if (input.verificationPass) verificationInput = input;
+      return { result: executionFor({ summary: input.verificationPass ? "Verified and refined the implementation" : "Implemented the parent task" }), raw: {} };
     },
   };
-  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
+  const worker = makeWorker(fixtureData, agent);
   const result = await worker.runOnce();
   assert.equal(result.action, RunAction.Claimed);
-  assert.equal(reviewInput.branchName, "factory/FACT-1");
-  assert.equal(reviewInput.baseBranch, "main");
+  assert.equal(agentCalls, 2);
+  assert.equal(verificationInput.branchName, "factory/FACT-1");
+  assert.equal(verificationInput.verificationPass, true);
+  assert.equal(verificationInput.baseBranch, "main");
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.db.getRun(result.runId).stage, STAGES.REVIEW);
   fixtureData.db.close();
 });
 
-test("a review blocker prevents pull-request creation", async () => {
+test("an unresolved pre-PR verification blocker prevents pull-request creation", async () => {
   const fixtureData = await fixture({ maxAttempts: 1 });
-  const reviewer = {
-    async review() {
-      return { result: reviewFor({ verdict: ReviewVerdict.Blocked, blockers: ["The implementation does not satisfy the acceptance criteria."] }), raw: {} };
+  const agent = {
+    async execute(input) {
+      return { result: executionFor(input.verificationPass
+        ? { blockers: ["The implementation requires unavailable authority."] }
+        : {}), raw: {} };
     },
   };
-  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { reviewer });
+  const worker = makeWorker(fixtureData, agent);
   const result = await worker.runOnce();
   assert.equal(result.action, RunAction.Blocked);
   assert.equal(fixtureData.github.pullRequests.length, 0);
-  assert.equal(fixtureData.db.getLastFailedStage(result.runId), STAGES.CODE_REVIEW);
+  assert.equal(fixtureData.db.getLastFailedStage(result.runId), STAGES.PRE_PR_VERIFICATION);
   fixtureData.db.close();
 });
 
-test("dry-run still records the code-review stage before pull-request generation", async () => {
+test("dry-run still records the pre-PR verification stage before pull-request generation", async () => {
   const fixtureData = await fixture();
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce({ dryRun: true });
   assert.equal(result.action, RunAction.Claimed);
   assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.IMPLEMENTATION), 1);
-  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.CODE_REVIEW), 1);
+  assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.PRE_PR_VERIFICATION), 1);
   assert.equal(fixtureData.db.countStageAttempts(result.runId, STAGES.PULL_REQUEST), 1);
   assert.equal(fixtureData.db.getRun(result.runId).stage, STAGES.REVIEW);
   fixtureData.db.close();
@@ -168,7 +183,7 @@ test("retries the same parent run without creating child work", async () => {
   assert.equal(first.action, "retry_scheduled");
   const second = await worker.runOnce();
   assert.equal(second.action, "resumed");
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(fixtureData.db.listRuns(20).length, 1);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.jira.issues.size, 1);
@@ -258,7 +273,7 @@ test("continues blocked implementation tasks from their failed stage when enable
   shouldFail = false;
   const second = await worker.runOnce();
   assert.equal(second.action, "resumed");
-  assert.equal(agentCalls, 2);
+  assert.equal(agentCalls, 3);
   assert.deepEqual(
     fixtureData.jira.transitions.map((item) => item.statusName),
     ["In Progress", "Error", "In Progress", "In Review"],
@@ -287,11 +302,13 @@ test("continues blocked pull-request tasks without rerunning implementation", as
   assert.equal(first.action, "blocked");
   assert.equal(fixtureData.db.getLastFailedStage(first.runId), STAGES.PULL_REQUEST);
   assert.equal(fixtureData.github.pullRequests.length, 0);
+  const callsBeforeResume = agentCalls;
 
   shouldFail = false;
   const second = await worker.runOnce();
   assert.equal(second.action, "resumed");
-  assert.equal(agentCalls, 1);
+  assert.equal(agentCalls, callsBeforeResume);
+  assert.equal(agentCalls, 2);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
@@ -349,7 +366,7 @@ test("a new worker reclaims an expired active lease and resumes the parent agent
   const worker = makeWorker(fixtureData, { async execute() { agentCalls += 1; return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
   assert.equal(result.action, RunAction.Resumed);
-  assert.equal(agentCalls, 1);
+  assert.equal(agentCalls, 2);
   assert.equal(fixtureData.github.pullRequests.length, 1);
   assert.equal(fixtureData.db.getRun("FACT-1-recovery").status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
@@ -425,7 +442,7 @@ test("resumes Jira reporting from a checkpointed pull request", async () => {
   fixtureData.db.close();
 });
 
-test("legacy planning runs migrate without invoking an agent or creating subtasks", async () => {
+test("legacy planning runs migrate without creating subtasks", async () => {
   const fixtureData = await fixture();
   const claimed = fixtureData.db.claimRun({
     id: "FACT-1-legacy",
@@ -446,7 +463,7 @@ test("legacy planning runs migrate without invoking an agent or creating subtask
   const worker = makeWorker(fixtureData, { async execute() { agentCalls += 1; return { result: executionFor(), raw: {} }; } });
   const result = await worker.runOnce();
   assert.equal(result.action, RunAction.Resumed);
-  assert.equal(agentCalls, 1);
+  assert.equal(agentCalls, 2);
   assert.equal(fixtureData.jira.issues.size, 1);
   assert.equal(fixtureData.db.getRun("FACT-1-legacy").status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();

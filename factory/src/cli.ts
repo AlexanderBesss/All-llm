@@ -65,12 +65,12 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal, { syncBas
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
     await github.health();
-    const { strategy, agent, reviewer } = createAgentExecutors(config, signal);
+    const { strategy, agent } = createAgentExecutors(config, signal);
     await agent.health({ requireJiraMcp: config.jira.adapter !== JiraAdapterKind.Rest });
     const jira = config.jira.adapter === JiraAdapterKind.Rest
       ? new JiraRestAdapter(normalizedJiraConfig(config, signal))
       : strategy.createJiraAdapter(normalizedJiraConfig(config, signal), agent);
-    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, reviewer, signal }) };
+    return { db, worker: new FactoryWorker({ config, db, jira, github, git, agent, signal }) };
   } catch (error) {
     db.close();
     throw error;

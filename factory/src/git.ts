@@ -212,6 +212,39 @@ export class GitAdapter {
     return Boolean(await this.output(["status", "--porcelain"], worktreePath));
   }
 
+  async assertBranchPublished(worktreePath: string, branchName: string) {
+    const currentBranch = await this.output(["branch", "--show-current"], worktreePath);
+    if (currentBranch !== branchName) {
+      throw new Error(`Factory worktree is on '${currentBranch || "detached HEAD"}', expected '${branchName}'.`);
+    }
+    if (await this.hasChanges(worktreePath)) {
+      throw new Error("Factory agent completed with uncommitted worktree changes.");
+    }
+
+    const head = await this.headSha(worktreePath);
+    const remote = this.config.remote || "origin";
+    const output = await this.output(["ls-remote", "--exit-code", "--heads", remote, branchName], worktreePath);
+    const remoteHead = output.split(/\s+/)[0] || "";
+    if (remoteHead !== head) {
+      throw new Error(`Remote branch ${remote}/${branchName} is at ${remoteHead || "no commit"}, expected local HEAD ${head}.`);
+    }
+    return head;
+  }
+
+  async changedFiles(worktreePath: string) {
+    const remote = this.config.remote || "origin";
+    const baseBranch = this.config.baseBranch || "main";
+    const remoteBase = `refs/remotes/${remote}/${baseBranch}`;
+    let baseRef = remoteBase;
+    try {
+      await this.git(["show-ref", "--verify", "--quiet", remoteBase], worktreePath);
+    } catch {
+      baseRef = baseBranch;
+    }
+    const output = await this.output(["diff", "--name-only", `${baseRef}...HEAD`], worktreePath);
+    return output ? output.split(/\r?\n/).filter(Boolean) : [];
+  }
+
   async assertFileCommitted(worktreePath, relativePath) {
     const root = path.resolve(worktreePath);
     const target = path.resolve(root, relativePath);

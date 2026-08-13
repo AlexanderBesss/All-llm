@@ -7,6 +7,7 @@ import { buildPullRequestTitle, normalizePullRequestTaskType } from "../pull-req
 import { McpJiraAdapter } from "../mcp-jira.js";
 import type { ProcessOptions, ProcessResult, ProcessRunner } from "../model/process.js";
 import type { JiraExecutor } from "../model/jira.js";
+import { AgentToolScope, AgentWorkspaceAccess } from "../model/codex.js";
 import { executionFor, fixture, makeWorker } from "./support.js";
 test("factory defaults to one attempt and no subtask configuration", () => {
   const previous = process.env.FACTORY_MAX_ATTEMPTS;
@@ -151,9 +152,13 @@ test("MCP Jira description updates use a bounded timeout and strict Markdown pay
   assert.equal(requests[1].timeoutMs, 12_345);
   assert.equal(requests[0].agent, "factory-jira");
   assert.equal(requests[1].agent, "factory-jira");
+  assert.equal(requests[0].toolScope, AgentToolScope.Jira);
+  assert.equal(requests[1].toolScope, AgentToolScope.Jira);
+  assert.equal(requests[0].workspaceAccess, AgentWorkspaceAccess.ReadOnly);
+  assert.equal(requests[1].workspaceAccess, AgentWorkspaceAccess.ReadOnly);
   assert.match(requests[0].task, /one JSON string, not an object/);
   assert.match(requests[0].task, /"fields":\{"description":"## Plan\\n\\nKeep this exact text\."\}/);
-  assert.match(requests[0].task, /BEGIN EXACT DESCRIPTION/);
+  assert.doesNotMatch(requests[0].task, /BEGIN EXACT DESCRIPTION/);
   assert.match(requests[0].task, /Keep this exact text\./);
   assert.match(requests[1].task, /description must be a Markdown string/);
   assert.match(requests[1].task, /one permitted correction attempt/);
@@ -178,20 +183,44 @@ test("MCP Jira description correction follows a format error instead of repeatin
   assert.match(requests[1].task, /valid ADF document object/);
 });
 
-test("MCP Jira mutations get one correction request after a provider timeout", async () => {
-  let calls = 0;
+test("MCP Jira mutations do not retry an unknown provider-timeout outcome", async () => {
+  const requests = [];
   const executor: JiraExecutor = {
-    async run() {
-      calls += 1;
-      if (calls === 1) throw new Error("timed out after 240000 ms");
-      return { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
+    async run(input) {
+      requests.push(input);
+      if (requests.length === 1) throw new Error("timed out after 240000 ms");
+      return { output: JSON.stringify({ issues: [{ key: "FACT-1", description: "Old description" }] }) };
     },
   };
   const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", mcpTimeoutMs: 12_345, mcpAgent: "factory-jira" }, executor);
 
-  await adapter.updateDescription("FACT-1", "Updated description");
+  await assert.rejects(
+    adapter.updateDescription("FACT-1", "Updated description"),
+    /outcome is unknown and was not retried/,
+  );
 
-  assert.equal(calls, 2);
+  assert.equal(requests.length, 2);
+  assert.equal(requests.filter((request) => /replace the description/.test(request.task)).length, 1);
+});
+
+test("MCP Jira comments reconcile an ambiguous failure without duplicating the mutation", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      if (/read the comments/.test(input.task)) {
+        return { output: JSON.stringify({ exists: requests.length > 1 }) };
+      }
+      throw new Error("timed out after the comment was accepted");
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  const result = await adapter.addComment("FACT-1", "[factory-run:FACT-1-run]\nPull request created");
+
+  assert.equal(result.ok, true);
+  assert.equal(requests.filter((request) => /add exactly one comment/.test(request.task)).length, 1);
+  assert.equal(requests.filter((request) => /read the comments/.test(request.task)).length, 2);
 });
 
 test("MCP Jira mutations recover a completed tool when OpenCode exhausts its response step", async () => {
@@ -282,7 +311,7 @@ test("factory claims a Ready issue without a sprint", async () => {
   const nextPoll = await worker.runOnce();
   assert.equal(claimed.issueKey, "FACT-1");
   assert.equal(nextPoll.issueKey, "FACT-2");
-  assert.equal(agentCalls, 2);
+  assert.equal(agentCalls, 4);
   fixtureData.db.close();
 });
 

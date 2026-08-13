@@ -165,9 +165,15 @@ export class JiraRestAdapter {
   }
 
   async addComment(issueKey, body) {
+    if (await this.commentExists(issueKey, body)) return {};
     return this.request("POST", `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
       body: textToAdf(body),
     });
+  }
+
+  async commentExists(issueKey: string, body: string) {
+    const issue = await this.getIssue(issueKey) as JiraIssue & { fields: JiraIssue["fields"] & { comment?: { comments?: Array<{ body?: unknown }> } } };
+    return (issue.fields?.comment?.comments || []).some((comment) => adfToText(comment.body) === body);
   }
 
 }
@@ -210,7 +216,12 @@ export class InMemoryJiraAdapter {
   }
 
   async addComment(issueKey, body) {
+    if (await this.commentExists(issueKey, body)) return;
     this.comments.push({ issueKey, body });
+  }
+
+  async commentExists(issueKey, body) {
+    return this.comments.some((comment) => comment.issueKey === issueKey && comment.body === body);
   }
 
 }

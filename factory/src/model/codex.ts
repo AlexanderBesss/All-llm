@@ -8,6 +8,16 @@ export interface CodexAgentConfig {
   signal?: AbortSignal;
 }
 
+export enum AgentToolScope {
+  Build = "build",
+  Jira = "jira",
+}
+
+export enum AgentWorkspaceAccess {
+  Configured = "configured",
+  ReadOnly = "read-only",
+}
+
 export interface CodexRunInput {
   task: string;
   context?: string;
@@ -15,6 +25,8 @@ export interface CodexRunInput {
   outputSchema?: string;
   timeoutMs?: number;
   agent?: string;
+  toolScope?: AgentToolScope;
+  workspaceAccess?: AgentWorkspaceAccess;
 }
 
 export interface CodexEvent {
@@ -65,42 +77,6 @@ export interface CodexExecutionResult {
   raw: CodexJsonLinesResult;
 }
 
-export enum FindingSeverity {
-  Critical = "critical",
-  Major = "major",
-  Minor = "minor",
-  Suggestion = "suggestion",
-}
-
-export interface ReviewFinding {
-  severity: FindingSeverity;
-  file: string;
-  line?: number;
-  description: string;
-  resolution: string;
-}
-
-export enum ReviewVerdict {
-  Passed = "passed",
-  Blocked = "blocked",
-}
-
-export interface ReviewResult {
-  verdict: ReviewVerdict;
-  summary: string;
-  findings: ReviewFinding[];
-  changed: boolean;
-  committed: boolean;
-  pushed: boolean;
-  tests: ExecutionTestResult[];
-  blockers: string[];
-}
-
-export interface CodexReviewResult {
-  result: ReviewResult;
-  raw: CodexJsonLinesResult;
-}
-
 export interface CodexAgent {
   run(input: CodexRunInput): Promise<CodexJsonLinesResult>;
   execute(input: {
@@ -110,18 +86,7 @@ export interface CodexAgent {
     cwd: string;
     previousPlan: ImplementationPlan | null;
     specPath: string;
+    baseBranch?: string;
+    verificationPass?: boolean;
   }): Promise<CodexExecutionResult>;
-}
-
-export interface CodexReviewer {
-  review(input: {
-    issue: JiraIssue;
-    runId: string;
-    branchName: string;
-    baseBranch: string;
-    cwd: string;
-    specPath: string;
-    plan: ImplementationPlan;
-    commitSha: string | null;
-  }): Promise<CodexReviewResult>;
 }

@@ -1,5 +1,4 @@
-import { ReviewVerdict } from "../model/codex.js";
-import type { CodexEvent, CodexJsonLinesResult, ExecutionResult, ReviewResult } from "../model/codex.js";
+import type { CodexEvent, CodexJsonLinesResult, ExecutionResult } from "../model/codex.js";
 
 export function parseJsonLines(stdout: string): CodexJsonLinesResult {
   const events: CodexEvent[] = [];
@@ -33,19 +32,4 @@ export function assertExecution(execution: unknown): ExecutionResult {
     throw new Error("Implementation result must include tests and blockers arrays.");
   }
   return candidate as ExecutionResult;
-}
-
-export function assertReview(review: unknown): ReviewResult {
-  if (!review || typeof review !== "object") throw new Error("Code review result must be an object.");
-  const candidate = review as Partial<ReviewResult>;
-  if (candidate.verdict !== ReviewVerdict.Passed && candidate.verdict !== ReviewVerdict.Blocked) {
-    throw new Error("Code review result must include a passed or blocked verdict.");
-  }
-  if (typeof candidate.summary !== "string") throw new Error("Code review result must include a summary.");
-  if (!Array.isArray(candidate.findings) || typeof candidate.changed !== "boolean" ||
-      typeof candidate.committed !== "boolean" || typeof candidate.pushed !== "boolean" ||
-      !Array.isArray(candidate.tests) || !Array.isArray(candidate.blockers)) {
-    throw new Error("Code review result has an invalid shape.");
-  }
-  return candidate as ReviewResult;
 }

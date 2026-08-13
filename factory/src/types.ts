@@ -1,6 +1,8 @@
 export enum StageName {
   PLANNING = "planning",
   IMPLEMENTATION = "implementation",
+  PRE_PR_VERIFICATION = "pre_pr_verification",
+  /** @deprecated Persisted alias retained for compatibility with existing runs. */
   CODE_REVIEW = "code_review",
   PULL_REQUEST = "pull_request",
   REVIEW = "review",

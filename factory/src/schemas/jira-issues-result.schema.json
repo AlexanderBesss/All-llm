@@ -7,16 +7,16 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["key", "summary", "description", "status", "issuetype", "labels", "parentKey", "projectKey", "sprint"],
+        "required": ["key"],
         "properties": {
           "key": { "type": "string" },
           "summary": { "type": "string" },
-          "description": { "type": "string" },
-          "status": { "type": "string" },
-          "issuetype": { "type": "string" },
+          "description": { "anyOf": [{ "type": "string" }, { "type": "object" }, { "type": "null" }] },
+          "status": { "anyOf": [{ "type": "string" }, { "type": "object" }, { "type": "null" }] },
+          "issuetype": { "anyOf": [{ "type": "string" }, { "type": "object" }, { "type": "null" }] },
           "labels": { "type": "array", "items": { "type": "string" } },
-          "parentKey": { "type": "string" },
-          "projectKey": { "type": "string" },
+          "parentKey": { "anyOf": [{ "type": "string" }, { "type": "object" }, { "type": "null" }] },
+          "projectKey": { "anyOf": [{ "type": "string" }, { "type": "object" }, { "type": "null" }] },
           "sprint": {
             "anyOf": [
               { "type": "null" },
@@ -35,7 +35,6 @@
                     "completeDate": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
                     "goal": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
                   },
-                  "required": ["id", "name", "state", "boardId", "originBoardId", "startDate", "endDate", "completeDate", "goal"],
                   "additionalProperties": false
                 }
               }

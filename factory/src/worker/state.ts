@@ -34,5 +34,8 @@ export function processIsAlive(pid: number): boolean {
 }
 
 export function resumableStage(stage: string | null): boolean {
-  return stage === STAGES.IMPLEMENTATION || stage === STAGES.CODE_REVIEW || stage === STAGES.PULL_REQUEST;
+  return stage === STAGES.IMPLEMENTATION
+    || stage === STAGES.PRE_PR_VERIFICATION
+    || stage === STAGES.CODE_REVIEW
+    || stage === STAGES.PULL_REQUEST;
 }

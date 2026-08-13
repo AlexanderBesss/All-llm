@@ -1,7 +1,10 @@
 import path from "node:path";
-import { extractJson } from "./json-output.js";
+import { parseJsonResult } from "./json-output.js";
+import { AgentToolScope, AgentWorkspaceAccess } from "./model/codex.js";
 import type { JiraConfig } from "./model/config.js";
 import type { JiraExecutor, JiraIssue, JiraIssueFields, JiraSearchItem, JiraStructuredResponse } from "./model/jira.js";
+import { assertSchema, factorySchemaPath } from "./schema-validation.js";
+import { adfToText } from "./jira.js";
 
 function textField(value: unknown, property: "name" | "key" = "name") {
   if (typeof value === "string") return value;
@@ -67,12 +70,14 @@ export class McpJiraAdapter {
   executor: JiraExecutor;
   issuesSchema: string;
   mutationSchema: string;
+  commentCheckSchema: string;
 
   constructor(config: JiraConfig, executor: JiraExecutor) {
     this.config = config;
     this.executor = executor;
-    this.issuesSchema = path.join(config.repoPath, "factory", "src", "schemas", "jira-issues-result.schema.json");
-    this.mutationSchema = path.join(config.repoPath, "factory", "src", "schemas", "jira-mutation-result.schema.json");
+    this.issuesSchema = factorySchemaPath(config.repoPath, "jira-issues-result.schema.json");
+    this.mutationSchema = factorySchemaPath(config.repoPath, "jira-mutation-result.schema.json");
+    this.commentCheckSchema = factorySchemaPath(config.repoPath, "jira-comment-check.schema.json");
   }
 
   enabled() {
@@ -89,7 +94,14 @@ export class McpJiraAdapter {
       outputSchema,
       timeoutMs,
       agent: this.config.mcpAgent,
+      toolScope: AgentToolScope.Jira,
+      workspaceAccess: AgentWorkspaceAccess.ReadOnly,
     });
+    const parseResponse = async (output: string) => {
+      const parsed = parseJsonResult<JiraStructuredResponse>(output);
+      await assertSchema(parsed, outputSchema);
+      return parsed;
+    };
     const correction = (reason: string) => {
       const formatCorrection = /expected a markdown string[\s\S]*got object|pass contentformat[\s\S]*adf/i.test(reason)
         ? "The MCP error specifically says the description was received as an object while contentFormat was markdown. For this correction, switch contentFormat to \"adf\" and send fields.description as one valid ADF document object (type=doc, version=1, content=[...]); keep the exact requested text as the document's text. This overrides the earlier Markdown-format payload instruction."
@@ -101,9 +113,12 @@ export class McpJiraAdapter {
     const correctedResult = async (reason: string) => {
       const response = await correction(reason);
       try {
-        return extractJson<JiraStructuredResponse>(response.output);
+        return await parseResponse(response.output);
       } catch (error) {
-        return mutationResultFromEvents(response.events) || (() => { throw error; })();
+        const observed = mutationResultFromEvents(response.events);
+        if (!observed) throw error;
+        await assertSchema(observed, outputSchema);
+        return observed;
       }
     };
     let first;
@@ -111,22 +126,26 @@ export class McpJiraAdapter {
       first = await request(task);
     } catch (error) {
       if (!retryMutation) throw error;
-      return correctedResult(error?.message || String(error));
+      throw new Error(`Jira mutation outcome is unknown and was not retried: ${error?.message || String(error)}`, { cause: error });
     }
     try {
-      const result = extractJson<JiraStructuredResponse>(first.output);
+      const result = await parseResponse(first.output);
       if (!retryMutation || result.ok !== false) return result;
       return correctedResult(result.details || "unknown MCP error");
     } catch (error) {
       if (retryMutation) {
         const observed = mutationResultFromEvents(first.events);
-        if (observed?.ok === true) return observed;
-        return correctedResult(observed?.details || error?.message || String(error));
+        if (observed?.ok === true) {
+          await assertSchema(observed, outputSchema);
+          return observed;
+        }
+        if (observed?.ok === false) return correctedResult(observed.details || "confirmed MCP mutation error");
+        throw error;
       }
       if (!retryInvalidJson) throw error;
       const retry = await request(`${task}\n\nThe previous response was not valid JSON. Repeat the same read-only operation now. Return exactly one JSON object matching the requested schema, with no Markdown or commentary.`);
       try {
-        return extractJson<JiraStructuredResponse>(retry.output);
+        return await parseResponse(retry.output);
       } catch (retryError) {
         throw new Error(`${error.message} Retry also failed: ${retryError.message}`);
       }
@@ -166,11 +185,17 @@ export class McpJiraAdapter {
   }
 
   async transition(issueKey, statusName) {
-    const result = await this.structured(
-      `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
-      this.mutationSchema,
-      { retryMutation: true },
-    );
+    let result;
+    try {
+      result = await this.structured(
+        `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
+        this.mutationSchema,
+        { retryMutation: true },
+      );
+    } catch (error) {
+      if ((await this.getIssue(issueKey)).fields?.status?.name === statusName) return { ok: true, issueKey, key: issueKey, details: "confirmed after ambiguous failure" };
+      throw error;
+    }
     if (!result.ok) throw new Error(`Jira transition failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
   }
@@ -181,22 +206,45 @@ export class McpJiraAdapter {
       fields: { description },
       contentFormat: "markdown",
     });
-    const result = await this.structured(
-      `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. Use this exact JSON arguments shape; the value of fields.description is one JSON string, not an object or a set of Markdown-derived keys:\n${markdownPayload}\nDo not alter the serialized description value. The exact Markdown string to write is also delimited below for verification; preserve every character between the delimiters. If the tool returns an error, stop immediately and return ok=false; do not retry the edit.\n\n--- BEGIN EXACT DESCRIPTION ---\n${description}\n--- END EXACT DESCRIPTION ---\n\nReturn ok=true only after the update succeeds. Do not change any other field or issue.`,
-      this.mutationSchema,
-      { retryMutation: true },
-    );
+    let result;
+    try {
+      result = await this.structured(
+        `Use the configured Jira MCP server to replace the description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. Use this exact JSON arguments shape; the value of fields.description is one JSON string, not an object or a set of Markdown-derived keys:\n${markdownPayload}\nDo not alter the serialized description value. If the tool returns an error, stop immediately and return ok=false; do not retry the edit. Return ok=true only after the update succeeds. Do not change any other field or issue.`,
+        this.mutationSchema,
+        { retryMutation: true },
+      );
+    } catch (error) {
+      if (adfToText((await this.getIssue(issueKey)).fields?.description) === description) return { ok: true, issueKey, key: issueKey, details: "confirmed after ambiguous failure" };
+      throw error;
+    }
     if (!result.ok) throw new Error(`Jira description update failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
   }
 
   async addComment(issueKey, body) {
-    const result = await this.structured(
-      `Use the configured Jira MCP server to add exactly one comment to Jira issue ${issueKey} with this exact body:\n\n${body}\n\nReturn ok=true only after the comment succeeds. Do not change any other issue.`,
-      this.mutationSchema,
-      { retryMutation: true },
-    );
+    if (await this.commentExists(issueKey, body)) return { ok: true, issueKey, key: issueKey, details: "comment already exists" };
+    const commentBody = JSON.stringify(String(body));
+    let result;
+    try {
+      result = await this.structured(
+        `Use the configured Jira MCP server to add exactly one comment to Jira issue ${issueKey}. The exact comment body is this JSON string: ${commentBody}. Decode that string as the body without changing any character. Return ok=true only after the comment succeeds. Do not change any other issue.`,
+        this.mutationSchema,
+        { retryMutation: true },
+      );
+    } catch (error) {
+      if (await this.commentExists(issueKey, body)) return { ok: true, issueKey, key: issueKey, details: "confirmed after ambiguous failure" };
+      throw error;
+    }
     if (!result.ok) throw new Error(`Jira comment failed for ${issueKey}: ${result.details || "unknown error"}`);
     return result;
+  }
+
+  async commentExists(issueKey: string, body: string) {
+    const result = await this.structured(
+      `Use the configured Jira MCP server to read the comments on exactly Jira issue ${issueKey}. Return exists=true only if one existing comment body exactly equals this JSON string after decoding it: ${JSON.stringify(String(body))}. This operation is read-only.`,
+      this.commentCheckSchema,
+      { retryInvalidJson: true },
+    );
+    return result.exists === true;
   }
 }

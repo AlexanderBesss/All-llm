@@ -9,6 +9,11 @@
         }
     },
     "agent": {
+        "build": {
+            "permission": {
+                "jira_*": "deny"
+            }
+        },
         "factory-jira": {
             "description": "Performs one bounded Jira MCP operation and returns its structured result.",
             "mode": "primary",

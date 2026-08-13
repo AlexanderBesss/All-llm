@@ -1,4 +1,5 @@
 import type { JsonValue } from "./common.js";
+import type { AgentToolScope, AgentWorkspaceAccess } from "./codex.js";
 
 export enum JiraErrorCode {
   IssueNotFound = "JIRA_ISSUE_NOT_FOUND",
@@ -62,6 +63,7 @@ export interface JiraAdapter {
   transition(issueKey: string, statusName: string): Promise<unknown>;
   updateDescription(issueKey: string, description: string): Promise<unknown>;
   addComment(issueKey: string, body: string): Promise<unknown>;
+  commentExists(issueKey: string, body: string): Promise<boolean>;
 }
 
 export interface JiraMutationResult {
@@ -75,10 +77,11 @@ export interface JiraStructuredResponse {
   issueKey?: string;
   key?: string;
   details?: string;
+  exists?: boolean;
 }
 
 export interface JiraExecutor {
-  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string }): Promise<{
+  run(input: { task: string; context?: string; cwd: string; outputSchema: string; timeoutMs?: number; agent?: string; toolScope?: AgentToolScope; workspaceAccess?: AgentWorkspaceAccess }): Promise<{
     output: string;
     events?: Array<Record<string, unknown>>;
   }>;

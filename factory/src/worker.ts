@@ -10,7 +10,7 @@ import type { JiraAdapter } from "./model/jira.js";
 import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 import { due, isJiraIssueMissing, leaseOwnerProcessId, processIsAlive, resumableStage } from "./worker/state.js";
 import { normalizePlan } from "./worker/format.js";
-import { processCodeReview, processImplementation, processPullRequest } from "./worker/stages.js";
+import { processImplementation, processPrePrVerification, processPullRequest } from "./worker/stages.js";
 import { failStage, transitionIfNeeded } from "./worker/failure.js";
 import { checkMergedPullRequests } from "./worker/merge-check.js";
 
@@ -21,20 +21,18 @@ export class FactoryWorker {
   github: GitHubAdapter;
   git: GitAdapterLike;
   agent: CodexAgent;
-  reviewer: FactoryWorkerOptions["reviewer"];
   logger: FactoryLogger;
   signal?: AbortSignal;
   leaseOwner: string;
   loopLabel?: string;
 
-  constructor({ config, db, jira, github, git, agent, reviewer, logger = console, signal }: FactoryWorkerOptions) {
+  constructor({ config, db, jira, github, git, agent, logger = console, signal }: FactoryWorkerOptions) {
     this.config = config;
     this.db = db;
     this.jira = jira;
     this.github = github;
     this.git = git;
     this.agent = agent;
-    this.reviewer = reviewer;
     this.logger = logger;
     this.signal = signal;
     // Include a per-process nonce so a restarted worker never looks like the
@@ -246,7 +244,9 @@ export class FactoryWorker {
   async processRun(run, { dryRun = false } = {}) {
     if (run.stage === STAGES.PLANNING) return this.migrateLegacyPlanning(run);
     if (run.stage === STAGES.IMPLEMENTATION) return this.processImplementation(run, { dryRun });
-    if (run.stage === STAGES.CODE_REVIEW) return this.processCodeReview(run, { dryRun });
+    if (run.stage === STAGES.PRE_PR_VERIFICATION || run.stage === STAGES.CODE_REVIEW) {
+      return this.processPrePrVerification(run, { dryRun });
+    }
     if (run.stage === STAGES.PULL_REQUEST) return this.processPullRequest(run, { dryRun });
     return { stage: run.stage, status: run.status };
   }
@@ -273,8 +273,8 @@ export class FactoryWorker {
     return processImplementation(this, run, options);
   }
 
-  async processCodeReview(run, options) {
-    return processCodeReview(this, run, options);
+  async processPrePrVerification(run, options) {
+    return processPrePrVerification(this, run, options);
   }
 
   async processPullRequest(run, options) {

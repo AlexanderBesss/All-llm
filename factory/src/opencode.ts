@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { runProcess } from "./git.js";
 import { CodexAgentExecutor } from "./codex.js";
 import type { ProcessRunner } from "./model/process.js";
-import type { CodexAgentConfig, CodexJsonLinesResult, CodexRunInput } from "./model/codex.js";
+import { AgentToolScope, AgentWorkspaceAccess, type CodexAgentConfig, type CodexJsonLinesResult, type CodexRunInput } from "./model/codex.js";
 
 function defaultOpenCodeEntry() {
   if (process.env.OPENCODE_COMMAND) return process.env.OPENCODE_COMMAND;
@@ -55,7 +55,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     return opencodeInvocation(this.config.opencode?.command);
   }
 
-  runtimeEnv() {
+  runtimeEnv(toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured) {
     const configuredPath = this.config.opencode?.configPath || "opencode.json";
     const configPath = path.isAbsolute(configuredPath)
       ? path.normalize(configuredPath)
@@ -81,11 +81,15 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
       XDG_STATE_HOME: process.env.XDG_STATE_HOME || stateHome,
       // `--auto` handles prompts; this setting grants the build agent the
       // same unattended tool access as the Codex strategy.
-      OPENCODE_PERMISSION: process.env.OPENCODE_PERMISSION || JSON.stringify("allow"),
+      OPENCODE_PERMISSION: toolScope === AgentToolScope.Jira
+        ? JSON.stringify({ read: "deny", edit: "deny", bash: "deny", glob: "deny", grep: "deny", list: "deny", task: "deny", question: "deny", webfetch: "deny", websearch: "deny", "jira_*": "allow" })
+        : workspaceAccess === AgentWorkspaceAccess.ReadOnly
+          ? JSON.stringify({ read: "allow", glob: "allow", grep: "allow", list: "allow", bash: "allow", edit: "deny", task: "deny", question: "deny", webfetch: "deny", websearch: "deny", "jira_*": "deny" })
+          : JSON.stringify({ read: "allow", edit: "allow", bash: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", question: "allow", webfetch: "allow", websearch: "allow", "jira_*": "deny" }),
     };
   }
 
-  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent }: CodexRunInput) {
+  async run({ task, context = "", cwd, outputSchema, timeoutMs, agent, toolScope = AgentToolScope.Build, workspaceAccess = AgentWorkspaceAccess.Configured }: CodexRunInput) {
     const settings = this.config.opencode || {};
     let schemaInstruction = "";
     if (outputSchema) {
@@ -101,7 +105,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     const args = [
       "run",
       "--model", settings.model || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
-      "--agent", agent || settings.agent || "build",
+      "--agent", toolScope === AgentToolScope.Jira ? agent || "factory-jira" : agent || settings.agent || "build",
       "--format", "json",
       "--auto",
       "--dir", directory,
@@ -111,7 +115,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
       cwd: this.config.repoPath,
       timeoutMs: timeoutMs || settings.timeoutMs || 1_200_000,
       signal: this.config.signal,
-      env: this.runtimeEnv(),
+      env: this.runtimeEnv(toolScope, workspaceAccess),
     });
     return parseOpenCodeOutput(result.stdout);
   }

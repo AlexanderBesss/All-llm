@@ -2,11 +2,11 @@ import { CodexAgentExecutor } from "./codex.js";
 import { OpenCodeAgentExecutor } from "./opencode.js";
 import { McpJiraAdapter } from "./mcp-jira.js";
 import { AgentProvider } from "./model/config.js";
-import type { CodexAgent, CodexReviewer } from "./model/codex.js";
+import type { CodexAgent } from "./model/codex.js";
 import type { FactoryConfig, JiraConfig } from "./model/config.js";
 import type { JiraAdapter, JiraExecutor } from "./model/jira.js";
 
-export type AgentExecutor = CodexAgent & CodexReviewer & {
+export type AgentExecutor = CodexAgent & {
   health(options?: { requireJiraMcp?: boolean }): Promise<{ command: string; version: string; [key: string]: unknown }>;
 };
 
@@ -55,6 +55,5 @@ export function createAgentExecutors(config: FactoryConfig, signal?: AbortSignal
   return {
     strategy,
     agent: strategy.create(config, signal),
-    reviewer: strategy.create(config, signal),
   };
 }

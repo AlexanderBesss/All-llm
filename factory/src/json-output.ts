@@ -45,3 +45,10 @@ export function extractJson<T = unknown>(text: string): T {
   throw new Error("Agent did not return valid JSON.");
 }
 
+export function parseJsonResult<T = unknown>(text: string): T {
+  const raw = String(text || "").trim();
+  const parsed = parseCandidate<T>(raw);
+  if (parsed !== undefined) return parsed;
+  throw new Error("Agent result must be exactly one valid JSON value.");
+}
+

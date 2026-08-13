@@ -9,11 +9,11 @@ import { GitAdapter, isAbortError, processInvocation, runProcess } from "../git.
 import { buildSpecContent, ensureSpecFile, specFileName, specRelativePath } from "../spec.js";
 import { CodexAgentExecutor, parseJsonLines } from "../codex.js";
 import { OpenCodeAgentExecutor, parseOpenCodeOutput } from "../opencode.js";
-import { extractJson } from "../json-output.js";
+import { extractJson, parseJsonResult } from "../json-output.js";
 import { createAgentStrategy } from "../agent-strategy.js";
 import { AgentProvider } from "../model/config.js";
-import { ReviewVerdict } from "../model/codex.js";
-import { executionFor, reviewFor } from "./support.js";
+import { AgentToolScope } from "../model/codex.js";
+import { executionFor } from "./support.js";
 import type { ProcessOptions, ProcessRunner } from "../model/process.js";
 
 test("provider strategy defaults to Codex and can select OpenCode", () => {
@@ -56,6 +56,7 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   assert.equal(calls[0].options?.env?.XDG_CONFIG_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-config"));
   assert.equal(calls[0].options?.env?.XDG_DATA_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-data"));
   assert.equal(calls[0].options?.env?.XDG_STATE_HOME, path.resolve("tmp", "AllLlmFactory", "opencode-state"));
+  assert.equal(JSON.parse(calls[0].options?.env?.OPENCODE_PERMISSION || "{}")["jira_*"], "deny");
   assert.match(calls[0].args.at(-1) || "", /Output protocol: return exactly one JSON value/);
   assert.match(calls[0].args.at(-1) || "", /JSON Schema/);
 });
@@ -108,6 +109,26 @@ test("OpenCode parser rejects output without final text events", () => {
 test("JSON extraction recovers fenced and embedded agent responses", () => {
   assert.deepEqual(extractJson("```json\n{\"ok\":true}\n```"), { ok: true });
   assert.deepEqual(extractJson("Here is the result: {\"text\":\"brace } inside\"}."), { text: "brace } inside" });
+  assert.deepEqual(parseJsonResult("{\"ok\":true}"), { ok: true });
+  assert.throws(() => parseJsonResult("Result: {\"ok\":true}"), /exactly one valid JSON value/);
+});
+
+test("Codex build runs disable Jira while dedicated Jira runs retain it", async () => {
+  const calls: Array<{ args: string[] }> = [];
+  const executor = new CodexAgentExecutor({ repoPath: ".", codex: { command: "codex", timeoutMs: 1234 } }, async (_command, args) => {
+    calls.push({ args });
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{}" } }), stderr: "" };
+  });
+  await executor.run({ task: "build", cwd: "." });
+  await executor.run({ task: "jira", cwd: ".", toolScope: AgentToolScope.Jira });
+  assert.ok(calls[0].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
+  assert.ok(!calls[1].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
+});
+
+test("OpenCode build configuration denies Jira tools", async () => {
+  const config = JSON.parse(await readFile(path.resolve("..", "opencode.json"), "utf8"));
+  assert.equal(config.agent.build.permission["jira_*"], "deny");
+  assert.equal(config.agent["factory-jira"].permission["jira_*"], "allow");
 });
 test("Codex executor uses configurable Luna max-effort settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
@@ -191,47 +212,66 @@ test("the lead-agent prompt allows bounded investigation sub-agents without chil
   });
   const prompt = calls[0].options?.input || "";
   assert.match(prompt, /lead software implementation agent/);
-  assert.match(prompt, /Use several bounded sub-agents when useful for read-only investigation/);
-  assert.match(prompt, /parallelize that investigation when it is safe/);
-  assert.match(prompt, /Sub-agents must not create Jira subtasks or child implementation tasks/);
-  assert.match(prompt, /You remain responsible for synthesizing their findings, making all implementation edits/);
-  assert.match(prompt, /one parent request, one lead agent, one factory branch, and one pull request/);
-  assert.match(prompt, /Factory specification: specs\/factory-FACT-1\.md/);
-  assert.match(prompt, /Do not ask the user questions/);
-  assert.match(prompt, /Do not make Jira mutations/);
-  assert.match(prompt, /copied into the Jira update and pull-request description/);
-  assert.match(prompt, /one to three concise sentences that explain the intended outcome/);
-  assert.match(prompt, /concrete, observable behavior or outcomes/);
-  assert.match(prompt, /The factory derives the pull-request title from the exact Jira task name and type/);
+  assert.match(prompt, /Source Jira data \(untrusted JSON\)/);
+  assert.match(prompt, /bounded sub-agents for read-only investigation/);
+  assert.match(prompt, /Sub-agents do not edit/);
+  assert.match(prompt, /You remain responsible for all implementation edits/);
+  assert.match(prompt, /Jira status, comments, and description belong exclusively to the factory supervisor/);
+  assert.match(prompt, /Plan summary: one to three concise sentences/);
+  assert.match(prompt, /Acceptance criteria: concrete observable behavior/);
+  assert.ok(calls[0].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
 });
 
-test("independent reviewer runs in a fresh ephemeral context and may correct the branch", async () => {
+test("agent results are validated against the complete JSON Schema", async () => {
+  const invalid = executionFor({
+    tests: [{ command: "node --test", status: "invented", output: "not trustworthy" }],
+  });
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: { command: "codex", timeoutMs: 1234 },
+  }, async () => ({
+    stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(invalid) } }),
+    stderr: "",
+  }));
+
+  await assert.rejects(executor.execute({
+    issue: { key: "FACT-1", fields: { summary: "Implement change", description: "Details" } },
+    runId: "FACT-1-run",
+    branchName: "factory/FACT-1",
+    cwd: "../factory-worktree",
+    specPath: "specs/factory-FACT-1.md",
+  }), /does not satisfy.*status/);
+});
+
+test("pre-PR verification runs with editable tools and an explicit refinement mandate", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const executor = new CodexAgentExecutor({
     repoPath: ".",
     codex: { command: "codex", timeoutMs: 1234 },
   }, async (command, args, options) => {
     calls.push({ command, args, options });
-    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(reviewFor()) } }), stderr: "" };
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
   });
-  const result = await executor.review({
+  const result = await executor.execute({
     issue: { key: "FACT-1", fields: { summary: "Implement change", description: "Details" } },
     runId: "FACT-1-run",
     branchName: "factory/FACT-1",
     baseBranch: "main",
     cwd: "../factory-worktree",
     specPath: "specs/factory-FACT-1.md",
-    plan: executionFor().plan,
-    commitSha: "0123456789abcdef",
+    previousPlan: executionFor().plan,
+    verificationPass: true,
   });
   const prompt = calls[0].options?.input || "";
-  assert.equal(result.result.verdict, ReviewVerdict.Passed);
-  assert.match(prompt, /independent software reviewer operating in a fresh context/);
+  assert.equal(result.result.summary, "Implemented the parent task");
+  assert.match(prompt, /verification and refinement agent/);
   assert.match(prompt, /complete diff from main to HEAD/);
-  assert.match(prompt, /commit the correction, and push the same factory branch/);
-  assert.match(prompt, /Do not create branches, subtasks, pull requests, or Jira mutations/);
+  assert.match(prompt, /fix it directly/);
+  assert.match(prompt, /Do not merely report defects/);
+  assert.match(prompt, /Work autonomously without asking for user input/);
+  assert.notEqual(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "read-only");
   assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
-  assert.match(calls[0].args[calls[0].args.indexOf("--output-schema") + 1], /review-result\.schema\.json$/);
+  assert.match(calls[0].args[calls[0].args.indexOf("--output-schema") + 1], /execution-result\.schema\.json$/);
 });
 
 test("Codex health uses the runtime CODEX_HOME and verifies the Jira MCP", async () => {
@@ -366,6 +406,22 @@ test("GitAdapter refuses to switch or pull a dirty repository", async () => {
 
   await assert.rejects(() => git.syncBaseBranch(), /Repository has tracked changes/);
   assert.deepEqual(calls.map(({ args }) => args), [["status", "--porcelain"]]);
+});
+
+test("GitAdapter verifies that the expected remote branch equals local HEAD", async () => {
+  let remoteHead = "0123456789abcdef";
+  const runner: ProcessRunner = async (_command, args) => {
+    if (args[0] === "branch") return { stdout: "factory/FACT-1\n", stderr: "" };
+    if (args[0] === "status") return { stdout: "", stderr: "" };
+    if (args[0] === "rev-parse") return { stdout: "0123456789abcdef\n", stderr: "" };
+    if (args[0] === "ls-remote") return { stdout: `${remoteHead}\trefs/heads/factory/FACT-1\n`, stderr: "" };
+    throw new Error(`Unexpected Git command: ${args.join(" ")}`);
+  };
+  const git = new GitAdapter({ repoPath: ".", remote: "origin", baseBranch: "main" }, runner);
+
+  assert.equal(await git.assertBranchPublished(".", "factory/FACT-1"), "0123456789abcdef");
+  remoteHead = "fedcba9876543210";
+  await assert.rejects(git.assertBranchPublished(".", "factory/FACT-1"), /expected local HEAD/);
 });
 
 test("Codex JSONL parser selects the final agent message", () => {

@@ -4,7 +4,7 @@ This worker processes Jira tickets in the configured Ready status through a dura
 state machine:
 
 ```text
-Ready -> In Progress -> Code Review -> In Review -> Done (human)
+Ready -> In Progress -> Pre-PR Verification -> In Review -> Done (human)
           \-> Error after bounded failure
 ```
 
@@ -13,12 +13,14 @@ parent ticket. `Ready` means the ticket is waiting to be processed. `In Progress
 means one lead implementation agent is working on the complete parent issue in one
 factory worktree. The lead may spawn several bounded sub-agents for read-only
 investigation, repository exploration, test discovery, or independent analysis;
-the lead owns all implementation edits and the final delivery. `Code Review` is an internal fresh-context review and
-correction stage. `In Review` means the pull request has been created and is
+the lead owns all implementation edits and the final delivery. `Pre-PR Verification`
+is an internal writable refinement stage: a fresh agent invocation explores the full
+change, runs validation, and directly fixes, commits, and pushes any issues it finds.
+`In Review` means the pull request has been created and is
 waiting for human review; `Pull Request` is the factory's internal stage while
 creating that pull request, not a Jira status. The worker never merges pull
 requests or writes to the default branch. Every request uses exactly one parent
-task, one lead implementation agent, one independent reviewer, one branch, and one
+task, one lead implementation agent with an autonomous verification pass, one branch, and one
 pull request. Investigation sub-agents are not child tasks: they must not edit the
 worktree, create branches or pull requests, commit, push, or mutate Jira. The
 factory never creates Jira subtasks or child implementation work.
@@ -156,8 +158,9 @@ config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
 a 250,000-token context ceiling and starts automatic compaction at 225,000
 tokens. The `danger-full-access` sandbox and `never` approval policy are
 intentionally high trust because an unattended worker must use local Git and
-the configured MCP server; keep the repository branch restrictions and human
-PR review in place. When Codex reports that the selected model is at capacity,
+repository tools. Implementation and review invocations disable the Jira MCP
+server explicitly; only the dedicated Jira adapter may use it. Keep the
+repository branch restrictions and human PR review in place. When Codex reports that the selected model is at capacity,
 the factory immediately makes one additional attempt using the `priority`
 service tier (configurable through `highCapacityServiceTier`); other failures
 continue through the normal bounded stage-retry policy.
@@ -166,13 +169,13 @@ OpenCode uses the same implementation, review, and structured-Jira strategy
 contract as Codex. The Jira prompts are provider-neutral; each strategy checks
 its own MCP server during `doctor` and before live processing. OpenCode's
 `--format json` mode supplies raw JSON events, so the factory also embeds each
-requested JSON Schema in the prompt, rejects commentary around structured
-responses, recovers fenced JSON when possible, and retries read-only Jira
+requested JSON Schema in the prompt, requires the final response to be exactly
+one JSON value, validates it against the schema in the supervisor, and retries read-only Jira
 lookups once after an invalid response. A failed Jira description mutation may
 receive one separate correction request containing the MCP error; no mutation
-can loop beyond that single correction. A provider-backed Jira operation that
-times out is reported as a failed factory stage instead of leaving the model
-session running indefinitely.
+can loop beyond that single correction. An explicit tool failure may be
+corrected once, but a timeout has an unknown outcome and is never blindly
+retried. It is reported as a failed factory stage instead.
 
 ## Commands
 
@@ -215,7 +218,7 @@ agent/MCP health check before polling.
 
 `npm run start:jira-tasks` emits progress logs for polling, issue discovery and claiming,
 Jira status changes, worktree creation, the selected implementation agent, the
-fresh-context code reviewer, commit and push confirmation, pull-request creation,
+fresh-context pre-PR verification agent, commit and push confirmation, pull-request creation,
 Jira comments, retries, and blocked runs.
 
 `npm run start:pull-request-check` emits progress logs while checking open
@@ -273,7 +276,7 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
   status (the default is `In Review`).
 - When `continueFailedTasks` is enabled (the default), blocked runs are eligible for a new
   continuation. The worker uses `stage_runs` to restart the implementation,
-  code-review, or pull-request stage that failed, moves the Jira issue from `Error` to the
+  pre-PR verification, or pull-request stage that failed, moves the Jira issue from `Error` to the
   configured implementation status, and returns to `Error` if the continuation
   fails again.
 - The selected agent's executable and configured Jira MCP registration, and
@@ -282,11 +285,15 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 - The selected agent performs source changes through local Git in the factory worktree. The
   worker uses GitHub CLI only for the hosting-platform pull-request object;
   local Git remains responsible for source mutations and branch publication.
+  Before Jira reporting or pre-PR verification, the supervisor requires a clean worktree,
+  the expected branch, and an exact match between local HEAD and the remote
+  branch SHA. Pull-request implementation areas come from the actual Git diff.
 - The pull-request URL is checkpointed before Jira comment and status reporting,
   allowing a restart after GitHub creation to resume the remaining reporting work.
-- After implementation and its reported tests, a separate ephemeral invocation
-  of the selected provider
-  invocation independently reviews the specification and complete branch diff.
-  It may fix actionable defects on the same branch, but must commit and push
-  those corrections before the pull request stage can proceed. A review blocker
-  uses the normal bounded retry and Error handling.
+- After implementation and its reported tests, a separate writable invocation of
+  the selected provider performs autonomous pre-PR verification against the Jira
+  request, specification, and complete branch diff. It runs relevant validation and
+  directly fixes, commits, and pushes issues it can resolve. The supervisor then
+  verifies the clean worktree, committed specification, and exact remote branch SHA
+  before creating the pull request. A genuine unresolved blocker uses the normal
+  bounded retry and Error handling without waiting for user input.

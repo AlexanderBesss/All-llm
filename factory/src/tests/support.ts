@@ -7,7 +7,7 @@ import { InMemoryJiraAdapter } from "../jira.js";
 import { InMemoryGitHubAdapter } from "../github.js";
 import { FactoryWorker } from "../worker.js";
 import { AgentProvider, JiraAdapterKind } from "../model/config.js";
-import { TestStatus, ReviewVerdict } from "../model/codex.js";
+import { TestStatus } from "../model/codex.js";
 import type { JiraDescription } from "../model/jira.js";
 
 export async function fixture({ maxAttempts = 1, description = "Implement the requested change.", continueFailedTasks = false }: { maxAttempts?: number; description?: JiraDescription; continueFailedTasks?: boolean } = {}) {
@@ -29,6 +29,9 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
   const git = {
     async prepareWorktree(runId) { return path.join(stateDir, "worktrees", runId); },
     async headSha() { return "0123456789abcdef"; },
+    async hasChanges() { return false; },
+    async assertBranchPublished() { return "0123456789abcdef"; },
+    async changedFiles() { return ["factory"]; },
     async assertFileCommitted(worktreePath, relativePath) {
       const content = await readFile(path.join(worktreePath, relativePath), "utf8");
       assert.match(content, /factory-spec:/);
@@ -77,27 +80,14 @@ export function executionFor(overrides = {}) {
   };
 }
 
-export function reviewFor(overrides = {}) {
-  return {
-    verdict: ReviewVerdict.Passed,
-    summary: "Independent review passed",
-    findings: [],
-    changed: false,
-    committed: false,
-    pushed: false,
-    tests: [{ command: "node --test", status: TestStatus.Passed, output: "ok" }],
-    blockers: [],
-    ...overrides,
-  };
-}
-
-export function makeWorker(fixtureData, agent, { events = [], logs = [], reviewer = null } = {}) {
+export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) {
   const jira = {
     enabled: fixtureData.jira.enabled.bind(fixtureData.jira),
     searchReady: fixtureData.jira.searchReady.bind(fixtureData.jira),
     getIssue: fixtureData.jira.getIssue.bind(fixtureData.jira),
     updateDescription: fixtureData.jira.updateDescription.bind(fixtureData.jira),
     addComment: fixtureData.jira.addComment.bind(fixtureData.jira),
+    commentExists: fixtureData.jira.commentExists.bind(fixtureData.jira),
     async transition(key, statusName) {
       events.push(key === "FACT-1" ? `status:${statusName}` : `unexpected-child-status:${key}:${statusName}`);
       return fixtureData.jira.transition(key, statusName);
@@ -118,7 +108,6 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [], reviewe
     jira,
     github,
     agent,
-    reviewer: reviewer || { async review() { return { result: reviewFor(), raw: {} }; } },
     logger: {
       info(message) { logs.push(message); },
       warn(message) { logs.push(message); },
