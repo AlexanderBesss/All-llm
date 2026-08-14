@@ -1,6 +1,14 @@
 import { abortError, isAbortError } from "../git.js";
 import { FactoryLoop, formatFactoryLog } from "../types.js";
-import { isFactoryLogColorEnabled, runWithFactoryLoop } from "../logging.js";
+import {
+  captureFactoryLogs,
+  flushFactoryLogs,
+  isFactoryLogColorEnabled,
+  runWithFactoryLoop,
+  runWithoutFactoryLogCapture,
+  writeFactoryLog,
+} from "../logging.js";
+import type { FactoryLogRecord } from "../logging.js";
 import type { FactoryLogger } from "../model/worker.js";
 import { normalizeConcurrency, runBounded } from "./concurrency.js";
 
@@ -19,6 +27,7 @@ export interface FactoryLoopOptions<TResult extends object> {
   shutdownEvent: string;
   failureMessage: string;
   concurrency?: number;
+  isIdle?(result: object, records: readonly FactoryLogRecord[]): boolean;
   execute(): Promise<TResult>;
 }
 
@@ -65,7 +74,7 @@ async function executeBoundedPoll<TResult extends object>(
     } catch (error) {
       if (isAbortError(error) || signal?.aborted) throw error;
       failures.push(error);
-      worker.logger.error?.(formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
+      writeFactoryLog(worker.logger, "error", formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
         loop: label,
         colors: isFactoryLogColorEnabled(),
       }));
@@ -81,35 +90,52 @@ async function executeBoundedPoll<TResult extends object>(
 
 export async function runFactoryLoop<TResult extends object>(
   worker: FactoryLoopWorker,
-  { signal = worker.signal, intervalMs, label, shutdownEvent, failureMessage, concurrency = 1, execute }: FactoryLoopOptions<TResult>,
+  {
+    signal = worker.signal,
+    intervalMs,
+    label,
+    shutdownEvent,
+    failureMessage,
+    concurrency = 1,
+    isIdle,
+    execute,
+  }: FactoryLoopOptions<TResult>,
 ): Promise<void> {
   return runWithFactoryLoop(label, async () => {
     let stopped = false;
     const stop = () => {
-      if (!stopped) worker.log?.("info", shutdownEvent);
+      if (!stopped) runWithoutFactoryLogCapture(() => worker.log?.("info", shutdownEvent));
       stopped = true;
     };
     signal?.addEventListener("abort", stop, { once: true });
     worker.log?.("info", `${label}:loop:started`, { intervalMs });
     while (!stopped) {
-      try {
-        const result = await executeBoundedPoll(worker, {
+      const execution = await captureFactoryLogs(() => executeBoundedPoll(worker, {
           label,
           failureMessage,
           concurrency,
           signal,
           execute,
-        });
-        worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label }), Date.now(), {
-          loop: label,
-          colors: isFactoryLogColorEnabled(),
         }));
-      } catch (error) {
+      if (execution.ok === false) {
+        flushFactoryLogs(worker.logger, execution.records);
+        const error = execution.error;
         if (isAbortError(error) || signal?.aborted) {
           stop();
           break;
         }
-        worker.logger.error?.(formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
+        writeFactoryLog(worker.logger, "error", formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
+          loop: label,
+          colors: isFactoryLogColorEnabled(),
+        }));
+      } else if (
+        execution.records.every((record) => record.level === "info")
+        && (isIdle?.(execution.result, execution.records) || isRegularIdleResult(execution.result, execution.records))
+      ) {
+        worker.log?.("info", `${label}:idle`);
+      } else {
+        flushFactoryLogs(worker.logger, execution.records);
+        writeFactoryLog(worker.logger, "info", formatFactoryLog(JSON.stringify({ ...execution.result, loop: label }), Date.now(), {
           loop: label,
           colors: isFactoryLogColorEnabled(),
         }));
@@ -129,6 +155,15 @@ export async function runFactoryLoop<TResult extends object>(
     signal?.removeEventListener("abort", stop);
     worker.log?.("info", `${label}:loop:stopped`);
   });
+}
+
+function isRegularIdleResult(result: object, records: readonly FactoryLogRecord[]): boolean {
+  if (records.some((record) => record.level !== "info")) return false;
+  if ("action" in result) return result.action === "idle";
+  if (!("results" in result) || !Array.isArray(result.results) || result.results.length === 0) return false;
+  return result.results.every((item) =>
+    item !== null && typeof item === "object" && "action" in item && item.action === "idle",
+  );
 }
 
 export interface PollLoopWorker extends FactoryLoopWorker {
@@ -151,6 +186,7 @@ export function runPlanningLoop(
     label: FactoryLoop.Planning,
     shutdownEvent: "planning-loop:shutdown-requested",
     failureMessage: "planning poll failed",
+    isIdle: (result) => isIdleBatchResult(result),
     // FactoryWorker.planBatch discovers and claims the bounded batch before
     // advancing any selected issue. Keep the outer loop serial for that batch
     // scheduler; small test doubles can still use the generic fallback.
@@ -171,6 +207,7 @@ export function runLoop(
     label: FactoryLoop.Poll,
     shutdownEvent: "loop:shutdown-requested",
     failureMessage: "poll failed",
+    isIdle: (result) => isIdleBatchResult(result),
     // FactoryWorker.runBatch claims every slot before advancing any run. Keep
     // the outer loop serial for that batch scheduler; test doubles without it
     // retain the generic bounded runOnce fallback.
@@ -195,6 +232,7 @@ export function runMergeCheckLoop(
     label: FactoryLoop.MergeCheck,
     shutdownEvent: "merge-check-loop:shutdown-requested",
     failureMessage: "merge-check failed",
+    isIdle: (_result, records) => records.some((record) => record.message.includes("merge-check:pending {\"count\":0}")),
     // Merge-check discovers its whole batch in one poll and applies this
     // limit while evaluating individual pull requests.
     concurrency: 1,
@@ -216,6 +254,15 @@ export function runReviewFixLoop(
     label: FactoryLoop.ReviewFix,
     shutdownEvent: "review-fix-loop:shutdown-requested",
     failureMessage: "review-fix failed",
+    isIdle: (result) => "pullRequests" in result && result.pullRequests === 0,
     execute: () => worker.fixPullRequestReviews(),
   });
+}
+
+function isIdleBatchResult(result: object): boolean {
+  if (!("results" in result) || !Array.isArray(result.results) || result.results.length === 0) return false;
+  if ("failed" in result && result.failed !== 0) return false;
+  return result.results.every((item) =>
+    item !== null && typeof item === "object" && "action" in item && item.action === "idle",
+  );
 }

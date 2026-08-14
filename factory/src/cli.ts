@@ -7,7 +7,7 @@ import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError } from "./git.js";
 import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
-import { currentFactoryLoop, isFactoryLogColorEnabled } from "./logging.js";
+import { currentFactoryLoop, isFactoryLogColorEnabled, writeFactoryLog } from "./logging.js";
 import { FactoryWorker, runLoop, runMergeCheckLoop, runPlanningLoop, runReviewFixLoop } from "./worker.js";
 import { commandDoctor } from "./cli/doctor.js";
 import { CliCommand } from "./model/cli.js";
@@ -42,7 +42,7 @@ function normalizedJiraConfig(config: FactoryConfig, signal?: AbortSignal): Jira
     signal,
     log(level, event, details) {
       const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
-      console[level]?.(formatFactoryLog(`${event}${suffix}`, Date.now(), {
+      writeFactoryLog(console, level, formatFactoryLog(`${event}${suffix}`, Date.now(), {
         loop: currentFactoryLoop(),
         colors: isFactoryLogColorEnabled(),
       }));

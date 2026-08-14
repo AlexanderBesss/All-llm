@@ -58,6 +58,7 @@ jobs:
             - A file with 250 or more physical lines is always a singleton round. A file with fewer than 250 physical lines may be alone when it starts a round or cannot fit the current round; every small-file round has an inclusive total of 300 lines or less. A total of exactly 300 is allowed, while a total of 301 or more starts a new round.
             - For boundary calibration, ordered lengths 120, 100, 80, 1 produce rounds 300 and 1; 249 and 51 share a round; 249 and 52 use separate rounds; and a 250-line file is always a singleton even when another file would fit.
             Treat each review round as one batch: invoke exactly one review subagent for each batch, passing all and only the files in that batch to that subagent. Run the batches synchronously in round order and wait for each batch review to finish before starting the next; never invoke one subagent per file, omit a file, duplicate a file, split a file, or combine files from different rounds. After all batch reviews are complete, synthesize their findings into the final pull request review; the synthesis must combine batch findings and must not schedule another per-file review.
+            Do not include the changed-file inventory or any redundant file list in the response.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
             The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","relevance":"high","confidence":0.93,"severity":"high","body":"Explain the concrete defect, its impact, and the recommended fix."}]}.
             Use one finding per comment. The path must be relative to the repository root, and line must be a line present in the pull request diff. Use RIGHT for additions or context lines and LEFT for deletions. Omit findings that cannot be anchored to a diff line.
@@ -213,7 +214,7 @@ jobs:
                 pull_number: pullNumber,
                 commit_id: commitId,
                 body: index === 0
-                  ? "## AI Review\nDetailed findings are attached to the changed lines."
+                  ? `## AI Review\n\n**Findings (${comments.length} high-severity):**\n\nDetailed findings are attached to the changed lines.`
                   : "Additional AI review findings are attached to the changed lines.",
                 event: "COMMENT",
                 comments: comments.slice(index, index + 100),
@@ -237,17 +238,10 @@ jobs:
             const { owner, repo } = context.repo;
             const publishedFindings = Number(process.env.PUBLISHED_FINDINGS || "0");
 
-            for (const name of ["ai-review", "ai-fix"]) {
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name });
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
+            try {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name: "ai-review" });
+            } catch (error) {
+              if (error.status !== 404) throw error;
             }
 
-            if (publishedFindings > 0) {
-              await github.rest.issues.addLabels({ owner, repo, issue_number: pullNumber, labels: ["ai-fix"] });
-              core.info(`Marked pull request #${pullNumber} as ai-fix for the factory review loop.`);
-            } else {
-              core.info(`Cleared the ai-review trigger label from pull request #${pullNumber}; no high-relevance findings remain.`);
-            }
+            core.info(`Cleared the ai-review trigger label from pull request #${pullNumber}; published ${publishedFindings} high-severity finding(s). A human must apply ai-fix to request repair.`);

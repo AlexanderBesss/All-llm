@@ -253,7 +253,7 @@ test("MCP Jira serializes calls and gives queued mutations priority over reads",
   assert.deepEqual(order, ["read", "mutation", "read"]);
 });
 
-test("MCP Jira emits queue, request, validation, and duration telemetry", async () => {
+test("MCP Jira emits one completion summary per logical call", async () => {
   const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
   const executor: JiraExecutor = {
     async run() {
@@ -269,11 +269,11 @@ test("MCP Jira emits queue, request, validation, and duration telemetry", async 
 
   await adapter.searchReady();
 
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:queued"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:start" && typeof entry.details?.queueMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:request-complete" && typeof entry.details?.durationMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:response-validated"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:complete" && typeof entry.details?.durationMs === "number"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "jira:mcp:complete");
+  assert.equal(events[0].details?.operation, "search-ready");
+  assert.equal(typeof events[0].details?.queueMs, "number");
+  assert.equal(typeof events[0].details?.durationMs, "number");
 });
 
 test("MCP Jira description correction follows a format error instead of repeating the bad payload", async () => {
@@ -293,6 +293,26 @@ test("MCP Jira description correction follows a format error instead of repeatin
   assert.equal(requests.length, 2);
   assert.match(requests[1].task, /switch contentFormat to "adf"/);
   assert.match(requests[1].task, /valid ADF document object/);
+});
+
+test("MCP Jira transition correction stays focused on the destination status", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      return requests.length === 1
+        ? { output: JSON.stringify({ ok: false, issueKey: "FACT-1", key: "FACT-1", details: 'The issue remained "In Review".' }) }
+        : { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "transitioned" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.transition("FACT-1", "Done");
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].task, /destination status named exactly/);
+  assert.match(requests[1].task, /destination status is exactly the requested target status/);
+  assert.doesNotMatch(requests[1].task, /fields\.description/);
 });
 
 test("MCP Jira mutations do not retry an unknown provider-timeout outcome", async () => {

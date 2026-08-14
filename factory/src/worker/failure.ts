@@ -15,6 +15,28 @@ function errorDetails(error: unknown): string {
   return errorMessage(error);
 }
 
+export class JiraTransitionFailedError extends Error {
+  issueKey: string;
+  targetStatus: string;
+  currentStatus: string;
+  originalError: unknown;
+
+  constructor(issueKey: string, targetStatus: string, currentStatus: string, originalError: unknown) {
+    const observed = currentStatus || "unknown";
+    const original = errorMessage(originalError);
+    super(
+      `Jira transition for ${issueKey} did not reach "${targetStatus}"; `
+      + `the issue is still "${observed}". ${original}`,
+      { cause: originalError },
+    );
+    this.name = "JiraTransitionFailedError";
+    this.issueKey = issueKey;
+    this.targetStatus = targetStatus;
+    this.currentStatus = currentStatus;
+    this.originalError = originalError;
+  }
+}
+
 export async function failStage(worker: FactoryWorker, run: FactoryRun, stage: string, attempt: number, error: unknown) {
   if (isAbortError(error) || worker.signal?.aborted) {
     worker.log("warn", "stage:cancelled", { runId: run.id, issueKey: run.issue_key, stage });
@@ -117,7 +139,9 @@ export async function transitionIfNeeded(worker: FactoryWorker, issueKey: string
     // that ambiguous mutation as a failure.
     const observed = await worker.jira.getIssue(issueKey);
     const observedStatus = observed.fields?.status?.name || "";
-    if (String(observedStatus).toLowerCase() !== String(statusName).toLowerCase()) throw error;
+    if (String(observedStatus).toLowerCase() !== String(statusName).toLowerCase()) {
+      throw new JiraTransitionFailedError(issueKey, statusName, observedStatus, error);
+    }
     worker.log("warn", "jira:status-confirmed-after-error", {
       issueKey,
       status: observedStatus,

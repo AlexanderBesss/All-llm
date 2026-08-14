@@ -43,15 +43,18 @@ New pull requests receive the `review` label and the factory explicitly applies
 `ai-review` once the pull request exists. The repository AI Review workflow listens
 only for that label event, so ordinary pull-request creation, updates, and commits
 do not spend review tokens. It filters findings to high-relevance, high-impact
-issues before publishing inline comments, removes the trigger label, and applies
-`ai-fix` only when a qualifying finding was published.
+issues before publishing inline comments, removes the trigger label, and leaves
+`ai-fix` for an explicit human repair request after the findings have been reviewed.
 
 A separate review-fix loop scans all open pull requests labeled `ai-fix`, gathers
-their unresolved review threads, and sends every thread on a pull request to one
-implementation-agent pass. After the agent commits and pushes its fixes, the
-supervisor resolves addressed threads and re-applies `ai-review`, beginning the
-next review cycle. Contradictory or incorrect feedback receives a technical reply
-and stays unresolved for the next human review.
+their unresolved AI review threads that have no follow-up, and sends each eligible
+thread on a pull request to one implementation-agent pass. Resolved threads,
+non-AI review threads, and threads with human replies are left untouched. After
+the agent commits and pushes its fixes, the supervisor resolves addressed threads
+and re-applies `ai-review`, beginning the next review cycle. Incorrect, irrelevant,
+contradictory, or unsafe feedback receives a concise negative reply and stays
+unresolved for the next human review; a pass with no eligible thread does not
+requeue another review.
 
 Pull-request titles follow the enforced format `[JIRA-KEY] exact Jira task name
 (Task|feature|bug fix)`. The task name comes from the Jira summary, and the task
@@ -86,6 +89,12 @@ The loop badge is colored on interactive terminals: `planning` is blue, `poll` i
 `merge-check` is yellow, and `review-fix` is magenta. Set `FORCE_COLOR=1` to
 enable colors when output is redirected, or set `NO_COLOR=1` to disable them.
 Structured loop results retain their `loop` field for machine-readable logs.
+When a loop only performs its regular no-work check, its nested discovery and
+queue messages are coalesced into one `[loop] <loop>:idle` line. Logs from
+actual work, warnings, and failures are retained in full.
+Each logical Jira MCP operation emits one terminal `jira:mcp:complete` or
+`jira:mcp:failed` summary, including queue and duration timing; internal
+request, validation, and correction steps are not logged separately.
 
 ## Configure
 

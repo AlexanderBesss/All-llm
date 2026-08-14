@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runFactoryLoop, runLoop, runMergeCheckLoop, runPlanningLoop } from "../worker/loops.js";
+import { runFactoryLoop, runLoop, runMergeCheckLoop, runPlanningLoop, runReviewFixLoop } from "../worker/loops.js";
 import { formatFactoryLog } from "../types.js";
-import { currentFactoryLoop, runWithFactoryLoop } from "../logging.js";
+import { currentFactoryLoop, runWithFactoryLoop, writeFactoryLog } from "../logging.js";
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-9;]*m/g, "");
@@ -71,6 +71,139 @@ test("factory loop logs an execution failure and continues polling", async () =>
   assert.equal(errors.length, 1);
   assert.match(stripAnsi(errors[0]), /\[factory\] \[retry-test\] /);
   assert.match(stripAnsi(errors[0]), /retry failed: Error: temporary failure/);
+});
+
+test("idle polls emit one loop message and discard duplicate discovery telemetry", async () => {
+  const controller = new AbortController();
+  const messages: string[] = [];
+  const logger = {
+    info(message: string) { messages.push(message); },
+    warn(message: string) { messages.push(message); },
+    error(message: string) { messages.push(message); },
+  };
+  const worker = {
+    signal: controller.signal,
+    logger,
+    log(level: "info" | "warn" | "error", event: string, details?: Record<string, unknown>) {
+      const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
+      writeFactoryLog(logger, level, formatFactoryLog(`${event}${suffix}`, Date.now(), { loop: "test" }));
+    },
+  };
+
+  await runFactoryLoop(worker, {
+    intervalMs: 0,
+    label: "test",
+    shutdownEvent: "test-loop:shutdown-requested",
+    failureMessage: "test failed",
+    execute: async () => {
+      worker.log("info", "test:poll-start");
+      worker.log("info", "jira:mcp:queued", { operation: "regular-check" });
+      controller.abort();
+      return { action: "idle" };
+    },
+  });
+
+  assert.equal(messages.filter((message) => message.includes("test:poll-start")).length, 0);
+  assert.equal(messages.filter((message) => message.includes("jira:mcp:queued")).length, 0);
+  assert.equal(messages.filter((message) => message.includes("[test] test:idle")).length, 1);
+});
+
+test("idle summaries cover planning, merge-check, and review-fix loops", async () => {
+  const runIdleLoop = async (run: (controller: AbortController, messages: string[]) => Promise<void>) => {
+    const controller = new AbortController();
+    const messages: string[] = [];
+    await run(controller, messages);
+    return messages;
+  };
+  const makeLogger = (controller: AbortController, messages: string[]) => {
+    const logger = {
+      info(message: string) { messages.push(message); },
+      warn(message: string) { messages.push(message); },
+      error(message: string) { messages.push(message); },
+    };
+    return {
+      signal: controller.signal,
+      logger,
+      log(level: "info" | "warn" | "error", event: string, details?: Record<string, unknown>) {
+        const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
+        writeFactoryLog(logger, level, formatFactoryLog(`${event}${suffix}`, Date.now(), { loop: currentFactoryLoop() || "test" }));
+      },
+    };
+  };
+
+  const planningMessages = await runIdleLoop(async (controller, messages) => {
+    const worker = makeLogger(controller, messages);
+    await runPlanningLoop({
+      ...worker,
+      async planNextIssue() {
+        worker.log("info", "planning:poll-start");
+        worker.log("info", "jira:mcp:queued", { operation: "search-planning" });
+        controller.abort();
+        return { action: "idle" };
+      },
+    }, { signal: controller.signal, intervalMs: 0 });
+  });
+  const mergeMessages = await runIdleLoop(async (controller, messages) => {
+    const worker = makeLogger(controller, messages);
+    await runMergeCheckLoop({
+      ...worker,
+      async checkMergedPullRequests() {
+        worker.log("info", "merge-check:start");
+        worker.log("info", "merge-check:pending", { count: 0 });
+        controller.abort();
+        return { closed: 0 };
+      },
+    }, { signal: controller.signal, intervalMs: 0 });
+  });
+  const reviewMessages = await runIdleLoop(async (controller, messages) => {
+    const worker = makeLogger(controller, messages);
+    await runReviewFixLoop({
+      ...worker,
+      async fixPullRequestReviews() {
+        worker.log("info", "review-fix:pending", { count: 0 });
+        controller.abort();
+        return { pullRequests: 0, addressed: 0, disputed: 0, failed: 0 };
+      },
+    }, { signal: controller.signal, intervalMs: 0 });
+  });
+
+  assert.equal(planningMessages.filter((message) => message.includes("[planning] planning:idle")).length, 1);
+  assert.equal(mergeMessages.filter((message) => message.includes("[merge-check] merge-check:idle")).length, 1);
+  assert.equal(reviewMessages.filter((message) => message.includes("[review-fix] review-fix:idle")).length, 1);
+  assert.equal(planningMessages.filter((message) => message.includes("planning:poll-start")).length, 0);
+  assert.equal(mergeMessages.filter((message) => message.includes("merge-check:pending")).length, 0);
+  assert.equal(reviewMessages.filter((message) => message.includes("review-fix:pending")).length, 0);
+});
+
+test("actual loop work keeps its nested telemetry", async () => {
+  const controller = new AbortController();
+  const messages: string[] = [];
+  const logger = {
+    info(message: string) { messages.push(message); },
+    warn(message: string) { messages.push(message); },
+    error(message: string) { messages.push(message); },
+  };
+  const worker = {
+    signal: controller.signal,
+    logger,
+    log(level: "info" | "warn" | "error", event: string) {
+      writeFactoryLog(logger, level, formatFactoryLog(event, Date.now(), { loop: currentFactoryLoop() }));
+    },
+  };
+
+  await runLoop({
+    ...worker,
+    async runOnce() {
+      worker.log("info", "poll:start");
+      worker.log("info", "issue:claimed");
+      controller.abort();
+      return { action: "claimed" };
+    },
+  }, { signal: controller.signal, pollIntervalMs: 0 });
+
+  assert.equal(messages.filter((message) => message.includes("poll:start")).length, 1);
+  assert.equal(messages.filter((message) => message.includes("issue:claimed")).length, 1);
+  assert.equal(messages.filter((message) => message.includes("[poll] poll:idle")).length, 0);
 });
 
 test("bounded loop polls isolate item failures and never exceed their configured limit", async () => {
