@@ -9,6 +9,8 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /pull_request:\r?\n\s+types: \[labeled\]/);
   assert.match(workflow, /github\.event\.label\.name == ['"]ai-review['"]/);
   assert.doesNotMatch(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
+  assert.doesNotMatch(workflow, /First list every changed file/);
+  assert.doesNotMatch(workflow, /Implementation areas/);
   assert.match(workflow, /relevance.*high/);
   assert.match(workflow, /confidence.*0\.85/s);
   assert.match(workflow, /Few-shot calibration examples/);
@@ -19,5 +21,7 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /core\.setOutput\("review_complete", "false"\)/);
   assert.match(workflow, /core\.setOutput\("review_complete", "true"\)/);
   assert.match(workflow, /steps\.publish\.outputs\.review_complete == ['"]true['"]/);
-  assert.match(workflow, /labels: \["ai-fix"\]/);
+  assert.match(workflow, /\*\*Findings \(\$\{comments\.length\} high-severity\):\*\*/);
+  assert.doesNotMatch(workflow, /addLabels/);
+  assert.doesNotMatch(workflow, /labels: \["ai-fix"\]/);
 });
