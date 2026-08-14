@@ -193,9 +193,11 @@ the local model configured in `opencode.json`; the default is
 config or with `CODEX_MODEL`, `CODEX_REASONING_EFFORT`,
 `CODEX_FEATURE_MODEL`, `CODEX_FEATURE_REASONING_EFFORT`,
 `CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`,
-`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. The factory defaults to
-a 250,000-token context ceiling and starts automatic compaction at 225,000
-tokens. The `danger-full-access` sandbox and `never` approval policy are
+`CODEX_AUTO_COMPACT_TOKEN_LIMIT`, and `CODEX_COMMAND`. These context-window
+overrides apply to non-Luna models; Luna uses the context-window and compaction
+behavior provided by Codex. The factory defaults to a 250,000-token context
+ceiling and starts automatic compaction at 225,000 tokens for other models.
+The `danger-full-access` sandbox and `never` approval policy are
 intentionally high trust because an unattended worker must use local Git and
 repository tools. Implementation and review invocations disable the Jira MCP
 server explicitly; only the dedicated Jira adapter may use it. Keep the

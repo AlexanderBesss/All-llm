@@ -30,6 +30,10 @@ function isModelCapacityError(error: unknown) {
   return error instanceof Error && /selected model is at capacity/i.test(error.message);
 }
 
+function isLunaModel(model: string | undefined) {
+  return model?.toLowerCase().includes("luna") === true;
+}
+
 export class CodexAgentExecutor {
   config: CodexAgentConfig;
   processRunner: ProcessRunner;
@@ -69,11 +73,17 @@ export class CodexAgentExecutor {
       `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`,
       "-c",
       `approval_policy=${JSON.stringify(codex.approvalPolicy)}`,
-      "-c",
-      `model_context_window=${codex.contextWindowTokens}`,
-      "-c",
-      `model_auto_compact_token_limit=${codex.autoCompactTokenLimit}`,
     ];
+    // Luna has its own context-window limits. Let Codex select the supported
+    // window and compaction behavior instead of forcing the factory defaults.
+    if (!isLunaModel(model)) {
+      args.push(
+        "-c",
+        `model_context_window=${codex.contextWindowTokens}`,
+        "-c",
+        `model_auto_compact_token_limit=${codex.autoCompactTokenLimit}`,
+      );
+    }
     if (serviceTier) {
       args.push("-c", `service_tier=${JSON.stringify(serviceTier)}`);
     }

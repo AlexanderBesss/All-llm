@@ -174,7 +174,7 @@ test("OpenCode build configuration denies Jira tools", async () => {
   assert.equal(config.agent.build.permission["jira_*"], "deny");
   assert.equal(config.agent["factory-jira"].permission["jira_*"], "allow");
 });
-test("Codex executor uses configurable Luna max-effort settings", async () => {
+test("Codex executor lets Luna choose its context-window settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const config = {
     repoPath: ".",
@@ -205,14 +205,39 @@ test("Codex executor uses configurable Luna max-effort settings", async () => {
   assert.deepEqual(calls[0].args.slice(0, 6), ["exec", "--ephemeral", "--json", "--model", "gpt-5.6-luna", "-c"]);
   assert.ok(calls[0].args.includes('model_reasoning_effort="max"'));
   assert.ok(calls[0].args.includes('approval_policy="never"'));
-  assert.ok(calls[0].args.includes("model_context_window=250000"));
-  assert.ok(calls[0].args.includes("model_auto_compact_token_limit=225000"));
+  assert.ok(!calls[0].args.some((arg) => arg.startsWith("model_context_window=")));
+  assert.ok(!calls[0].args.some((arg) => arg.startsWith("model_auto_compact_token_limit=")));
   assert.ok(calls[0].args.includes("danger-full-access"));
   assert.equal(calls[0].args.at(-1), "-");
   assert.match(calls[0].options?.input || "", /Return a JSON health result/);
   assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
   assert.equal(calls[0].options.cwd, ".");
   assert.equal(calls[0].options.timeoutMs, 1234);
+});
+
+test("Codex executor keeps configured context-window settings for non-Luna models", async () => {
+  const calls: string[][] = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: {
+      command: "codex",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      contextWindowTokens: 250000,
+      autoCompactTokenLimit: 225000,
+      timeoutMs: 1234,
+    },
+  }, async (_command, args) => {
+    calls.push(args);
+    return {
+      stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{}" } }),
+      stderr: "",
+    };
+  });
+
+  await executor.run({ task: "Return a JSON health result.", cwd: "../factory-worktree" });
+  assert.ok(calls[0].includes("model_context_window=250000"));
+  assert.ok(calls[0].includes("model_auto_compact_token_limit=225000"));
 });
 
 test("Codex executor routes Jira features to Sol with medium reasoning", async () => {
