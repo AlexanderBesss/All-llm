@@ -5,8 +5,9 @@ import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
 import { RUN_STATUSES, STAGES, RunAction, ArtifactKind } from "../types.js";
+import { AgentProvider } from "../model/config.js";
 import { executionFor, fixture, makeWorker, planFor } from "./support.js";
-import { pullRequestDescription } from "../worker.js";
+import { implementationModel, pullRequestDescription } from "../worker.js";
 test("processes one parent ticket with one agent and one aggregate PR", async () => {
   const fixtureData = await fixture();
   const events = [];
@@ -41,6 +42,7 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
   assert.deepEqual(fixtureData.github.pullRequests[0].labels, ["review", "ai-review"]);
   const pullRequestBody = fixtureData.github.pullRequests[0].body;
+  assert.match(pullRequestBody, /^Implemented by gpt-5\.6-luna \(reasoning effort: max\)\n\n\[factory-run:FACT-1-[^\]]+\]/);
   assert.match(pullRequestBody, /## Intent\nFactory coverage/);
   assert.match(pullRequestBody, /## What this changes/);
   assert.match(pullRequestBody, /### Implementation areas\n- factory/);
@@ -81,13 +83,54 @@ test("pull-request description presents intent and review context in a predictab
       tests: ["npm test — verifies the factory workflow."],
     },
     specPath: "specs/factory-FACT-1.md",
+    model: "gpt-5.6-sol",
+    reasoningEffort: "medium",
   });
+  assert.match(body, /^Implemented by gpt-5\.6-sol \(reasoning effort: medium\)\n\n\[factory-run:FACT-1-run\]/);
   assert.ok(body.indexOf("## Intent") < body.indexOf("## Acceptance criteria"));
   assert.ok(body.indexOf("## Acceptance criteria") < body.indexOf("## Validation"));
   assert.ok(body.indexOf("## Validation") < body.indexOf("## References"));
   assert.match(body, /Allow reviewers to understand the factory result/);
   assert.match(body, /factory\/src\/worker\.ts/);
   assert.match(body, /npm test — verifies the factory workflow\./);
+});
+
+test("pull-request attribution follows the selected provider and Jira issue type", async () => {
+  const featureFixture = await fixture();
+  const featureIssue = await featureFixture.jira.getIssue("FACT-1");
+  featureIssue.fields.issuetype = { name: "Feature" };
+  featureFixture.jira.issues.set("FACT-1", featureIssue);
+  const featureWorker = makeWorker(featureFixture, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  await featureWorker.runOnce();
+
+  assert.equal(implementationModel(featureFixture.config, featureIssue), "gpt-5.6-sol");
+  assert.match(featureFixture.github.pullRequests[0].body, /^Implemented by gpt-5\.6-sol \(reasoning effort: medium\)\n\n/);
+  featureFixture.db.close();
+
+  const openCodeFixture = await fixture();
+  openCodeFixture.config.provider = AgentProvider.OpenCode;
+  Object.assign(openCodeFixture.config.opencode, { model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL" });
+  const openCodeIssue = await openCodeFixture.jira.getIssue("FACT-1");
+  const openCodeWorker = makeWorker(openCodeFixture, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  await openCodeWorker.runOnce();
+
+  assert.equal(implementationModel(openCodeFixture.config, openCodeIssue), "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
+  assert.match(openCodeFixture.github.pullRequests[0].body, /^Implemented by llamacpp\/unsloth\/Qwen3\.6-27B-UD-Q4_K_XL\n\n/);
+  openCodeFixture.db.close();
+});
+
+test("missing model metadata leaves the existing pull-request description usable", async () => {
+  const fixtureData = await fixture();
+  Object.assign(fixtureData.config.codex, { model: " " });
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  await worker.runOnce();
+
+  assert.equal(implementationModel(fixtureData.config, await fixtureData.jira.getIssue("FACT-1")), undefined);
+  assert.match(fixtureData.github.pullRequests[0].body, /^\[factory-run:FACT-1-[^\]]+\]/);
+  fixtureData.db.close();
 });
 
 test("dry-run moves directly from implementation to pull-request generation", async () => {

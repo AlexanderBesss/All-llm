@@ -1,7 +1,44 @@
 import crypto from "node:crypto";
 import { adfToText } from "../jira.js";
+import { AgentProvider } from "../model/config.js";
 import { makeRunMarker } from "../types.js";
+import type { CodexSettings, FactoryConfig } from "../model/config.js";
 import type { ImplementationPlan } from "../model/codex.js";
+import type { JiraIssue } from "../model/jira.js";
+
+function usableValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || undefined;
+}
+
+export interface ImplementationMetadata {
+  model?: string;
+  reasoningEffort?: string;
+}
+
+export function codexImplementationMetadata(settings: CodexSettings, issue: JiraIssue): ImplementationMetadata {
+  const isFeature = jiraText(issue.fields?.issuetype).trim().toLowerCase() === "feature";
+  const model = isFeature ? settings.featureModel : settings.model;
+  const reasoningEffort = isFeature ? settings.featureReasoningEffort : settings.reasoningEffort;
+  return {
+    model: usableValue(model) || (isFeature ? usableValue(settings.model) : undefined),
+    reasoningEffort: usableValue(reasoningEffort) || (isFeature ? usableValue(settings.reasoningEffort) : undefined),
+  };
+}
+
+export function codexImplementationModel(settings: CodexSettings, issue: JiraIssue): string | undefined {
+  return codexImplementationMetadata(settings, issue).model;
+}
+
+export function implementationMetadata(config: Pick<FactoryConfig, "provider" | "codex" | "opencode">, issue: JiraIssue): ImplementationMetadata {
+  if (config.provider === AgentProvider.OpenCode) return { model: usableValue(config.opencode?.model) };
+  return codexImplementationMetadata(config.codex, issue);
+}
+
+export function implementationModel(config: Pick<FactoryConfig, "provider" | "codex" | "opencode">, issue: JiraIssue): string | undefined {
+  return implementationMetadata(config, issue).model;
+}
 
 export function jiraText(value: unknown, property: "name" | "key" | "summary" = "name"): string {
   if (typeof value === "string") return value;
@@ -63,11 +100,13 @@ export function planDescription(originalDescription: unknown, plan: Implementati
   ].join("\n");
 }
 
-export function pullRequestDescription({ runId, issueKey, plan, specPath = "" }: {
+export function pullRequestDescription({ runId, issueKey, plan, specPath = "", model, reasoningEffort }: {
   runId: string;
   issueKey: string;
   plan: ImplementationPlan;
   specPath?: string;
+  model?: string;
+  reasoningEffort?: string;
 }): string {
   const implementationAreas = plan.files.length
     ? plan.files.map((item) => `- ${item}`)
@@ -75,7 +114,13 @@ export function pullRequestDescription({ runId, issueKey, plan, specPath = "" }:
   const validationChecks = plan.tests.length
     ? plan.tests.map((item) => `- ${item}`)
     : ["- Relevant repository tests and validation checks."];
+  const normalizedModel = usableValue(model);
+  const normalizedReasoningEffort = usableValue(reasoningEffort);
+  const attribution = normalizedModel
+    ? `Implemented by ${normalizedModel}${normalizedReasoningEffort ? ` (reasoning effort: ${normalizedReasoningEffort})` : ""}`
+    : undefined;
   return [
+    ...(attribution ? [attribution, ""] : []),
     makeRunMarker(runId),
     "",
     "## Intent",
