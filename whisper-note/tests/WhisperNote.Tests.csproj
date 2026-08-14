@@ -17,6 +17,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\whisper-note\WhisperNote.csproj" />
+    <ProjectReference Include="..\WhisperNote.csproj" />
   </ItemGroup>
 </Project>
