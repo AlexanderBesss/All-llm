@@ -1,15 +1,19 @@
 export enum StageName {
   PLANNING = "planning",
   IMPLEMENTATION = "implementation",
-  PRE_PR_VERIFICATION = "pre_pr_verification",
-  /** @deprecated Persisted alias retained for compatibility with existing runs. */
-  CODE_REVIEW = "code_review",
   PULL_REQUEST = "pull_request",
   REVIEW = "review",
   BLOCKED = "blocked",
 }
 
 export const STAGES = StageName;
+
+/** Persisted stages from the removed post-implementation review pass. */
+export const REMOVED_REVIEW_STAGES = new Set(["pre_pr_verification", "code_review"]);
+
+export function isRemovedReviewStage(stage: string | null | undefined): boolean {
+  return REMOVED_REVIEW_STAGES.has(String(stage || ""));
+}
 
 export enum RunStatus {
   ACTIVE = "active",

@@ -4,7 +4,7 @@ This worker processes Jira tickets in the configured Ready status through a dura
 state machine:
 
 ```text
-Ready -> In Progress -> Pre-PR Verification -> In Review -> Done (human)
+Ready -> In Progress -> In Review -> Done (human)
           \-> Error after bounded failure
 ```
 
@@ -13,14 +13,11 @@ parent ticket. `Ready` means the ticket is waiting to be processed. `In Progress
 means one lead implementation agent is working on the complete parent issue in one
 factory worktree. The lead may spawn several bounded sub-agents for read-only
 investigation, repository exploration, test discovery, or independent analysis;
-the lead owns all implementation edits and the final delivery. `Pre-PR Verification`
-is an internal writable refinement stage: a fresh agent invocation explores the full
-change, runs validation, and directly fixes, commits, and pushes any issues it finds.
-`In Review` means the pull request has been created and is
+the lead owns all implementation edits and the final delivery. `In Review` means the pull request has been created and is
 waiting for human review; `Pull Request` is the factory's internal stage while
 creating that pull request, not a Jira status. The worker never merges pull
 requests or writes to the default branch. Every request uses exactly one parent
-task, one lead implementation agent with an autonomous verification pass, one branch, and one
+task, one lead implementation agent, one branch, and one
 pull request. Investigation sub-agents are not child tasks: they must not edit the
 worktree, create branches or pull requests, commit, push, or mutate Jira. The
 factory never creates Jira subtasks or child implementation work.
@@ -173,8 +170,7 @@ section.
 The factory uses a provider strategy. `provider` defaults to `codex`, which
 invokes the installed Codex CLI with `gpt-5.6-luna` and maximum reasoning
 effort for Jira `Task` and `bug fix` issues. Jira `feature` issues use
-`gpt-5.6-sol` with medium reasoning effort for implementation and pre-PR
-verification. These routes can be overridden with `codex.model`,
+`gpt-5.6-sol` with medium reasoning effort for implementation. These routes can be overridden with `codex.model`,
 `codex.reasoningEffort`, `codex.featureModel`, and
 `codex.featureReasoningEffort`. Set `provider` to `opencode` to invoke the
 installed OpenCode CLI and
@@ -247,8 +243,7 @@ GitHub CLI repository access, and Jira configuration. Live startup repeats the
 agent/MCP health check before polling.
 
 `npm run start:jira-tasks` emits progress logs for polling, issue discovery and claiming,
-Jira status changes, worktree creation, the selected implementation agent, the
-fresh-context pre-PR verification agent, commit and push confirmation, pull-request creation,
+Jira status changes, worktree creation, the selected implementation agent, commit and push confirmation, pull-request creation,
 Jira comments, retries, and blocked runs. Implementation-agent heartbeats remain compact;
 instead of logging every Codex item event, the factory reports exact input, cached-input,
 and generated-token usage when Codex completes the turn.
@@ -311,7 +306,7 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
   status (the default is `In Review`).
 - When `continueFailedTasks` is enabled (the default), blocked runs are eligible for a new
   continuation. The worker uses `stage_runs` to restart the implementation,
-  pre-PR verification, or pull-request stage that failed, moves the Jira issue from `Error` to the
+  implementation or pull-request stage that failed, moves the Jira issue from `Error` to the
   configured implementation status, and returns to `Error` if the continuation
   fails again.
 - The selected agent's executable and configured Jira MCP registration, and
@@ -320,15 +315,12 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 - The selected agent performs source changes through local Git in the factory worktree. The
   worker uses GitHub CLI only for the hosting-platform pull-request object;
   local Git remains responsible for source mutations and branch publication.
-  Before Jira reporting or pre-PR verification, the supervisor requires a clean worktree,
+  Before Jira reporting, the supervisor requires a clean worktree,
   the expected branch, and an exact match between local HEAD and the remote
   branch SHA. Pull-request implementation areas come from the actual Git diff.
 - The pull-request URL is checkpointed before Jira comment and status reporting,
   allowing a restart after GitHub creation to resume the remaining reporting work.
-- After implementation and its reported tests, a separate writable invocation of
-  the selected provider performs autonomous pre-PR verification against the Jira
-  request, specification, and complete branch diff. It runs relevant validation and
-  directly fixes, commits, and pushes issues it can resolve. The supervisor then
-  verifies the clean worktree, committed specification, and exact remote branch SHA
-  before creating the pull request. A genuine unresolved blocker uses the normal
-  bounded retry and Error handling without waiting for user input.
+- After implementation and its reported tests, the supervisor verifies the clean
+  worktree, committed specification, and exact remote branch SHA before creating
+  the pull request. Any implementation failure uses the normal bounded retry and
+  Error handling without waiting for user input.

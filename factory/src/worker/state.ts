@@ -1,5 +1,5 @@
 import { JiraErrorCode } from "../model/jira.js";
-import { STAGES } from "../types.js";
+import { isRemovedReviewStage, STAGES } from "../types.js";
 
 export function due(value: string | null | undefined): boolean {
   return !value || new Date(value).getTime() <= Date.now();
@@ -35,7 +35,6 @@ export function processIsAlive(pid: number): boolean {
 
 export function resumableStage(stage: string | null): boolean {
   return stage === STAGES.IMPLEMENTATION
-    || stage === STAGES.PRE_PR_VERIFICATION
-    || stage === STAGES.CODE_REVIEW
+    || isRemovedReviewStage(stage)
     || stage === STAGES.PULL_REQUEST;
 }

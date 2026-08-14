@@ -207,19 +207,16 @@ test("Codex executor routes Jira features to Sol with medium reasoning", async (
     return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
   });
 
-  for (const verificationPass of [false, true]) {
-    await executor.execute({
-      issue: { key: "FACT-1", fields: { summary: "Build capability", issuetype: { name: "Feature" } } },
-      runId: "FACT-1-run",
-      branchName: "factory/FACT-1",
-      cwd: "../factory-worktree",
-      previousPlan: verificationPass ? executionFor().plan : null,
-      specPath: "specs/factory-FACT-1.md",
-      verificationPass,
-    });
-  }
+  await executor.execute({
+    issue: { key: "FACT-1", fields: { summary: "Build capability", issuetype: { name: "Feature" } } },
+    runId: "FACT-1-run",
+    branchName: "factory/FACT-1",
+    cwd: "../factory-worktree",
+    previousPlan: null,
+    specPath: "specs/factory-FACT-1.md",
+  });
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   for (const call of calls) {
     assert.equal(call.args[call.args.indexOf("--model") + 1], "gpt-5.6-sol");
     assert.ok(call.args.includes('model_reasoning_effort="medium"'));
@@ -330,37 +327,6 @@ test("agent results are validated against the complete JSON Schema", async () =>
     cwd: "../factory-worktree",
     specPath: "specs/factory-FACT-1.md",
   }), /does not satisfy.*status/);
-});
-
-test("pre-PR verification runs with editable tools and an explicit refinement mandate", async () => {
-  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
-  const executor = new CodexAgentExecutor({
-    repoPath: ".",
-    codex: { command: "codex", timeoutMs: 1234 },
-  }, async (command, args, options) => {
-    calls.push({ command, args, options });
-    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
-  });
-  const result = await executor.execute({
-    issue: { key: "FACT-1", fields: { summary: "Implement change", description: "Details" } },
-    runId: "FACT-1-run",
-    branchName: "factory/FACT-1",
-    baseBranch: "main",
-    cwd: "../factory-worktree",
-    specPath: "specs/factory-FACT-1.md",
-    previousPlan: executionFor().plan,
-    verificationPass: true,
-  });
-  const prompt = calls[0].options?.input || "";
-  assert.equal(result.result.summary, "Implemented the parent task");
-  assert.match(prompt, /verification and refinement agent/);
-  assert.match(prompt, /complete diff from main to HEAD/);
-  assert.match(prompt, /fix it directly/);
-  assert.match(prompt, /Do not merely report defects/);
-  assert.match(prompt, /Work autonomously without asking for user input/);
-  assert.notEqual(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "read-only");
-  assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
-  assert.match(calls[0].args[calls[0].args.indexOf("--output-schema") + 1], /execution-result\.schema\.json$/);
 });
 
 test("Codex health uses the runtime CODEX_HOME and verifies the Jira MCP", async () => {

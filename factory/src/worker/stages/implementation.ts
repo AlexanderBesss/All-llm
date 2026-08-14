@@ -65,7 +65,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       });
       worker.db.updateRun(run.id, { plan_json: JSON.stringify(plan), issue_json: JSON.stringify(issue) });
       worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { dryRun: true, branchName }, StageRunStatus.Completed);
-      worker.db.updateRun(run.id, { stage: STAGES.PRE_PR_VERIFICATION, branch_name: branchName, worktree_path: worktreePath });
+      worker.db.updateRun(run.id, { stage: STAGES.PULL_REQUEST, branch_name: branchName, worktree_path: worktreePath });
       return { stage: STAGES.IMPLEMENTATION, dryRun: true };
     }
     await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.implementation);
@@ -169,7 +169,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
     ));
     worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, StageRunStatus.Completed);
     worker.db.updateRun(run.id, {
-      stage: STAGES.PRE_PR_VERIFICATION,
+      stage: STAGES.PULL_REQUEST,
       status: RUN_STATUSES.ACTIVE,
       branch_name: branchName,
       worktree_path: worktree,
@@ -182,7 +182,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       issueKey: run.issue_key,
       commitSha,
       branchName,
-      nextStage: STAGES.PRE_PR_VERIFICATION,
+      nextStage: STAGES.PULL_REQUEST,
     });
     return { stage: STAGES.IMPLEMENTATION, commitSha };
   } catch (error) {

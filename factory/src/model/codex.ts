@@ -109,8 +109,6 @@ export interface CodexAgent {
     cwd: string;
     previousPlan: ImplementationPlan | null;
     specPath: string;
-    baseBranch?: string;
-    verificationPass?: boolean;
     onProgress?(event: CodexEvent): void;
   }): Promise<CodexExecutionResult>;
 }

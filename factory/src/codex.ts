@@ -145,18 +145,16 @@ export class CodexAgentExecutor {
     return { ...result, mcp: "Atlassian-Rovo-MCP" };
   }
 
-  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "", baseBranch = "", verificationPass = false, onProgress }: {
+  async execute({ issue, runId, branchName, cwd, previousPlan = null, specPath = "", onProgress }: {
     issue: JiraIssue;
     runId: string;
     branchName: string;
     cwd: string;
     previousPlan?: import("./model/codex.js").ImplementationPlan | null;
     specPath?: string;
-    baseBranch?: string;
-    verificationPass?: boolean;
     onProgress?(event: CodexEvent): void;
   }): Promise<CodexExecutionResult> {
-    const task = buildExecutionTask({ issue, runId, branchName, baseBranch, specPath, previousPlan, verificationPass });
+    const task = buildExecutionTask({ issue, runId, branchName, specPath, previousPlan });
     const outputSchema = factorySchemaPath(this.config.repoPath, "execution-result.schema.json");
     const isFeature = jiraText(issue.fields?.issuetype).trim().toLowerCase() === "feature";
     const result = await this.run({

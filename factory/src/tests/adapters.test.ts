@@ -420,7 +420,7 @@ test("factory claims a Ready issue without a sprint", async () => {
   const nextPoll = await worker.runOnce();
   assert.equal(claimed.issueKey, "FACT-1");
   assert.equal(nextPoll.issueKey, "FACT-2");
-  assert.equal(agentCalls, 4);
+  assert.equal(agentCalls, 2);
   fixtureData.db.close();
 });
 

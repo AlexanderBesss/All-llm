@@ -10,10 +10,11 @@ import type { JiraAdapter } from "./model/jira.js";
 import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 import { due, isJiraIssueMissing, leaseOwnerProcessId, processIsAlive, resumableStage } from "./worker/state.js";
 import { normalizePlan } from "./worker/format.js";
-import { processImplementation, processPrePrVerification, processPullRequest } from "./worker/stages.js";
+import { processImplementation, processPullRequest } from "./worker/stages.js";
 import { failStage, transitionIfNeeded } from "./worker/failure.js";
 import { checkMergedPullRequests } from "./worker/merge-check.js";
 import { fixPullRequestReviews } from "./worker/review-fix.js";
+import { isRemovedReviewStage } from "./types.js";
 
 export class FactoryWorker {
   config: FactoryConfig;
@@ -245,11 +246,26 @@ export class FactoryWorker {
   async processRun(run, { dryRun = false } = {}) {
     if (run.stage === STAGES.PLANNING) return this.migrateLegacyPlanning(run);
     if (run.stage === STAGES.IMPLEMENTATION) return this.processImplementation(run, { dryRun });
-    if (run.stage === STAGES.PRE_PR_VERIFICATION || run.stage === STAGES.CODE_REVIEW) {
-      return this.processPrePrVerification(run, { dryRun });
-    }
+    if (isRemovedReviewStage(run.stage)) return this.migrateRemovedReviewStage(run);
     if (run.stage === STAGES.PULL_REQUEST) return this.processPullRequest(run, { dryRun });
     return { stage: run.stage, status: run.status };
+  }
+
+  async migrateRemovedReviewStage(run) {
+    this.log("info", "review-stage:removed", {
+      runId: run.id,
+      issueKey: run.issue_key,
+      previousStage: run.stage,
+      nextStage: STAGES.PULL_REQUEST,
+    });
+    this.db.updateRun(run.id, {
+      stage: STAGES.PULL_REQUEST,
+      status: RUN_STATUSES.ACTIVE,
+      last_error: null,
+      next_attempt_at: null,
+      lease_until: new Date(Date.now() + this.config.leaseMs).toISOString(),
+    });
+    return { stage: run.stage, nextStage: STAGES.PULL_REQUEST, skipped: true };
   }
 
   async migrateLegacyPlanning(run) {
@@ -272,10 +288,6 @@ export class FactoryWorker {
 
   async processImplementation(run, options) {
     return processImplementation(this, run, options);
-  }
-
-  async processPrePrVerification(run, options) {
-    return processPrePrVerification(this, run, options);
   }
 
   async processPullRequest(run, options) {
