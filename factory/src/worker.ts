@@ -15,7 +15,7 @@ import { failStage, transitionIfNeeded } from "./worker/failure.js";
 import { checkMergedPullRequests } from "./worker/merge-check.js";
 import { fixPullRequestReviews } from "./worker/review-fix.js";
 import { isRemovedReviewStage } from "./types.js";
-import { currentFactoryLoop, isFactoryLogColorEnabled } from "./logging.js";
+import { currentFactoryLoop, isFactoryLogColorEnabled, writeFactoryLog } from "./logging.js";
 import { planIssues, planNextIssue } from "./worker/planning.js";
 import type { PlanningRunResult } from "./worker/planning.js";
 import { normalizeConcurrency, runBounded } from "./worker/concurrency.js";
@@ -59,7 +59,7 @@ export class FactoryWorker {
   log(level: keyof FactoryLogger, event: string, details?: Record<string, unknown>) {
     const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
     const loop = this.loopLabel || currentFactoryLoop();
-    this.logger[level]?.(formatFactoryLog(`${event}${suffix}`, Date.now(), {
+    writeFactoryLog(this.logger, level, formatFactoryLog(`${event}${suffix}`, Date.now(), {
       loop,
       colors: isFactoryLogColorEnabled(),
     }));

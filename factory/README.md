@@ -86,6 +86,12 @@ The loop badge is colored on interactive terminals: `planning` is blue, `poll` i
 `merge-check` is yellow, and `review-fix` is magenta. Set `FORCE_COLOR=1` to
 enable colors when output is redirected, or set `NO_COLOR=1` to disable them.
 Structured loop results retain their `loop` field for machine-readable logs.
+When a loop only performs its regular no-work check, its nested discovery and
+queue messages are coalesced into one `[loop] <loop>:idle` line. Logs from
+actual work, warnings, and failures are retained in full.
+Each logical Jira MCP operation emits one terminal `jira:mcp:complete` or
+`jira:mcp:failed` summary, including queue and duration timing; internal
+request, validation, and correction steps are not logged separately.
 
 ## Configure
 

@@ -253,7 +253,7 @@ test("MCP Jira serializes calls and gives queued mutations priority over reads",
   assert.deepEqual(order, ["read", "mutation", "read"]);
 });
 
-test("MCP Jira emits queue, request, validation, and duration telemetry", async () => {
+test("MCP Jira emits one completion summary per logical call", async () => {
   const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
   const executor: JiraExecutor = {
     async run() {
@@ -269,11 +269,11 @@ test("MCP Jira emits queue, request, validation, and duration telemetry", async 
 
   await adapter.searchReady();
 
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:queued"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:start" && typeof entry.details?.queueMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:request-complete" && typeof entry.details?.durationMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:response-validated"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:complete" && typeof entry.details?.durationMs === "number"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "jira:mcp:complete");
+  assert.equal(events[0].details?.operation, "search-ready");
+  assert.equal(typeof events[0].details?.queueMs, "number");
+  assert.equal(typeof events[0].details?.durationMs, "number");
 });
 
 test("MCP Jira description correction follows a format error instead of repeating the bad payload", async () => {
