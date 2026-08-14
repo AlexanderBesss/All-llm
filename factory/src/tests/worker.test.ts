@@ -75,7 +75,8 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-token-usage") && entry.includes('"generatedTokens":678')));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete") && entry.includes('"generatedTokens":678')));
   assert.ok(!logs.some((entry) => entry.includes("implementation:agent-progress")));
-  assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\] \[factory\] /.test(entry)));
+  assert.ok(logs.every((entry) => /^\[\d{4}-\d{2}-\d{2}T[^\]]+Z\](?: \[[^\]]+\])? /.test(entry)));
+  assert.ok(logs.every((entry) => !entry.includes("[factory]")));
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);
   assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);

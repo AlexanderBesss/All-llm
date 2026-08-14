@@ -83,7 +83,7 @@ export class FactoryWorker {
 
   async runOnce({ dryRun = false, beforeAdvance }: { dryRun?: boolean; beforeAdvance?: BeforeRunAdvance } = {}): Promise<FactoryRunResult> {
     this.throwIfStopping();
-    this.log("info", "poll:start", { dryRun });
+    this.log("info", "task:start", { dryRun });
     const deadOwners = this.db.listRuns(50)
       .map((run) => run.lease_owner)
       .filter((owner): owner is string => {
@@ -221,7 +221,7 @@ export class FactoryWorker {
       }
     }
     await beforeAdvance?.(false);
-    this.log("info", "poll:idle");
+    this.log("info", "task:idle");
     return { action: RunAction.Idle };
   }
 
@@ -270,7 +270,7 @@ export class FactoryWorker {
         joinClaimBarrier();
         if (isAbortError(error) || this.signal?.aborted) throw error;
         failures.push(error);
-        this.log("error", "poll:item-failed", {
+        this.log("error", "task:item-failed", {
           error: error instanceof Error ? error.stack || error.message : String(error),
         });
       }

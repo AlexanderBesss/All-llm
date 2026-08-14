@@ -34,7 +34,7 @@ export async function planNextIssue(
   inFlightIssueKeys: Set<string> = new Set(),
 ): Promise<PlanningRunResult> {
   worker.throwIfStopping();
-  worker.log("info", "planning:poll-start", { dryRun });
+  worker.log("info", "planning:task-start", { dryRun });
   if (!worker.jira.enabled()) {
     await beforePlan?.(false);
     return { action: PlanningAction.Disabled, reason: "Jira adapter is not configured." };

@@ -84,8 +84,8 @@ The agent resolves ambiguity with documented assumptions and never pauses for
 user questions. Dry runs retain their existing no-worktree-mutation behavior.
 
 Factory log lines begin with an ISO-8601 UTC timestamp, for example
-`[2026-08-11T16:00:42.689Z] [factory] [poll] poll:start`.
-The loop badge is colored on interactive terminals: `planning` is blue, `poll` is cyan,
+`[2026-08-11T16:00:42.689Z] [task] task:start`.
+The loop badge is colored on interactive terminals: `planning` is blue, `task` is cyan,
 `merge-check` is yellow, and `review-fix` is magenta. Set `FORCE_COLOR=1` to
 enable colors when output is redirected, or set `NO_COLOR=1` to disable them.
 Structured loop results retain their `loop` field for machine-readable logs.

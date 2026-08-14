@@ -38,7 +38,8 @@ test("factory loop stops cleanly when its signal is aborted", async () => {
   assert.deepEqual(events, ["test:loop:started", "test-loop:shutdown-requested", "test:loop:stopped"]);
   assert.match(stripAnsi(messages[0]), /"executions":1/);
   assert.match(stripAnsi(messages[0]), /"loop":"test"/);
-  assert.match(stripAnsi(messages[0]), /\[factory\] \[test\] /);
+  assert.match(stripAnsi(messages[0]), /\[test\] /);
+  assert.doesNotMatch(stripAnsi(messages[0]), /\[factory\]/);
 });
 
 test("factory loop logs an execution failure and continues polling", async () => {
@@ -69,7 +70,8 @@ test("factory loop logs an execution failure and continues polling", async () =>
 
   assert.equal(executions, 2);
   assert.equal(errors.length, 1);
-  assert.match(stripAnsi(errors[0]), /\[factory\] \[retry-test\] /);
+  assert.match(stripAnsi(errors[0]), /\[retry-test\] /);
+  assert.doesNotMatch(stripAnsi(errors[0]), /\[factory\]/);
   assert.match(stripAnsi(errors[0]), /retry failed: Error: temporary failure/);
 });
 
@@ -96,14 +98,14 @@ test("idle polls emit one loop message and discard duplicate discovery telemetry
     shutdownEvent: "test-loop:shutdown-requested",
     failureMessage: "test failed",
     execute: async () => {
-      worker.log("info", "test:poll-start");
+      worker.log("info", "test:task-start");
       worker.log("info", "jira:mcp:queued", { operation: "regular-check" });
       controller.abort();
       return { action: "idle" };
     },
   });
 
-  assert.equal(messages.filter((message) => message.includes("test:poll-start")).length, 0);
+  assert.equal(messages.filter((message) => message.includes("test:task-start")).length, 0);
   assert.equal(messages.filter((message) => message.includes("jira:mcp:queued")).length, 0);
   assert.equal(messages.filter((message) => message.includes("[test] test:idle")).length, 1);
 });
@@ -136,7 +138,7 @@ test("idle summaries cover planning, merge-check, and review-fix loops", async (
     await runPlanningLoop({
       ...worker,
       async planNextIssue() {
-        worker.log("info", "planning:poll-start");
+        worker.log("info", "planning:task-start");
         worker.log("info", "jira:mcp:queued", { operation: "search-planning" });
         controller.abort();
         return { action: "idle" };
@@ -170,7 +172,7 @@ test("idle summaries cover planning, merge-check, and review-fix loops", async (
   assert.equal(planningMessages.filter((message) => message.includes("[planning] planning:idle")).length, 1);
   assert.equal(mergeMessages.filter((message) => message.includes("[merge-check] merge-check:idle")).length, 1);
   assert.equal(reviewMessages.filter((message) => message.includes("[review-fix] review-fix:idle")).length, 1);
-  assert.equal(planningMessages.filter((message) => message.includes("planning:poll-start")).length, 0);
+  assert.equal(planningMessages.filter((message) => message.includes("planning:task-start")).length, 0);
   assert.equal(mergeMessages.filter((message) => message.includes("merge-check:pending")).length, 0);
   assert.equal(reviewMessages.filter((message) => message.includes("review-fix:pending")).length, 0);
 });
@@ -194,16 +196,16 @@ test("actual loop work keeps its nested telemetry", async () => {
   await runLoop({
     ...worker,
     async runOnce() {
-      worker.log("info", "poll:start");
+      worker.log("info", "task:start");
       worker.log("info", "issue:claimed");
       controller.abort();
       return { action: "claimed" };
     },
   }, { signal: controller.signal, pollIntervalMs: 0 });
 
-  assert.equal(messages.filter((message) => message.includes("poll:start")).length, 1);
+  assert.equal(messages.filter((message) => message.includes("task:start")).length, 1);
   assert.equal(messages.filter((message) => message.includes("issue:claimed")).length, 1);
-  assert.equal(messages.filter((message) => message.includes("[poll] poll:idle")).length, 0);
+  assert.equal(messages.filter((message) => message.includes("[task] task:idle")).length, 0);
 });
 
 test("bounded loop polls isolate item failures and never exceed their configured limit", async () => {
@@ -247,11 +249,11 @@ test("bounded loop polls isolate item failures and never exceed their configured
 });
 
 test("factory loop labels can be colored without changing the log structure", () => {
-  const plain = formatFactoryLog("poll:idle", 0, { loop: "poll" });
-  const colored = formatFactoryLog("poll:idle", 0, { loop: "poll", colors: true });
+  const plain = formatFactoryLog("task:idle", 0, { loop: "task" });
+  const colored = formatFactoryLog("task:idle", 0, { loop: "task", colors: true });
 
-  assert.equal(plain, "[1970-01-01T00:00:00.000Z] [factory] [poll] poll:idle");
-  assert.equal(colored, "[1970-01-01T00:00:00.000Z] [factory] \u001b[36m[poll]\u001b[0m poll:idle");
+  assert.equal(plain, "[1970-01-01T00:00:00.000Z] [task] task:idle");
+  assert.equal(colored, "[1970-01-01T00:00:00.000Z] \u001b[36m[task]\u001b[0m task:idle");
 });
 
 test("concurrent factory loop contexts remain isolated across awaits", async () => {
@@ -263,9 +265,9 @@ test("concurrent factory loop contexts remain isolated across awaits", async () 
     observed.push(`${currentFactoryLoop()}:after`);
   });
 
-  await Promise.all([run("poll", 2), run("merge-check", 0)]);
+  await Promise.all([run("task", 2), run("merge-check", 0)]);
 
-  assert.deepEqual(observed.sort(), ["merge-check:after", "merge-check:before", "poll:after", "poll:before"]);
+  assert.deepEqual(observed.sort(), ["merge-check:after", "merge-check:before", "task:after", "task:before"]);
 });
 
 test("planning and implementation loops run independently", async () => {
@@ -304,7 +306,7 @@ test("planning and implementation loops run independently", async () => {
 
   assert.ok(planningAttempts >= 1);
   assert.equal(implementationPolls, 1);
-  assert.ok(errors.some((message) => message.includes("planning poll failed") && message.includes("planner unavailable")));
+  assert.ok(errors.some((message) => message.includes("planning task failed") && message.includes("planner unavailable")));
 });
 
 test("planning, implementation, and merge-check loops start independently", async () => {

@@ -52,7 +52,7 @@ async function waitForInterval(intervalMs: number, signal?: AbortSignal): Promis
   });
 }
 
-async function executeBoundedPoll<TResult extends object>(
+async function executeBoundedTask<TResult extends object>(
   worker: FactoryLoopWorker,
   {
     label,
@@ -110,7 +110,7 @@ export async function runFactoryLoop<TResult extends object>(
     signal?.addEventListener("abort", stop, { once: true });
     worker.log?.("info", `${label}:loop:started`, { intervalMs });
     while (!stopped) {
-      const execution = await captureFactoryLogs(() => executeBoundedPoll(worker, {
+      const execution = await captureFactoryLogs(() => executeBoundedTask(worker, {
           label,
           failureMessage,
           concurrency,
@@ -166,7 +166,7 @@ function isRegularIdleResult(result: object, records: readonly FactoryLogRecord[
   );
 }
 
-export interface PollLoopWorker extends FactoryLoopWorker {
+export interface TaskLoopWorker extends FactoryLoopWorker {
   runOnce(): Promise<object>;
   runBatch?(options?: { concurrency?: number }): Promise<object>;
 }
@@ -185,7 +185,7 @@ export function runPlanningLoop(
     intervalMs,
     label: FactoryLoop.Planning,
     shutdownEvent: "planning-loop:shutdown-requested",
-    failureMessage: "planning poll failed",
+    failureMessage: "planning task failed",
     isIdle: (result) => isIdleBatchResult(result),
     // FactoryWorker.planBatch discovers and claims the bounded batch before
     // advancing any selected issue. Keep the outer loop serial for that batch
@@ -198,15 +198,15 @@ export function runPlanningLoop(
 }
 
 export function runLoop(
-  worker: PollLoopWorker,
+  worker: TaskLoopWorker,
   { signal = worker.signal, pollIntervalMs = 60_000, concurrency = 1 }: { signal?: AbortSignal; pollIntervalMs?: number; concurrency?: number } = {},
 ): Promise<void> {
   return runFactoryLoop(worker, {
     signal,
     intervalMs: pollIntervalMs,
-    label: FactoryLoop.Poll,
+    label: FactoryLoop.Task,
     shutdownEvent: "loop:shutdown-requested",
-    failureMessage: "poll failed",
+    failureMessage: "task failed",
     isIdle: (result) => isIdleBatchResult(result),
     // FactoryWorker.runBatch claims every slot before advancing any run. Keep
     // the outer loop serial for that batch scheduler; test doubles without it
