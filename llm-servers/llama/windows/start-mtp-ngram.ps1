@@ -4,10 +4,8 @@
   --host 0.0.0.0 `
   --gpu-layers all `
   --kv-unified `
-  --fit on `
   --spec-type draft-mtp,ngram-mod `
-  --spec-draft-n-max 3 `
-  --spec-ngram-mod-n-max 4 `
+  --spec-ngram-mod-n-max 3 `
   --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
