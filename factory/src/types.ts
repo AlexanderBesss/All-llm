@@ -56,12 +56,35 @@ export enum RunAction {
   Claimed = "claimed",
 }
 
+export enum FactoryLoop {
+  Poll = "poll",
+  MergeCheck = "merge-check",
+  ReviewFix = "review-fix",
+}
+
 export function nowIso() {
   return new Date().toISOString();
 }
 
-export function formatFactoryLog(message: string, timestamp = Date.now()) {
-  return `[${new Date(timestamp).toISOString()}] [factory] ${message}`;
+export interface FactoryLogOptions {
+  loop?: string;
+  colors?: boolean;
+}
+
+const LOOP_COLORS: Record<string, string> = {
+  [FactoryLoop.Poll]: "\u001b[36m",
+  [FactoryLoop.MergeCheck]: "\u001b[33m",
+  [FactoryLoop.ReviewFix]: "\u001b[35m",
+};
+
+export function formatFactoryLog(message: string, timestamp = Date.now(), options: FactoryLogOptions = {}) {
+  const loop = String(options.loop || "").trim();
+  const loopLabel = loop ? `[${loop}]` : "";
+  const formattedLoop = loopLabel && options.colors
+    ? `${LOOP_COLORS[loop] || "\u001b[34m"}${loopLabel}\u001b[0m`
+    : loopLabel;
+  const scope = formattedLoop ? ` ${formattedLoop}` : "";
+  return `[${new Date(timestamp).toISOString()}] [factory]${scope} ${message}`;
 }
 
 export function makeRunId(issueKey: string, clock = Date.now()) {
