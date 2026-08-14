@@ -20,6 +20,9 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /core\.setOutput\("review_complete", "true"\)/);
   assert.match(workflow, /steps\.publish\.outputs\.review_complete == ['"]true['"]/);
   assert.match(workflow, /labels: \["ai-fix"\]/);
+  assert.match(workflow, /const existingKeys = new Set/);
+  assert.match(workflow, /diffLines\(file\.patch\)\[finding\.side\]\.has\(finding\.line\)/);
+  assert.match(workflow, /name of \["ai-review", "ai-fix"\]/);
 });
 
 test("AI review schedules deterministic size-aware review rounds", async () => {
@@ -31,6 +34,10 @@ test("AI review schedules deterministic size-aware review rounds", async () => {
   assert.match(workflow, /never only diff, hunk, or changed-line counts/);
   assert.match(workflow, /LARGE_FILE_LINES = 250/);
   assert.match(workflow, /MAX_ROUND_LINES = 300/);
+  assert.match(workflow, /rounds = \[\].*currentSmallRound = \[\].*currentLines = 0/s);
+  assert.match(workflow, /file\.lines >= LARGE_FILE_LINES/);
+  assert.match(workflow, /currentLines \+ file\.lines > MAX_ROUND_LINES/);
+  assert.match(workflow, /flattened round paths must equal the original inventory paths exactly/);
   assert.match(workflow, /250 or more physical lines.*singleton round/s);
   assert.match(workflow, /fewer than 250 physical lines.*300 lines or less/s);
   assert.match(workflow, /301 or more/);
@@ -42,7 +49,8 @@ test("AI review schedules deterministic size-aware review rounds", async () => {
   assert.match(workflow, /exactly one review subagent for each batch/);
   assert.match(workflow, /all and only the files in that batch/);
   assert.match(workflow, /never invoke one subagent per file/);
-  assert.match(workflow, /After all review rounds are complete, synthesize/);
+  assert.match(workflow, /After all batch reviews are complete, synthesize/);
+  assert.match(workflow, /synthesis must combine batch findings and must not schedule another per-file review/);
 
   assert.doesNotMatch(workflow, /Review each changed file in a separate subagent/);
   assert.doesNotMatch(workflow, /Do not run file-review subagents in parallel or combine multiple files/);
