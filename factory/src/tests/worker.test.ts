@@ -55,7 +55,8 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(pullRequestBody, /^Implemented by gpt-5\.6-luna \(reasoning effort: max\)\n\n\[factory-run:FACT-1-[^\]]+\]/);
   assert.match(pullRequestBody, /## Intent\nFactory coverage/);
   assert.match(pullRequestBody, /## What this changes/);
-  assert.match(pullRequestBody, /### Implementation areas\n- factory/);
+  assert.doesNotMatch(pullRequestBody, /Implementation areas/);
+  assert.doesNotMatch(pullRequestBody, /- factory/);
   assert.match(pullRequestBody, /## Acceptance criteria/);
   assert.match(pullRequestBody, /## Validation\nThe implementation agent was asked to run:/);
   assert.match(pullRequestBody, /## References\n- Jira issue: `FACT-1`\n- Factory specification: `specs\/factory-FACT-1\.md`/);
@@ -101,7 +102,8 @@ test("pull-request description presents intent and review context in a predictab
   assert.ok(body.indexOf("## Acceptance criteria") < body.indexOf("## Validation"));
   assert.ok(body.indexOf("## Validation") < body.indexOf("## References"));
   assert.match(body, /Allow reviewers to understand the factory result/);
-  assert.match(body, /factory\/src\/worker\.ts/);
+  assert.doesNotMatch(body, /Implementation areas/);
+  assert.doesNotMatch(body, /factory\/src\/worker\.ts/);
   assert.match(body, /npm test — verifies the factory workflow\./);
 });
 
@@ -642,8 +644,8 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
   });
   pr.labels = ["ai-fix"];
   fixtureData.github.reviewThreads.set(pr.number, [
-    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "reviewer", body: "Add validation" }] },
-    { id: "thread-incorrect", isResolved: false, comments: [{ id: "comment-2", author: "reviewer", body: "Remove required behavior" }] },
+    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "ai-review", body: "<!-- ai-review -->\nAdd validation" }] },
+    { id: "thread-incorrect", isResolved: false, comments: [{ id: "comment-2", author: "ai-review", body: "<!-- ai-review -->\nRemove required behavior" }] },
   ]);
   let publicationChecks = 0;
   fixtureData.git.assertBranchPublished = async () => publicationChecks++ === 0 ? "before-review-fix" : "after-review-fix";
@@ -656,7 +658,7 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
           pushed: true,
           threads: [
             { threadId: "thread-actionable", disposition: "addressed", reply: "" },
-            { threadId: "thread-incorrect", disposition: "disputed", reply: "That change conflicts with the documented requirement." },
+            { threadId: "thread-incorrect", disposition: "disputed", reply: "❌ That change conflicts with the documented requirement." },
           ],
           tests: [],
           blockers: [],
@@ -674,10 +676,72 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
   assert.deepEqual(fixtureData.github.reviewReplies, [{
     prNumber: pr.number,
     threadId: "thread-incorrect",
-    body: "That change conflicts with the documented requirement.",
+    body: "❌ That change conflicts with the documented requirement.",
   }]);
   assert.deepEqual(pr.labels, ["ai-review"]);
   assert.ok(logs.some((entry) => entry.includes("review-fix:requeued-ai-review")));
+  fixtureData.db.close();
+});
+
+test("review-fix loop only sends unresolved AI findings without follow-ups to the agent", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.repoPath = path.resolve(".");
+  const pr = await fixtureData.github.createPullRequest({
+    title: "[FACT-1] Add factory coverage (Task)",
+    taskNumber: "FACT-1",
+    taskName: "Add factory coverage",
+    taskType: "Task",
+    body: "Details",
+    head: "factory/FACT-1",
+    base: "main",
+  });
+  pr.labels = ["ai-fix"];
+  fixtureData.github.reviewThreads.set(pr.number, [
+    { id: "thread-eligible", isResolved: false, comments: [{ id: "comment-eligible", author: "ai-review", body: "<!-- ai-review -->\nAdd validation" }] },
+    { id: "thread-resolved", isResolved: true, comments: [{ id: "comment-resolved", author: "ai-review", body: "<!-- ai-review -->\nAlready handled" }] },
+    { id: "thread-not-relevant", isResolved: false, comments: [
+      { id: "comment-not-relevant", author: "ai-review", body: "<!-- ai-review -->\nChange this" },
+      { id: "reply-not-relevant", author: "human", body: "not relevant" },
+    ] },
+    { id: "thread-do-not-fix", isResolved: false, comments: [
+      { id: "comment-do-not-fix", author: "ai-review", body: "<!-- ai-review -->\nChange that" },
+      { id: "reply-do-not-fix", author: "human", body: "do not fix this" },
+    ] },
+    { id: "thread-human", isResolved: false, comments: [{ id: "comment-human", author: "reviewer", body: "Please update this" }] },
+  ]);
+  let agentCalls = 0;
+  let task = "";
+  let publicationChecks = 0;
+  fixtureData.git.assertBranchPublished = async () => publicationChecks++ === 0 ? "before-review-fix" : "after-review-fix";
+  const worker = makeWorker(fixtureData, {
+    async run(input) {
+      agentCalls += 1;
+      task = input.task;
+      return {
+        output: JSON.stringify({
+          summary: "Handled the eligible review finding",
+          committed: true,
+          pushed: true,
+          threads: [{ threadId: "thread-eligible", disposition: "addressed", reply: "" }],
+          tests: [],
+          blockers: [],
+        }),
+        events: [],
+      };
+    },
+  });
+
+  const result = await worker.fixPullRequestReviews();
+
+  assert.deepEqual(result, { pullRequests: 1, addressed: 1, disputed: 0, failed: 0 });
+  assert.equal(agentCalls, 1);
+  assert.match(task, /thread-eligible/);
+  assert.doesNotMatch(task, /thread-resolved|thread-not-relevant|thread-do-not-fix|thread-human/);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-resolved")?.isResolved, true);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-not-relevant")?.isResolved, false);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-do-not-fix")?.isResolved, false);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-human")?.isResolved, false);
+  assert.deepEqual(fixtureData.github.reviewReplies, []);
   fixtureData.db.close();
 });
 
@@ -695,7 +759,7 @@ test("review-fix loop does not resolve addressed threads without a newly publish
   });
   pr.labels = ["ai-fix"];
   fixtureData.github.reviewThreads.set(pr.number, [
-    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "reviewer", body: "Add validation" }] },
+    { id: "thread-actionable", isResolved: false, comments: [{ id: "comment-1", author: "ai-review", body: "<!-- ai-review -->\nAdd validation" }] },
   ]);
   const worker = makeWorker(fixtureData, {
     async run() {
@@ -720,7 +784,7 @@ test("review-fix loop does not resolve addressed threads without a newly publish
   fixtureData.db.close();
 });
 
-test("review-fix loop retries the AI review label when an ai-fix pull request has no threads", async () => {
+test("review-fix loop leaves an ai-fix pull request alone when no eligible threads remain", async () => {
   const fixtureData = await fixture();
   fixtureData.config.repoPath = path.resolve(".");
   const pr = await fixtureData.github.createPullRequest({
@@ -738,7 +802,7 @@ test("review-fix loop retries the AI review label when an ai-fix pull request ha
   const result = await worker.fixPullRequestReviews();
 
   assert.deepEqual(result, { pullRequests: 1, addressed: 0, disputed: 0, failed: 0 });
-  assert.deepEqual(pr.labels, ["ai-review"]);
+  assert.deepEqual(pr.labels, ["ai-fix"]);
   fixtureData.db.close();
 });
 
