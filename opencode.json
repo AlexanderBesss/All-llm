@@ -57,8 +57,8 @@
                     "presence_penalty": 0.0,
                     "top_p": 0.95,
                     "limit": {
-                        "context": 100000,
-                        "output": 8192
+                        "context": 96000,
+                        "output": 32768
                     },
                     "cost": {
                         "input": 0.00000005,
