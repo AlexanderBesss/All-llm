@@ -67,6 +67,23 @@ test("planning dry-run performs no Jira mutations", async () => {
   assert.deepEqual(events, []);
 });
 
+test("planning restores the original description when the transition fails", async () => {
+  const data = await fixture({ description: "Original description" });
+  const existing = await data.jira.getIssue("FACT-1");
+  existing.fields.status = { name: "Planning" };
+  data.jira = new InMemoryJiraAdapter([existing]);
+  data.jira.transition = async () => {
+    throw new Error("transition unavailable");
+  };
+  const worker = makeWorker(data, planningAgent());
+
+  await assert.rejects(worker.planNextIssue(), /transition unavailable/);
+
+  const unchanged = await data.jira.getIssue("FACT-1");
+  assert.equal(unchanged.fields.description, "Original description");
+  assert.equal(unchanged.fields.status?.name, "Planning");
+});
+
 test("planning is idle when no issue is in Planning", async () => {
   const data = await fixture();
   const worker = makeWorker(data, planningAgent());

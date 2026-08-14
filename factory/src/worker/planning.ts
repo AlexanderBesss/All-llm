@@ -1,4 +1,5 @@
 import type { FactoryWorker } from "../worker.js";
+import { adfToText } from "../jira.js";
 
 export enum PlanningAction {
   Disabled = "disabled",
@@ -51,9 +52,30 @@ export async function planNextIssue(worker: FactoryWorker, { dryRun = false }: {
     };
   }
 
-  await worker.jira.updateDescription(issue.key, description);
-  worker.throwIfStopping();
-  await worker.transitionIfNeeded(issue.key, targetStatus, { skipStatusCheck: true });
+  const originalDescription = adfToText(issue.fields?.description);
+  let descriptionMutationStarted = false;
+  try {
+    descriptionMutationStarted = true;
+    await worker.jira.updateDescription(issue.key, description);
+    worker.throwIfStopping();
+    await worker.transitionIfNeeded(issue.key, targetStatus, { skipStatusCheck: true });
+  } catch (error) {
+    if (!descriptionMutationStarted) throw error;
+    try {
+      await worker.jira.updateDescription(issue.key, originalDescription);
+      worker.log("warn", "planning:description-rolled-back", { issueKey: issue.key });
+    } catch (rollbackError) {
+      worker.log("error", "planning:description-rollback-failed", {
+        issueKey: issue.key,
+        error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+      });
+      throw new AggregateError(
+        [error, rollbackError],
+        `Planning failed for ${issue.key}, and restoring the original description also failed.`,
+      );
+    }
+    throw error;
+  }
   worker.log("info", "planning:complete", {
     issueKey: issue.key,
     acceptanceCriteria: result.acceptanceCriteria.length,
