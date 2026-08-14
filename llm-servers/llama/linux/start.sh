@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODEL="$(dirname "$0")/../../../models/unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-UD-Q4_K_XL.gguf"
+MODEL="$(dirname "$0")/../../../models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q5_K_XL.gguf"
 # Use the CUDA build so the NVIDIA GPU is available.
 LLAMA_SERVER="./build-cuda/bin/llama-server"
 
@@ -35,8 +35,9 @@ exec "$LLAMA_SERVER" \
   --ubatch-size 1024 \
   --no-mmap \
   --jinja \
-  --temp 0.6 \
+  --temp 1.0 \
   --top-p 0.95 \
+  --top-k 20 \
   --min-p 0.0 \
   --repeat-penalty 1.0 \
   --metrics \

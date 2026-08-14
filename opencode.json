@@ -51,7 +51,7 @@
                 "unsloth/Qwen3.8-27B-UD-Q5_K_XL": {
                     "name": "Qwen3.8-27B-UD-Q5_K_XL",
                     "repeat_penalty": 1.0,
-                    "temp": 0.6,
+                    "temp": 1.0,
                     "min_probability": 0,
                     "top_k": 20,
                     "presence_penalty": 0.0,

@@ -104,7 +104,7 @@ export class OpenCodeAgentExecutor extends CodexAgentExecutor {
     const directory = settings.directory || cwd;
     const args = [
       "run",
-      "--model", model || settings.model || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+      "--model", model || settings.model || "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL",
       "--agent", toolScope === AgentToolScope.Jira ? agent || "factory-jira" : agent || settings.agent || "build",
       "--format", "json",
       "--auto",

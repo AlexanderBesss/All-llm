@@ -32,7 +32,7 @@ The bridge invokes OpenCode with parameters supported by the installed CLI:
 
 ```text
 opencode run \
-  --model llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL \
+  --model llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL \
   --agent build \
   --format json \
   --auto \
@@ -44,8 +44,8 @@ On Windows, resolve the native `opencode.exe` behind the npm shim. Pass argument
 directly without a shell. `--format json` produces newline-delimited events;
 the bridge extracts final `text` events and a compact `tool_use` trace.
 
-The model is pinned to Qwen 3.6 27B. The bridge requires the exact
-`llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL` entry under the `llamacpp` provider in
+The model is pinned to Qwen 3.8 27B. The bridge requires the exact
+`llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL` entry under the `llamacpp` provider in
 `opencode.json`; it fails closed instead of using another configured model.
 
 `--auto` approves permission requests that are not denied. The child process also

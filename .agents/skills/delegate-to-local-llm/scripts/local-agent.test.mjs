@@ -23,7 +23,7 @@ test("resolveConfiguration validates the OpenCode local provider", async () => {
       provider: {
         llamacpp: {
           options: { baseURL: "http://192.168.0.96:8080/v1", apiKey: "local" },
-          models: { "unsloth/Qwen3.6-27B-UD-Q4_K_XL": {} },
+          models: { "unsloth/Qwen3.8-27B-UD-Q5_K_XL": {} },
         },
       },
     }),
@@ -36,7 +36,7 @@ test("resolveConfiguration validates the OpenCode local provider", async () => {
   assert.ok(config.command);
 });
 
-test("resolveConfiguration requires the pinned Qwen 3.6 27B model", async () => {
+test("resolveConfiguration requires the pinned Qwen 3.8 27B model", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "local-agent-model-"));
   await writeFile(
     path.join(workspace, "opencode.json"),

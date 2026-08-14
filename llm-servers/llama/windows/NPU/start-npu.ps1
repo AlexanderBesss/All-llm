@@ -1,8 +1,3 @@
-param(
-    [ValidateSet('Q4_K_M', 'Q4_0')]
-    [string]$MainQuant = 'Q4_K_M'
-)
-
 # --- Prerequisites (one-time setup) ---
 # 1. Install Intel NPU driver:
 #    https://www.intel.com/content/www/us/en/download/770895/intel-npu-driver-for-windows.html
@@ -22,7 +17,7 @@ $env:GGML_OPENVINO_PREFILL_CHUNK_SIZE = "512"
 $env:GGML_OPENVINO_STATEFUL_EXECUTION = "0"
 
 # --- Model paths ---
-$mainModel = "..\..\..\..\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-UD-$MainQuant.gguf"
+$mainModel = "..\..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf"
 $draftModel = "..\..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf"
 
 # --- Binary ---
@@ -37,7 +32,7 @@ if (-not (Test-Path $Binary)) {
 # - No --gpu-layers (OpenVINO handles all offloading internally)
 # - Context size kept modest (NPU has limited memory)
 # - parallel must be 1 (NPU does not support multiple sequences)
-# - Q4_K_M / Q4_0 are the primary supported quantizations
+# - Q5_K_XL is the quantization used here
 
 & $Binary `
     -m $mainModel `
@@ -56,7 +51,9 @@ if (-not (Test-Path $Binary)) {
     --no-mmap `
     --mlock `
     --jinja `
-    --temp 0.6 `
+    --temp 1.0 `
+    --top-p 0.95 `
+    --top-k 20 `
     --min-p 0.0 `
     --repeat-penalty 1.0 `
     --presence-penalty 0.0 `

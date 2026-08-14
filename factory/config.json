@@ -54,7 +54,7 @@
     "command": ""
   },
   "opencode": {
-    "model": "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+    "model": "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL",
     "agent": "build",
     "timeoutMs": 1200000,
     "command": "",

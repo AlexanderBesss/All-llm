@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_LOCAL_URL = "http://192.168.0.96:8080/v1";
-export const REQUIRED_LOCAL_MODEL = "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL";
+export const REQUIRED_LOCAL_MODEL = "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL";
 const SYSTEM_PROMPT = `You are a local OpenCode worker controlled by a frontier orchestrator.
 Complete only the bounded assignment below. Use all OpenCode tools available to the selected
 agent, and work directly in the configured project when the assignment asks for changes.

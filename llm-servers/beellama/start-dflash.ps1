@@ -1,7 +1,7 @@
 .\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-UD-Q4_K_XL.gguf" `
+  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
   --spec-draft-model "..\..\models\Anbeeld\Qwen3.6-27B-DFlash-GGUF\Qwen3.6-27B-DFlash-Q5_K_M.gguf" `
-  --mmproj "..\..\models\unsloth\Qwen3.6-27B-GGUF\mmproj-F32.gguf" `
+  --mmproj "..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf" `
   --spec-dflash-cross-ctx 1024 `
   --no-mmproj-offload `
   --kv-unified `
@@ -22,7 +22,9 @@
   --no-mmap `
   --mlock `
   --jinja `
-  --temp 0.6 `
+  --temp 1.0 `
+  --top-p 0.95 `
+  --top-k 20 `
   --min-p 0.0 `
   --repeat-penalty 1.0 `
   --presence-penalty 0.0 `

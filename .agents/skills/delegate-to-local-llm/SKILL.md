@@ -1,6 +1,6 @@
 ---
 name: delegate-to-local-llm
-description: Use a frontier main model to orchestrate sequential OpenCode workers powered specifically by the user's local Qwen 3.6 27B model at http://192.168.0.96:8080/v1. OpenCode workers may use all configured tools to inspect, edit, and validate the project; the frontier model reviews their work and synthesizes the result. Use when the user asks for local LLM agents, local tool-using workers, OpenCode delegation, private sub-agents, sequential local delegation, hybrid frontier/local orchestration, or explicitly invokes $delegate-to-local-llm. Do not substitute native cloud subagents or another local model when local Qwen execution is required.
+description: Use a frontier main model to orchestrate sequential OpenCode workers powered specifically by the user's local Qwen 3.8 27B model at http://192.168.0.96:8080/v1. OpenCode workers may use all configured tools to inspect, edit, and validate the project; the frontier model reviews their work and synthesizes the result. Use when the user asks for local LLM agents, local tool-using workers, OpenCode delegation, private sub-agents, sequential local delegation, hybrid frontier/local orchestration, or explicitly invokes $delegate-to-local-llm. Do not substitute native cloud subagents or another local model when local Qwen execution is required.
 ---
 
 # Delegate to Local LLM
@@ -18,7 +18,7 @@ cross-worker coordination, final validation, and the final response.
 - Use local OpenCode workers for repository exploration, implementation, tests,
   code review, debugging, critique, alternative approaches, and drafts.
 - Run every local worker with the pinned model identifier
-  `llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL` (Qwen 3.6 27B). Do not inherit,
+  `llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL` (Qwen 3.8 27B). Do not inherit,
   guess, or substitute another OpenCode model.
 - Execute local sub-agents strictly in listed order. Wait for each response or
   failure before starting the next request. Never overlap local inference calls.
@@ -59,7 +59,7 @@ Run paths relative to the repository root. If working from a nested directory,
 resolve the script to an absolute path first.
 
 Require `opencode.json` to configure
-`llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL` and require the `llamacpp` provider's
+`llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL` and require the `llamacpp` provider's
 `baseURL` to equal `http://192.168.0.96:8080/v1`. The bridge pins that model in
 every invocation instead of inheriting the active OpenCode model. It uses the
 installed OpenCode executable directly; on Windows it resolves the native
@@ -146,7 +146,7 @@ For each task, the bridge invokes the installed CLI with these verified
 parameters (the last argument is the generated worker assignment):
 
 ```text
-opencode run --model llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL --agent build --format json --auto --dir <workspace> <message>
+opencode run --model llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL --agent build --format json --auto --dir <workspace> <message>
 ```
 
 Do not call the blocked `opencode.ps1` shim on Windows. The bridge resolves the
@@ -206,7 +206,7 @@ outcome; do not expose noisy event transcripts unless the user asks.
 ## Completion checklist
 
 - Confirm the local model, not a cloud subagent, performed delegated work.
-- Confirm the reported model is `llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL`.
+- Confirm the reported model is `llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL`.
 - Confirm OpenCode sessions ran one by one without overlap.
 - Confirm tool calls and workspace changes stayed within user authorization.
 - Confirm no secret or unrelated data entered a local prompt.

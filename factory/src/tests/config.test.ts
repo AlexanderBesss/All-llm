@@ -26,7 +26,7 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.codex.reasoningEffort, "max");
   assert.equal(config.codex.featureModel, "gpt-5.6-sol");
   assert.equal(config.codex.featureReasoningEffort, "medium");
-  assert.equal(config.opencode.model, "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
+  assert.equal(config.opencode.model, "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL");
 });
 
 test("standalone planning validation does not require GitHub", () => {
@@ -137,7 +137,7 @@ test("OpenCode doctor settings come from the selected model in opencode.json", a
   const config = defaultConfig(repoPath);
   config.provider = AgentProvider.OpenCode;
   const details = await readOpenCodeDoctorSettings(config);
-  assert.equal(details.model, "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
+  assert.equal(details.model, "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL");
   assert.equal(details.contextWindowTokens, 100000);
   assert.equal(details.outputTokens, 8192);
   assert.equal(details.compactionAuto, true);

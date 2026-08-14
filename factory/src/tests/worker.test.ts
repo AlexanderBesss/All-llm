@@ -123,14 +123,14 @@ test("pull-request attribution follows the selected provider and Jira issue type
 
   const openCodeFixture = await fixture();
   openCodeFixture.config.provider = AgentProvider.OpenCode;
-  Object.assign(openCodeFixture.config.opencode, { model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL" });
+  Object.assign(openCodeFixture.config.opencode, { model: "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL" });
   const openCodeIssue = await openCodeFixture.jira.getIssue("FACT-1");
   const openCodeWorker = makeWorker(openCodeFixture, { async execute() { return { result: executionFor(), raw: {} }; } });
 
   await openCodeWorker.runOnce();
 
-  assert.equal(implementationModel(openCodeFixture.config, openCodeIssue), "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
-  assert.match(openCodeFixture.github.pullRequests[0].body, /^Implemented by llamacpp\/unsloth\/Qwen3\.6-27B-UD-Q4_K_XL\n\n/);
+  assert.equal(implementationModel(openCodeFixture.config, openCodeIssue), "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL");
+  assert.match(openCodeFixture.github.pullRequests[0].body, /^Implemented by llamacpp\/unsloth\/Qwen3\.8-27B-UD-Q5_K_XL\n\n/);
   openCodeFixture.db.close();
 });
 

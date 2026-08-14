@@ -79,7 +79,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       command: process.env.CODEX_COMMAND || "",
     },
     opencode: {
-      model: process.env.OPENCODE_MODEL || "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL",
+      model: process.env.OPENCODE_MODEL || "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL",
       agent: process.env.OPENCODE_AGENT || "build",
       timeoutMs: 1_200_000,
       command: process.env.OPENCODE_COMMAND || "",

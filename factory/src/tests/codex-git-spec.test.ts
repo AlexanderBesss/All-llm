@@ -49,7 +49,7 @@ test("OpenCode executor invokes the configured local model and parses JSON event
     repoPath: ".",
     stateDir: path.resolve("tmp", "AllLlmFactory"),
     codex: {},
-    opencode: { command: "opencode", model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", agent: "build", timeoutMs: 1234 },
+    opencode: { command: "opencode", model: "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL", agent: "build", timeoutMs: 1234 },
   }, async (command, args, options) => {
     calls.push({ command, args, options });
     return {
@@ -68,7 +68,7 @@ test("OpenCode executor invokes the configured local model and parses JSON event
   });
   assert.equal(result.output, '{"ok":true}');
   assert.equal(calls[0].command, "opencode");
-  assert.deepEqual(calls[0].args.slice(0, 8), ["run", "--model", "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL", "--agent", "build", "--format", "json", "--auto"]);
+  assert.deepEqual(calls[0].args.slice(0, 8), ["run", "--model", "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL", "--agent", "build", "--format", "json", "--auto"]);
   assert.equal(calls[0].args.at(-2), "../factory-worktree");
   assert.equal(calls[0].options?.timeoutMs, 1234);
   assert.equal(calls[0].options?.env?.OPENCODE_CONFIG, path.resolve("opencode.json"));

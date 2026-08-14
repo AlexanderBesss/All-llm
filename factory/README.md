@@ -60,7 +60,7 @@ Changing `provider` switches the complete implementation/review/Jira strategy an
 | Provider | Implementation defaults | Jira MCP |
 |---|---|---|
 | `codex` | `gpt-5.6-luna`/maximum reasoning for `Task` and `bug fix`; `gpt-5.6-sol`/medium for `feature` | `Atlassian-Rovo-MCP`; short operations always use Luna/low reasoning by default |
-| `opencode` | model from `opencode.json`; default `llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL` | `jira` through the bounded `factory-jira` agent |
+| `opencode` | model from `opencode.json`; default `llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL` | `jira` through the bounded `factory-jira` agent |
 
 Override Codex routing with `codex.model`, `codex.reasoningEffort`, `codex.featureModel`, and `codex.featureReasoningEffort`, or the matching environment variables below. Non-Luna models default to a 250,000-token context window with auto-compaction at 225,000; Luna uses Codex-provided limits. A Codex capacity error gets one immediate attempt on the `priority` service tier configured by `highCapacityServiceTier`; other failures use normal stage retries.
 

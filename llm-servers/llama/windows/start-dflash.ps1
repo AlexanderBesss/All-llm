@@ -1,10 +1,5 @@
-param(
-    [ValidateSet('Q4_K_XL', 'Q5_K_S')]
-    [string]$MainQuant = 'Q4_K_XL'
-)
-
-$mainModel = "..\..\..\models\unsloth\Qwen3.6-27B-GGUF\Qwen3.6-27B-UD-$MainQuant.gguf"
-$mmproj = "..\..\..\models\unsloth\Qwen3.6-27B-GGUF\mmproj-F32.gguf"
+$mainModel = "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf"
+$mmproj = "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf"
 $draftModel = "..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf"
 
 & (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
@@ -32,7 +27,9 @@ $draftModel = "..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\
     --no-mmap `
     --mlock `
     --jinja `
-    --temp 0.6 `
+    --temp 1.0 `
+    --top-p 0.95 `
+    --top-k 20 `
     --min-p 0.0 `
     --repeat-penalty 1.0 `
     --presence-penalty 0.0 `
