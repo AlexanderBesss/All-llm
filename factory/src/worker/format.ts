@@ -108,9 +108,6 @@ export function pullRequestDescription({ runId, issueKey, plan, specPath = "", m
   model?: string;
   reasoningEffort?: string;
 }): string {
-  const implementationAreas = plan.files.length
-    ? plan.files.map((item) => `- ${item}`)
-    : ["- See the committed diff for the implementation areas."];
   const validationChecks = plan.tests.length
     ? plan.tests.map((item) => `- ${item}`)
     : ["- Relevant repository tests and validation checks."];
@@ -128,9 +125,6 @@ export function pullRequestDescription({ runId, issueKey, plan, specPath = "", m
     "",
     "## What this changes",
     `This pull request implements the requested behavior for Jira issue \`${issueKey}\`.`,
-    "",
-    "### Implementation areas",
-    ...implementationAreas,
     "",
     "## Acceptance criteria",
     ...plan.acceptanceCriteria.map((item) => `- ${item}`),

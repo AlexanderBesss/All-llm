@@ -49,10 +49,8 @@ jobs:
           use_github_token: true
           prompt: |
             Review this pull request for high-relevance, high-impact defects only. Start your response with "## AI Review".
-            First list every changed file in the pull request. Review each changed file in a separate subagent.
-            Invoke the subagents synchronously, one file at a time, and wait for each subagent to finish before calling the next.
-            Do not run file-review subagents in parallel or combine multiple files in one subagent.
-            After all file reviews are complete, synthesize their findings into the final pull request review.
+            Inspect the changed code as needed, using subagents when useful, and synthesize the findings into the final pull request review.
+            Do not include a changed-file inventory or any redundant file list in the response.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
             The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","relevance":"high","confidence":0.93,"severity":"high","body":"Explain the concrete defect, its impact, and the recommended fix."}]}.
             Use one finding per comment. The path must be relative to the repository root, and line must be a line present in the pull request diff. Use RIGHT for additions or context lines and LEFT for deletions. Omit findings that cannot be anchored to a diff line.
@@ -208,7 +206,7 @@ jobs:
                 pull_number: pullNumber,
                 commit_id: commitId,
                 body: index === 0
-                  ? "## AI Review\nDetailed findings are attached to the changed lines."
+                  ? `## AI Review\n\n**Findings (${comments.length} high-severity):**\n\nDetailed findings are attached to the changed lines.`
                   : "Additional AI review findings are attached to the changed lines.",
                 event: "COMMENT",
                 comments: comments.slice(index, index + 100),
@@ -232,17 +230,10 @@ jobs:
             const { owner, repo } = context.repo;
             const publishedFindings = Number(process.env.PUBLISHED_FINDINGS || "0");
 
-            for (const name of ["ai-review", "ai-fix"]) {
-              try {
-                await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name });
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
+            try {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: pullNumber, name: "ai-review" });
+            } catch (error) {
+              if (error.status !== 404) throw error;
             }
 
-            if (publishedFindings > 0) {
-              await github.rest.issues.addLabels({ owner, repo, issue_number: pullNumber, labels: ["ai-fix"] });
-              core.info(`Marked pull request #${pullNumber} as ai-fix for the factory review loop.`);
-            } else {
-              core.info(`Cleared the ai-review trigger label from pull request #${pullNumber}; no high-relevance findings remain.`);
-            }
+            core.info(`Cleared the ai-review trigger label from pull request #${pullNumber}; published ${publishedFindings} high-severity finding(s). A human must apply ai-fix to request repair.`);
