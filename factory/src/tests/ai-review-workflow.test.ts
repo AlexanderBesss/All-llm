@@ -21,3 +21,29 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /steps\.publish\.outputs\.review_complete == ['"]true['"]/);
   assert.match(workflow, /labels: \["ai-fix"\]/);
 });
+
+test("AI review schedules deterministic size-aware review rounds", async () => {
+  const workflow = await readFile(path.resolve("..", ".github", "workflows", "ai-review.yml"), "utf8");
+
+  assert.match(workflow, /complete changed-file inventory.*existing changed-file order/s);
+  assert.match(workflow, /complete contents at the pull-request revision/);
+  assert.match(workflow, /total physical lines, including blank lines/);
+  assert.match(workflow, /never only diff, hunk, or changed-line counts/);
+  assert.match(workflow, /LARGE_FILE_LINES = 250/);
+  assert.match(workflow, /MAX_ROUND_LINES = 300/);
+  assert.match(workflow, /250 or more physical lines.*singleton round/s);
+  assert.match(workflow, /fewer than 250 physical lines.*300 lines or less/s);
+  assert.match(workflow, /301 or more/);
+  assert.match(workflow, /120, 100, 80, 1 produce rounds 300 and 1/);
+  assert.match(workflow, /249 and 51 share a round/);
+  assert.match(workflow, /249 and 52 use separate rounds/);
+  assert.match(workflow, /250-line file is always a singleton/);
+  assert.match(workflow, /each review round as one batch/);
+  assert.match(workflow, /exactly one review subagent for each batch/);
+  assert.match(workflow, /all and only the files in that batch/);
+  assert.match(workflow, /never invoke one subagent per file/);
+  assert.match(workflow, /After all review rounds are complete, synthesize/);
+
+  assert.doesNotMatch(workflow, /Review each changed file in a separate subagent/);
+  assert.doesNotMatch(workflow, /Do not run file-review subagents in parallel or combine multiple files/);
+});

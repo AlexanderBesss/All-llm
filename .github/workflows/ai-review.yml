@@ -49,10 +49,13 @@ jobs:
           use_github_token: true
           prompt: |
             Review this pull request for high-relevance, high-impact defects only. Start your response with "## AI Review".
-            First list every changed file in the pull request. Review each changed file in a separate subagent.
-            Invoke the subagents synchronously, one file at a time, and wait for each subagent to finish before calling the next.
-            Do not run file-review subagents in parallel or combine multiple files in one subagent.
-            After all file reviews are complete, synthesize their findings into the final pull request review.
+            First obtain the complete changed-file inventory in the pull request's existing changed-file order; do not sort or reorder it. For every changed file, inspect its complete contents at the pull-request revision and count its total physical lines, including blank lines. Use this full file length, never only diff, hunk, or changed-line counts.
+            Build deterministic review rounds from that ordered inventory, assigning every file to exactly one round and never splitting a file. Use LARGE_FILE_LINES = 250 and MAX_ROUND_LINES = 300 with this algorithm:
+            - A file with 250 or more physical lines is large. Finish any current small-file round, review the large file alone in a singleton round, then continue with the next changed file.
+            - A file with fewer than 250 physical lines is eligible for the current small-file round only when adding it keeps the inclusive round total at 300 lines or less. If it would make the total 301 or more, finish the current round and start a new round with that file.
+            - Preserve changed-file order in every round and across rounds. A small file may be alone when it starts a round or cannot fit the current round. After the inventory is exhausted, emit any remaining round.
+            - For boundary calibration, ordered lengths 120, 100, 80, 1 produce rounds 300 and 1; 249 and 51 share a round; 249 and 52 use separate rounds; and a 250-line file is always a singleton even when another file would fit.
+            Treat each review round as one batch: invoke exactly one review subagent for each batch, passing all and only the files in that batch to that subagent. Run the batches synchronously in round order and wait for each batch review to finish before starting the next; never invoke one subagent per file, omit a file, duplicate a file, split a file, or combine files from different rounds. After all review rounds are complete, synthesize their findings into the final pull request review.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
             The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","relevance":"high","confidence":0.93,"severity":"high","body":"Explain the concrete defect, its impact, and the recommended fix."}]}.
             Use one finding per comment. The path must be relative to the repository root, and line must be a line present in the pull request diff. Use RIGHT for additions or context lines and LEFT for deletions. Omit findings that cannot be anchored to a diff line.
