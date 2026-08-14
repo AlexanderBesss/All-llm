@@ -17,6 +17,9 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.jira.mcpModel, "gpt-5.6-luna");
   assert.equal(config.jira.mcpReasoningEffort, "low");
   assert.equal(config.planningIntervalMs, 60_000);
+  assert.equal(config.planningConcurrency, 2);
+  assert.equal(config.implementationConcurrency, 2);
+  assert.equal(config.mergeCheckConcurrency, 2);
   assert.equal(config.jira.statuses?.planning, "Planning");
   assert.equal(config.jira.statuses?.todo, "To Do");
   assert.equal(config.codex.model, "gpt-5.6-luna");

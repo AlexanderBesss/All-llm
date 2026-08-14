@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runFactoryLoop, runLoop, runPlanningLoop } from "../worker/loops.js";
+import { runFactoryLoop, runLoop, runMergeCheckLoop, runPlanningLoop } from "../worker/loops.js";
 import { formatFactoryLog } from "../types.js";
 import { currentFactoryLoop, runWithFactoryLoop } from "../logging.js";
 
@@ -73,6 +73,46 @@ test("factory loop logs an execution failure and continues polling", async () =>
   assert.match(stripAnsi(errors[0]), /retry failed: Error: temporary failure/);
 });
 
+test("bounded loop polls isolate item failures and never exceed their configured limit", async () => {
+  const controller = new AbortController();
+  let executions = 0;
+  let active = 0;
+  let maxActive = 0;
+  const errors: string[] = [];
+  const worker = {
+    signal: controller.signal,
+    logger: {
+      info() {},
+      error(message: string) { errors.push(message); },
+    },
+    log() {},
+  };
+
+  await runFactoryLoop(worker, {
+    intervalMs: 0,
+    concurrency: 2,
+    label: "bounded-test",
+    shutdownEvent: "bounded-test:shutdown-requested",
+    failureMessage: "bounded failed",
+    execute: async () => {
+      const id = ++executions;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      if (id === 1) throw new Error("one item failed");
+      if (id === 4) controller.abort();
+      return { id };
+    },
+  });
+
+  assert.equal(executions, 4);
+  assert.equal(maxActive, 2);
+  assert.equal(active, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /one item failed/);
+});
+
 test("factory loop labels can be colored without changing the log structure", () => {
   const plain = formatFactoryLog("poll:idle", 0, { loop: "poll" });
   const colored = formatFactoryLog("poll:idle", 0, { loop: "poll", colors: true });
@@ -132,4 +172,54 @@ test("planning and implementation loops run independently", async () => {
   assert.ok(planningAttempts >= 1);
   assert.equal(implementationPolls, 1);
   assert.ok(errors.some((message) => message.includes("planning poll failed") && message.includes("planner unavailable")));
+});
+
+test("planning, implementation, and merge-check loops start independently", async () => {
+  const controller = new AbortController();
+  const started = new Set<string>();
+  const releases: Array<() => void> = [];
+  let resolveStarted: (() => void) | undefined;
+  const allStarted = new Promise<void>((resolve) => { resolveStarted = resolve; });
+  const start = (label: string) => async () => {
+    started.add(label);
+    if (started.size === 3) resolveStarted?.();
+    await new Promise<void>((resolve) => releases.push(resolve));
+    return { action: "idle", closed: 0 };
+  };
+  const common = {
+    signal: controller.signal,
+    logger: { info() {}, error() {} },
+    log() {},
+  };
+
+  const loops = [
+    runPlanningLoop({ ...common, planNextIssue: start("planning") }, { signal: controller.signal, intervalMs: 1, concurrency: 1 }),
+    runLoop({ ...common, runOnce: start("implementation") }, { signal: controller.signal, pollIntervalMs: 1, concurrency: 1 }),
+    runMergeCheckLoop({ ...common, checkMergedPullRequests: start("merge-check") }, { signal: controller.signal, intervalMs: 1, concurrency: 1 }),
+  ];
+  await allStarted;
+  assert.deepEqual([...started].sort(), ["implementation", "merge-check", "planning"]);
+  controller.abort();
+  releases.forEach((release) => release());
+  await Promise.all(loops);
+});
+
+test("merge-check loop invokes its bounded batch once per poll", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const worker = {
+    signal: controller.signal,
+    logger: { info() {}, error() {} },
+    log() {},
+    async checkMergedPullRequests(concurrency?: number) {
+      calls += 1;
+      assert.equal(concurrency, 3);
+      controller.abort();
+      return { closed: 0 };
+    },
+  };
+
+  await runMergeCheckLoop(worker, { signal: controller.signal, intervalMs: 0, concurrency: 3 });
+
+  assert.equal(calls, 1);
 });

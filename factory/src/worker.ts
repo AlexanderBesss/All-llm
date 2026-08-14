@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { abortError } from "./git.js";
+import { abortError, isAbortError } from "./git.js";
 import { formatFactoryLog, makeRunId, RUN_STATUSES, STAGES, EventType, RunAction } from "./types.js";
 import type { FactoryRun } from "./model/database.js";
 import type { FactoryConfig } from "./model/config.js";
@@ -16,7 +16,12 @@ import { checkMergedPullRequests } from "./worker/merge-check.js";
 import { fixPullRequestReviews } from "./worker/review-fix.js";
 import { isRemovedReviewStage } from "./types.js";
 import { currentFactoryLoop, isFactoryLogColorEnabled } from "./logging.js";
-import { planNextIssue } from "./worker/planning.js";
+import { planIssues, planNextIssue } from "./worker/planning.js";
+import type { PlanningRunResult } from "./worker/planning.js";
+import { normalizeConcurrency, runBounded } from "./worker/concurrency.js";
+import type { BoundedBatchResult } from "./worker/concurrency.js";
+
+type BeforeRunAdvance = (claimed: boolean) => Promise<void>;
 
 export class FactoryWorker {
   config: FactoryConfig;
@@ -29,6 +34,9 @@ export class FactoryWorker {
   signal?: AbortSignal;
   leaseOwner: string;
   loopLabel?: string;
+  private readonly inFlightRunIds = new Set<string>();
+  private readonly inFlightPlanningIssueKeys = new Set<string>();
+  private readonly inFlightMergeCheckRunIds = new Set<string>();
 
   constructor({ config, db, jira, github, git, agent, logger = console, signal }: FactoryWorkerOptions) {
     this.config = config;
@@ -73,7 +81,7 @@ export class FactoryWorker {
     };
   }
 
-  async runOnce({ dryRun = false }: { dryRun?: boolean } = {}): Promise<FactoryRunResult> {
+  async runOnce({ dryRun = false, beforeAdvance }: { dryRun?: boolean; beforeAdvance?: BeforeRunAdvance } = {}): Promise<FactoryRunResult> {
     this.throwIfStopping();
     this.log("info", "poll:start", { dryRun });
     const deadOwners = this.db.listRuns(50)
@@ -88,73 +96,87 @@ export class FactoryWorker {
     }
     this.db.reapExpiredLeases();
     const resumable = this.db.listRuns(50).find((run) =>
-      (run.status === RUN_STATUSES.RETRY_WAIT && due(run.next_attempt_at))
-      || (run.status === RUN_STATUSES.ACTIVE
-        && (!run.lease_owner || run.lease_owner === this.leaseOwner)
-        && run.stage !== STAGES.REVIEW
-        && run.stage !== STAGES.BLOCKED)
-      || (this.config.continueFailedTasks === true
-        && run.status === RUN_STATUSES.BLOCKED
-        && run.stage === STAGES.BLOCKED
-        && resumableStage(this.db.getLastFailedStage(run.id))));
+      !this.inFlightRunIds.has(run.id)
+      && ((run.status === RUN_STATUSES.RETRY_WAIT && due(run.next_attempt_at))
+        || (run.status === RUN_STATUSES.ACTIVE
+          && (!run.lease_owner || run.lease_owner === this.leaseOwner)
+          && run.stage !== STAGES.REVIEW
+          && run.stage !== STAGES.BLOCKED)
+        || (this.config.continueFailedTasks === true
+          && run.status === RUN_STATUSES.BLOCKED
+          && run.stage === STAGES.BLOCKED
+          && resumableStage(this.db.getLastFailedStage(run.id)))));
     if (resumable) {
-      this.throwIfStopping();
-      this.log("info", "run:resume-found", {
-        runId: resumable.id,
-        issueKey: resumable.issue_key,
-        stage: resumable.stage,
-        status: resumable.status,
-      });
-      const issue = await this.verifyResumableIssue(resumable);
-      if (!issue) {
-        return { action: RunAction.Cancelled, runId: resumable.id, issueKey: resumable.issue_key, reason: "Jira issue no longer exists." };
-      }
-      if (!this.db.acquireLease(
-        resumable.id,
-        this.leaseOwner,
-        new Date(Date.now() + this.config.leaseMs).toISOString(),
-      )) {
-        this.log("info", "run:busy", { runId: resumable.id });
-        return { action: RunAction.Busy, runId: resumable.id };
-      }
-      let leased = this.db.getRun(resumable.id);
-      if (leased.status === RUN_STATUSES.BLOCKED) {
-        const failedStage = this.db.getLastFailedStage(leased.id);
-        if (!resumableStage(failedStage)) {
-          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
-          this.log("warn", "run:resume-skipped", {
+      this.inFlightRunIds.add(resumable.id);
+      try {
+        this.throwIfStopping();
+        this.log("info", "run:resume-found", {
+          runId: resumable.id,
+          issueKey: resumable.issue_key,
+          stage: resumable.stage,
+          status: resumable.status,
+        });
+        const issue = await this.verifyResumableIssue(resumable);
+        if (!issue) {
+          await beforeAdvance?.(false);
+          return { action: RunAction.Cancelled, runId: resumable.id, issueKey: resumable.issue_key, reason: "Jira issue no longer exists." };
+        }
+        if (!this.db.acquireLease(
+          resumable.id,
+          this.leaseOwner,
+          new Date(Date.now() + this.config.leaseMs).toISOString(),
+        )) {
+          this.log("info", "run:busy", { runId: resumable.id });
+          await beforeAdvance?.(false);
+          return { action: RunAction.Busy, runId: resumable.id };
+        }
+        let leased = this.db.getRun(resumable.id);
+        if (leased.status === RUN_STATUSES.BLOCKED) {
+          const failedStage = this.db.getLastFailedStage(leased.id);
+          if (!resumableStage(failedStage)) {
+            this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+            this.log("warn", "run:resume-skipped", {
+              runId: leased.id,
+              issueKey: leased.issue_key,
+              reason: "No supported failed stage was recorded.",
+            });
+            await beforeAdvance?.(false);
+            return { action: RunAction.Idle };
+          }
+          try {
+            await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
+          } catch (error) {
+            this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
+            throw error;
+          }
+          leased = this.db.updateRun(leased.id, {
+            status: RUN_STATUSES.ACTIVE,
+            stage: failedStage,
+            next_attempt_at: null,
+            last_error: null,
+          });
+          this.log("info", "run:failed-task-continued", {
             runId: leased.id,
             issueKey: leased.issue_key,
-            reason: "No supported failed stage was recorded.",
+            stage: failedStage,
+            jiraStatus: this.config.jira.statuses.implementation,
           });
-            return { action: RunAction.Idle };
         }
-        try {
-          await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
-        } catch (error) {
-          this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
-          throw error;
+        this.log("info", "run:resume", { runId: leased.id, stage: leased.stage });
+        await beforeAdvance?.(true);
+        await this.advanceRun(leased, { dryRun });
+        return this.runResult(RunAction.Resumed, this.db.getRun(leased.id), leased.issue_key);
+      } finally {
+        if (this.signal?.aborted) {
+          this.db.updateRun(resumable.id, { lease_owner: null, lease_until: null });
         }
-        leased = this.db.updateRun(leased.id, {
-          status: RUN_STATUSES.ACTIVE,
-          stage: failedStage,
-          next_attempt_at: null,
-          last_error: null,
-        });
-        this.log("info", "run:failed-task-continued", {
-          runId: leased.id,
-          issueKey: leased.issue_key,
-          stage: failedStage,
-          jiraStatus: this.config.jira.statuses.implementation,
-        });
+        this.inFlightRunIds.delete(resumable.id);
       }
-      this.log("info", "run:resume", { runId: leased.id, stage: leased.stage });
-      await this.advanceRun(leased, { dryRun });
-      return this.runResult(RunAction.Resumed, this.db.getRun(leased.id), leased.issue_key);
     }
 
     if (!this.jira.enabled()) {
       this.log("warn", "jira:disabled", { reason: "Jira adapter is not configured." });
+      await beforeAdvance?.(false);
       return { action: RunAction.Disabled, reason: "Jira adapter is not configured." };
     }
     this.throwIfStopping();
@@ -186,15 +208,88 @@ export class FactoryWorker {
         continue;
       }
       this.log("info", "issue:claimed", { issueKey, runId, stage: STAGES.IMPLEMENTATION, dryRun });
-      await this.advanceRun(claimed.run, { dryRun });
-      return this.runResult(RunAction.Claimed, this.db.getRun(runId), issueKey);
+      this.inFlightRunIds.add(runId);
+      try {
+        await beforeAdvance?.(true);
+        await this.advanceRun(claimed.run, { dryRun });
+        return this.runResult(RunAction.Claimed, this.db.getRun(runId), issueKey);
+      } finally {
+        if (this.signal?.aborted) {
+          this.db.updateRun(runId, { lease_owner: null, lease_until: null });
+        }
+        this.inFlightRunIds.delete(runId);
+      }
     }
+    await beforeAdvance?.(false);
     this.log("info", "poll:idle");
     return { action: RunAction.Idle };
   }
 
+  /**
+   * Claim a bounded implementation batch before advancing any one run. The
+   * claim barrier keeps a fast item from completing while a sibling is still
+   * discovering and claiming its Ready issue.
+   */
+  async runBatch({ dryRun = false, concurrency = this.config.implementationConcurrency }: { dryRun?: boolean; concurrency?: number } = {}): Promise<BoundedBatchResult<FactoryRunResult>> {
+    const limit = normalizeConcurrency(concurrency);
+    if (limit === 1) {
+      return {
+        concurrency: limit,
+        completed: 1,
+        failed: 0,
+        results: [await this.runOnce({ dryRun })],
+      };
+    }
+
+    let arrived = 0;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+    const results: FactoryRunResult[] = [];
+    const failures: unknown[] = [];
+    const slots = Array.from({ length: limit }, (_, index) => index);
+
+    await runBounded(slots, limit, async () => {
+      let joined = false;
+      const joinClaimBarrier = () => {
+        if (joined) return;
+        joined = true;
+        arrived += 1;
+        if (arrived === limit) releaseGate();
+      };
+      try {
+        results.push(await this.runOnce({
+          dryRun,
+          beforeAdvance: async () => {
+            joinClaimBarrier();
+            await gate;
+          },
+        }));
+      } catch (error) {
+        // A discovery or claim failure happens before runOnce can reach the
+        // barrier. Count it as an arrived worker so siblings are not stranded.
+        joinClaimBarrier();
+        if (isAbortError(error) || this.signal?.aborted) throw error;
+        failures.push(error);
+        this.log("error", "poll:item-failed", {
+          error: error instanceof Error ? error.stack || error.message : String(error),
+        });
+      }
+    }, this.signal);
+
+    return {
+      concurrency: limit,
+      completed: results.length,
+      failed: failures.length,
+      results,
+    };
+  }
+
   async planNextIssue(options: { dryRun?: boolean } = {}) {
-    return planNextIssue(this, options);
+    return planNextIssue(this, options, this.inFlightPlanningIssueKeys);
+  }
+
+  async planBatch({ dryRun = false, concurrency = this.config.planningConcurrency }: { dryRun?: boolean; concurrency?: number } = {}): Promise<BoundedBatchResult<PlanningRunResult>> {
+    return planIssues(this, { dryRun, concurrency }, this.inFlightPlanningIssueKeys);
   }
 
   async advanceRun(run, { dryRun = false } = {}) {
@@ -303,8 +398,8 @@ export class FactoryWorker {
     return processPullRequest(this, run, options);
   }
 
-  async checkMergedPullRequests(): Promise<{ closed: number }> {
-    return checkMergedPullRequests(this);
+  async checkMergedPullRequests(concurrency = this.config.mergeCheckConcurrency): Promise<{ closed: number }> {
+    return checkMergedPullRequests(this, concurrency, this.inFlightMergeCheckRunIds);
   }
 
   async fixPullRequestReviews(): Promise<{ pullRequests: number; addressed: number; disputed: number; failed: number }> {

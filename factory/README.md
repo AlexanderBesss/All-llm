@@ -18,6 +18,13 @@ at the same time as implementation and neither loop waits for the other. The
 standalone planning command also skips base-branch synchronization and GitHub
 health checks because planning requires neither Git nor GitHub mutations.
 
+Planning, Ready-ticket implementation, and pull-request merge-check each use an
+explicit bounded concurrency setting. The checked-in configuration starts each
+of those paths with a limit of two; `planningConcurrency`,
+`implementationConcurrency`, and `mergeCheckConcurrency` can be lowered or
+raised independently. An item that fails is logged while sibling items in the
+same poll continue, and the next poll remains eligible to run.
+
 Implementation uses one aggregate `factory/<JIRA-KEY>` branch and one pull request per
 parent ticket. `Ready` means the verified ticket is waiting to be processed. `In Progress`
 means one lead implementation agent is working on the complete parent issue in one
