@@ -2,7 +2,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { FactoryLogger } from "./model/worker.js";
 
 const factoryLoopContext = new AsyncLocalStorage<string>();
-const factoryLogCapture = new AsyncLocalStorage<FactoryLogRecord[] | undefined>();
+interface FactoryLogCapture {
+  records: FactoryLogRecord[];
+  onRecord?: (record: FactoryLogRecord, records: readonly FactoryLogRecord[]) => void;
+}
+
+const factoryLogCapture = new AsyncLocalStorage<FactoryLogCapture | undefined>();
 
 export type FactoryLogLevel = "info" | "warn" | "error";
 
@@ -22,22 +27,27 @@ export function runWithFactoryLoop<TResult>(label: string, execute: () => Promis
 export function writeFactoryLog(logger: FactoryLogger, level: FactoryLogLevel, message: string): void {
   const capture = factoryLogCapture.getStore();
   if (capture) {
-    capture.push({ level, message });
+    const record = { level, message };
+    capture.records.push(record);
+    capture.onRecord?.(record, capture.records);
     return;
   }
   logger[level]?.(message);
 }
 
-export async function captureFactoryLogs<TResult>(execute: () => Promise<TResult>): Promise<
+export async function captureFactoryLogs<TResult>(
+  execute: () => Promise<TResult>,
+  { onRecord }: { onRecord?: FactoryLogCapture["onRecord"] } = {},
+): Promise<
   | { ok: true; result: TResult; records: FactoryLogRecord[] }
   | { ok: false; error: unknown; records: FactoryLogRecord[] }
 > {
-  const records: FactoryLogRecord[] = [];
+  const capture: FactoryLogCapture = { records: [], onRecord };
   try {
-    const result = await factoryLogCapture.run(records, execute);
-    return { ok: true, result, records };
+    const result = await factoryLogCapture.run(capture, execute);
+    return { ok: true, result, records: capture.records };
   } catch (error) {
-    return { ok: false, error, records };
+    return { ok: false, error, records: capture.records };
   }
 }
 

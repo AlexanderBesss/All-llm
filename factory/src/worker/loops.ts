@@ -28,6 +28,7 @@ export interface FactoryLoopOptions<TResult extends object> {
   failureMessage: string;
   concurrency?: number;
   isIdle?(result: object, records: readonly FactoryLogRecord[]): boolean;
+  isActive?(record: FactoryLogRecord, records: readonly FactoryLogRecord[]): boolean;
   execute(): Promise<TResult>;
 }
 
@@ -98,11 +99,24 @@ export async function runFactoryLoop<TResult extends object>(
     failureMessage,
     concurrency = 1,
     isIdle,
+    isActive,
     execute,
   }: FactoryLoopOptions<TResult>,
 ): Promise<void> {
   return runWithFactoryLoop(label, async () => {
     let stopped = false;
+    let streamed = 0;
+    let streaming = false;
+    const emitCapturedLogs = (records: readonly FactoryLogRecord[]) => {
+      if (streamed >= records.length) return;
+      const pending = records.slice(streamed);
+      streamed = records.length;
+      runWithoutFactoryLogCapture(() => flushFactoryLogs(worker.logger, pending));
+    };
+    const onCapturedLog = (record: FactoryLogRecord, records: readonly FactoryLogRecord[]) => {
+      if (!streaming && isActive?.(record, records)) streaming = true;
+      if (streaming) emitCapturedLogs(records);
+    };
     const stop = () => {
       if (!stopped) runWithoutFactoryLogCapture(() => worker.log?.("info", shutdownEvent));
       stopped = true;
@@ -110,15 +124,17 @@ export async function runFactoryLoop<TResult extends object>(
     signal?.addEventListener("abort", stop, { once: true });
     worker.log?.("info", `${label}:loop:started`, { intervalMs });
     while (!stopped) {
+      streamed = 0;
+      streaming = false;
       const execution = await captureFactoryLogs(() => executeBoundedTask(worker, {
-          label,
-          failureMessage,
-          concurrency,
-          signal,
-          execute,
-        }));
+        label,
+        failureMessage,
+        concurrency,
+        signal,
+        execute,
+      }), { onRecord: onCapturedLog });
       if (execution.ok === false) {
-        flushFactoryLogs(worker.logger, execution.records);
+        emitCapturedLogs(execution.records);
         const error = execution.error;
         if (isAbortError(error) || signal?.aborted) {
           stop();
@@ -134,7 +150,7 @@ export async function runFactoryLoop<TResult extends object>(
       ) {
         worker.log?.("info", `${label}:idle`);
       } else {
-        flushFactoryLogs(worker.logger, execution.records);
+        emitCapturedLogs(execution.records);
         writeFactoryLog(worker.logger, "info", formatFactoryLog(JSON.stringify({ ...execution.result, loop: label }), Date.now(), {
           loop: label,
           colors: isFactoryLogColorEnabled(),
@@ -187,6 +203,7 @@ export function runPlanningLoop(
     shutdownEvent: "planning-loop:shutdown-requested",
     failureMessage: "planning task failed",
     isIdle: (result) => isIdleBatchResult(result),
+    isActive: (record) => record.message.includes("planning:agent-start"),
     // FactoryWorker.planBatch discovers and claims the bounded batch before
     // advancing any selected issue. Keep the outer loop serial for that batch
     // scheduler; small test doubles can still use the generic fallback.
@@ -208,6 +225,7 @@ export function runLoop(
     shutdownEvent: "loop:shutdown-requested",
     failureMessage: "task failed",
     isIdle: (result) => isIdleBatchResult(result),
+    isActive: (record) => record.message.includes("issue:claimed") || record.message.includes("run:resume-found"),
     // FactoryWorker.runBatch claims every slot before advancing any run. Keep
     // the outer loop serial for that batch scheduler; test doubles without it
     // retain the generic bounded runOnce fallback.
@@ -233,6 +251,7 @@ export function runMergeCheckLoop(
     shutdownEvent: "merge-check-loop:shutdown-requested",
     failureMessage: "merge-check failed",
     isIdle: (_result, records) => records.some((record) => record.message.includes("merge-check:pending {\"count\":0}")),
+    isActive: (record) => record.message.includes("merge-check:pending") && !record.message.includes("{\"count\":0}"),
     // Merge-check discovers its whole batch in one poll and applies this
     // limit while evaluating individual pull requests.
     concurrency: 1,
@@ -255,6 +274,7 @@ export function runReviewFixLoop(
     shutdownEvent: "review-fix-loop:shutdown-requested",
     failureMessage: "review-fix failed",
     isIdle: (result) => "pullRequests" in result && result.pullRequests === 0,
+    isActive: (record) => record.message.includes("review-fix:pending") && !record.message.includes("{\"count\":0}"),
     execute: () => worker.fixPullRequestReviews(),
   });
 }

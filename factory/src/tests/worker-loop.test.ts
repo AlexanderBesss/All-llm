@@ -208,6 +208,47 @@ test("actual loop work keeps its nested telemetry", async () => {
   assert.equal(messages.filter((message) => message.includes("[task] task:idle")).length, 0);
 });
 
+test("active task logs stream before the task completes", async () => {
+  const controller = new AbortController();
+  const messages: string[] = [];
+  let releaseTask!: () => void;
+  const taskReleased = new Promise<void>((resolve) => { releaseTask = resolve; });
+  let resolveClaimed!: () => void;
+  const claimed = new Promise<void>((resolve) => { resolveClaimed = resolve; });
+  const logger = {
+    info(message: string) {
+      messages.push(message);
+      if (message.includes("issue:claimed")) resolveClaimed();
+    },
+    warn(message: string) { messages.push(message); },
+    error(message: string) { messages.push(message); },
+  };
+  const worker = {
+    signal: controller.signal,
+    logger,
+    log(level: "info" | "warn" | "error", event: string, details?: Record<string, unknown>) {
+      const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
+      writeFactoryLog(logger, level, formatFactoryLog(`${event}${suffix}`, Date.now(), { loop: currentFactoryLoop() || "task" }));
+    },
+    async runOnce() {
+      worker.log("info", "task:start");
+      worker.log("info", "issue:claimed");
+      await taskReleased;
+      worker.log("info", "implementation:agent-heartbeat");
+      controller.abort();
+      return { action: "claimed" };
+    },
+  };
+
+  const loop = runLoop(worker, { signal: controller.signal, pollIntervalMs: 0 });
+  await claimed;
+  assert.equal(messages.filter((message) => message.includes("issue:claimed")).length, 1);
+  assert.equal(messages.filter((message) => message.includes("implementation:agent-heartbeat")).length, 0);
+  releaseTask();
+  await loop;
+  assert.equal(messages.filter((message) => message.includes("implementation:agent-heartbeat")).length, 1);
+});
+
 test("bounded loop polls isolate item failures and never exceed their configured limit", async () => {
   const controller = new AbortController();
   let executions = 0;
