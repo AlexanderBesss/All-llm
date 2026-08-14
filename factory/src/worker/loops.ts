@@ -1,5 +1,6 @@
 import { abortError, isAbortError } from "../git.js";
-import { formatFactoryLog } from "../types.js";
+import { FactoryLoop, formatFactoryLog } from "../types.js";
+import { isFactoryLogColorEnabled, runWithFactoryLoop } from "../logging.js";
 import type { FactoryLogger } from "../model/worker.js";
 
 type LoopLogLevel = "info" | "warn" | "error";
@@ -44,38 +45,46 @@ export async function runFactoryLoop<TResult extends object>(
   worker: FactoryLoopWorker,
   { signal = worker.signal, intervalMs, label, shutdownEvent, failureMessage, execute }: FactoryLoopOptions<TResult>,
 ): Promise<void> {
-  let stopped = false;
-  const stop = () => {
-    if (!stopped) worker.log?.("info", shutdownEvent);
-    stopped = true;
-  };
-  signal?.addEventListener("abort", stop, { once: true });
-  worker.log?.("info", `${label}:loop:started`, { intervalMs });
-  while (!stopped) {
-    try {
-      const result = await execute();
-      worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label })));
-    } catch (error) {
-      if (isAbortError(error) || signal?.aborted) {
-        stop();
-        break;
-      }
-      worker.logger.error?.(formatFactoryLog(`[${label}] ${failureMessage}: ${errorMessage(error)}`));
-    }
-    if (!stopped) {
+  return runWithFactoryLoop(label, async () => {
+    let stopped = false;
+    const stop = () => {
+      if (!stopped) worker.log?.("info", shutdownEvent);
+      stopped = true;
+    };
+    signal?.addEventListener("abort", stop, { once: true });
+    worker.log?.("info", `${label}:loop:started`, { intervalMs });
+    while (!stopped) {
       try {
-        await waitForInterval(intervalMs, signal);
+        const result = await execute();
+        worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label }), Date.now(), {
+          loop: label,
+          colors: isFactoryLogColorEnabled(),
+        }));
       } catch (error) {
-        if (isAbortError(error)) {
+        if (isAbortError(error) || signal?.aborted) {
           stop();
           break;
         }
-        throw error;
+        worker.logger.error?.(formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
+          loop: label,
+          colors: isFactoryLogColorEnabled(),
+        }));
+      }
+      if (!stopped) {
+        try {
+          await waitForInterval(intervalMs, signal);
+        } catch (error) {
+          if (isAbortError(error)) {
+            stop();
+            break;
+          }
+          throw error;
+        }
       }
     }
-  }
-  signal?.removeEventListener("abort", stop);
-  worker.log?.("info", `${label}:loop:stopped`);
+    signal?.removeEventListener("abort", stop);
+    worker.log?.("info", `${label}:loop:stopped`);
+  });
 }
 
 export interface PollLoopWorker extends FactoryLoopWorker {
@@ -89,7 +98,7 @@ export function runLoop(
   return runFactoryLoop(worker, {
     signal,
     intervalMs: pollIntervalMs,
-    label: "poll",
+    label: FactoryLoop.Poll,
     shutdownEvent: "loop:shutdown-requested",
     failureMessage: "poll failed",
     execute: () => worker.runOnce(),
@@ -107,7 +116,7 @@ export function runMergeCheckLoop(
   return runFactoryLoop(worker, {
     signal,
     intervalMs,
-    label: "merge-check",
+    label: FactoryLoop.MergeCheck,
     shutdownEvent: "merge-check-loop:shutdown-requested",
     failureMessage: "merge-check failed",
     execute: () => worker.checkMergedPullRequests(),
@@ -125,7 +134,7 @@ export function runReviewFixLoop(
   return runFactoryLoop(worker, {
     signal,
     intervalMs,
-    label: "review-fix",
+    label: FactoryLoop.ReviewFix,
     shutdownEvent: "review-fix-loop:shutdown-requested",
     failureMessage: "review-fix failed",
     execute: () => worker.fixPullRequestReviews(),

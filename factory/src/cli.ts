@@ -7,6 +7,7 @@ import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError } from "./git.js";
 import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
+import { currentFactoryLoop, isFactoryLogColorEnabled } from "./logging.js";
 import { FactoryWorker, runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker.js";
 import { commandDoctor } from "./cli/doctor.js";
 import { CliCommand } from "./model/cli.js";
@@ -40,7 +41,10 @@ function normalizedJiraConfig(config: FactoryConfig, signal?: AbortSignal): Jira
     signal,
     log(level, event, details) {
       const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
-      console[level]?.(formatFactoryLog(`${event}${suffix}`));
+      console[level]?.(formatFactoryLog(`${event}${suffix}`, Date.now(), {
+        loop: currentFactoryLoop(),
+        colors: isFactoryLogColorEnabled(),
+      }));
     },
   };
 }
@@ -128,7 +132,10 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   const controller = new AbortController();
   const onShutdown = () => {
     if (controller.signal.aborted) return;
-    console.warn(formatFactoryLog("shutdown requested; cancelling active operations..."));
+    console.warn(formatFactoryLog("shutdown requested; cancelling active operations...", Date.now(), {
+      loop: currentFactoryLoop(),
+      colors: isFactoryLogColorEnabled(),
+    }));
     controller.abort();
   };
   const shutdownSignals = ["SIGINT", "SIGTERM"];
@@ -167,11 +174,17 @@ export async function main(argv: string[] = process.argv.slice(2)) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((error) => {
     if (isAbortError(error)) {
-      console.log(formatFactoryLog("shutdown complete."));
+      console.log(formatFactoryLog("shutdown complete.", Date.now(), {
+        loop: currentFactoryLoop(),
+        colors: isFactoryLogColorEnabled(),
+      }));
       process.exitCode = 0;
       return;
     }
-    console.error(formatFactoryLog(`fatal: ${error.stack || error.message || error}`));
+    console.error(formatFactoryLog(`fatal: ${error.stack || error.message || error}`, Date.now(), {
+      loop: currentFactoryLoop(),
+      colors: isFactoryLogColorEnabled(),
+    }));
     process.exitCode = 1;
   });
 }
