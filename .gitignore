@@ -6,6 +6,8 @@
 /whisper-note/bin/
 /whisper-note/obj/
 /whisper-note/publish/
+/whisper-note.tests/bin/
+/whisper-note.tests/obj/
 /models/**/*.gguf
 /models
 /open-webui-data/
