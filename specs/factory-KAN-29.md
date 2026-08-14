@@ -77,8 +77,8 @@ In order to see which model were implemented we should add this model to the Pul
 ## Decision log
 
 - No user questions are required for this unattended run. Record assumptions and implementation decisions here as they are made.
-- The generated Pull Request body starts with `Implemented by <model>` when the selected implementation model is a non-empty configured value. The exact model identifier is retained so provider-qualified OpenCode values remain unambiguous.
-- Codex attribution follows the same routing as implementation execution: `codex.model` for Tasks and bug fixes, `codex.featureModel` for Features, with the base Codex model as the Feature fallback. OpenCode uses `opencode.model` regardless of Jira type.
+- The generated Pull Request body starts with `Implemented by <model>` when the selected implementation model is a non-empty configured value. When Codex reasoning effort is configured, the same attribution includes `(reasoning effort: <effort>)`. The exact model identifier is retained so provider-qualified OpenCode values remain unambiguous.
+- Codex attribution follows the same routing as implementation execution: `codex.model` and `codex.reasoningEffort` for Tasks and bug fixes, `codex.featureModel` and `codex.featureReasoningEffort` for Features, with the base Codex model and effort as Feature fallbacks. OpenCode uses `opencode.model` regardless of Jira type and does not require an effort setting.
 - If the selected configuration has no usable model identifier, PR creation continues with the pre-existing marker-first description rather than inventing a model name.
 
 ## Implementation notes
@@ -86,12 +86,12 @@ In order to see which model were implemented we should add this model to the Pul
 ### Approach
 
 - Added shared model-selection helpers in `factory/src/worker/format.ts` and reused the Codex helper from the executor so the PR description cannot drift from the model actually selected for implementation.
-- Passed the selected model into the existing PR-description formatter, which prepends the attribution while preserving the existing marker, intent, acceptance, validation, and reference sections.
-- Added worker coverage for Codex Task and Feature routing, OpenCode model attribution, and missing-model compatibility; the fixture now models the repository's configured provider defaults.
+- Passed the selected model and optional reasoning effort into the existing PR-description formatter, which prepends the attribution while preserving the existing marker, intent, acceptance, validation, and reference sections.
+- Added worker coverage for Codex Task and Feature routing with effort attribution, OpenCode model attribution without a required effort, and missing-model compatibility; the fixture now models the repository's configured provider defaults.
 
 ### Compatibility and validation
 
-- Existing PR descriptions remain unchanged when no usable model metadata is supplied; no GitHub adapter or PR input contract changed.
+- Existing PR descriptions remain unchanged when no usable model metadata is supplied, and OpenCode remains compatible without an effort setting; no GitHub adapter or PR input contract changed.
 - Focused validation: `node.exe --test --test-name-pattern="pull-request" dist/tests/worker.test.js` passed 7 tests.
 - Full validation: `npm.cmd test` passed all 98 tests.
 - TypeScript validation: `npm.cmd run build` passed with no compiler errors.

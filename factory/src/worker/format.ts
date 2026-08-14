@@ -6,21 +6,38 @@ import type { CodexSettings, FactoryConfig } from "../model/config.js";
 import type { ImplementationPlan } from "../model/codex.js";
 import type { JiraIssue } from "../model/jira.js";
 
-function usableModel(value: unknown): string | undefined {
+function usableValue(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const model = value.trim().replace(/\s+/g, " ");
-  return model || undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || undefined;
+}
+
+export interface ImplementationMetadata {
+  model?: string;
+  reasoningEffort?: string;
+}
+
+export function codexImplementationMetadata(settings: CodexSettings, issue: JiraIssue): ImplementationMetadata {
+  const isFeature = jiraText(issue.fields?.issuetype).trim().toLowerCase() === "feature";
+  const model = isFeature ? settings.featureModel : settings.model;
+  const reasoningEffort = isFeature ? settings.featureReasoningEffort : settings.reasoningEffort;
+  return {
+    model: usableValue(model) || (isFeature ? usableValue(settings.model) : undefined),
+    reasoningEffort: usableValue(reasoningEffort) || (isFeature ? usableValue(settings.reasoningEffort) : undefined),
+  };
 }
 
 export function codexImplementationModel(settings: CodexSettings, issue: JiraIssue): string | undefined {
-  const isFeature = jiraText(issue.fields?.issuetype).trim().toLowerCase() === "feature";
-  const preferred = isFeature ? settings.featureModel : settings.model;
-  return usableModel(preferred) || (isFeature ? usableModel(settings.model) : undefined);
+  return codexImplementationMetadata(settings, issue).model;
+}
+
+export function implementationMetadata(config: Pick<FactoryConfig, "provider" | "codex" | "opencode">, issue: JiraIssue): ImplementationMetadata {
+  if (config.provider === AgentProvider.OpenCode) return { model: usableValue(config.opencode?.model) };
+  return codexImplementationMetadata(config.codex, issue);
 }
 
 export function implementationModel(config: Pick<FactoryConfig, "provider" | "codex" | "opencode">, issue: JiraIssue): string | undefined {
-  if (config.provider === AgentProvider.OpenCode) return usableModel(config.opencode?.model);
-  return codexImplementationModel(config.codex, issue);
+  return implementationMetadata(config, issue).model;
 }
 
 export function jiraText(value: unknown, property: "name" | "key" | "summary" = "name"): string {
@@ -83,12 +100,13 @@ export function planDescription(originalDescription: unknown, plan: Implementati
   ].join("\n");
 }
 
-export function pullRequestDescription({ runId, issueKey, plan, specPath = "", model }: {
+export function pullRequestDescription({ runId, issueKey, plan, specPath = "", model, reasoningEffort }: {
   runId: string;
   issueKey: string;
   plan: ImplementationPlan;
   specPath?: string;
   model?: string;
+  reasoningEffort?: string;
 }): string {
   const implementationAreas = plan.files.length
     ? plan.files.map((item) => `- ${item}`)
@@ -96,9 +114,13 @@ export function pullRequestDescription({ runId, issueKey, plan, specPath = "", m
   const validationChecks = plan.tests.length
     ? plan.tests.map((item) => `- ${item}`)
     : ["- Relevant repository tests and validation checks."];
-  const normalizedModel = usableModel(model);
+  const normalizedModel = usableValue(model);
+  const normalizedReasoningEffort = usableValue(reasoningEffort);
+  const attribution = normalizedModel
+    ? `Implemented by ${normalizedModel}${normalizedReasoningEffort ? ` (reasoning effort: ${normalizedReasoningEffort})` : ""}`
+    : undefined;
   return [
-    ...(normalizedModel ? [`Implemented by ${normalizedModel}`, ""] : []),
+    ...(attribution ? [attribution, ""] : []),
     makeRunMarker(runId),
     "",
     "## Intent",

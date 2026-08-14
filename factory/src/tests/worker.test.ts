@@ -42,7 +42,7 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(fixtureData.github.pullRequests[0].title, /Add factory coverage/);
   assert.deepEqual(fixtureData.github.pullRequests[0].labels, ["review", "ai-review"]);
   const pullRequestBody = fixtureData.github.pullRequests[0].body;
-  assert.match(pullRequestBody, /^Implemented by gpt-5\.6-luna\n\n\[factory-run:FACT-1-[^\]]+\]/);
+  assert.match(pullRequestBody, /^Implemented by gpt-5\.6-luna \(reasoning effort: max\)\n\n\[factory-run:FACT-1-[^\]]+\]/);
   assert.match(pullRequestBody, /## Intent\nFactory coverage/);
   assert.match(pullRequestBody, /## What this changes/);
   assert.match(pullRequestBody, /### Implementation areas\n- factory/);
@@ -84,8 +84,9 @@ test("pull-request description presents intent and review context in a predictab
     },
     specPath: "specs/factory-FACT-1.md",
     model: "gpt-5.6-sol",
+    reasoningEffort: "medium",
   });
-  assert.match(body, /^Implemented by gpt-5\.6-sol\n\n\[factory-run:FACT-1-run\]/);
+  assert.match(body, /^Implemented by gpt-5\.6-sol \(reasoning effort: medium\)\n\n\[factory-run:FACT-1-run\]/);
   assert.ok(body.indexOf("## Intent") < body.indexOf("## Acceptance criteria"));
   assert.ok(body.indexOf("## Acceptance criteria") < body.indexOf("## Validation"));
   assert.ok(body.indexOf("## Validation") < body.indexOf("## References"));
@@ -104,7 +105,7 @@ test("pull-request attribution follows the selected provider and Jira issue type
   await featureWorker.runOnce();
 
   assert.equal(implementationModel(featureFixture.config, featureIssue), "gpt-5.6-sol");
-  assert.match(featureFixture.github.pullRequests[0].body, /^Implemented by gpt-5\.6-sol\n\n/);
+  assert.match(featureFixture.github.pullRequests[0].body, /^Implemented by gpt-5\.6-sol \(reasoning effort: medium\)\n\n/);
   featureFixture.db.close();
 
   const openCodeFixture = await fixture();
