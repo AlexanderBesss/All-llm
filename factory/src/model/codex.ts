@@ -54,6 +54,16 @@ export interface ImplementationPlan {
   tests: string[];
 }
 
+export interface JiraPlanningResult {
+  description: string;
+  acceptanceCriteria: string[];
+}
+
+export interface CodexPlanningResult {
+  result: JiraPlanningResult;
+  raw: CodexJsonLinesResult;
+}
+
 export enum TestStatus {
   Passed = "passed",
   Failed = "failed",
@@ -109,8 +119,7 @@ export interface CodexAgent {
     cwd: string;
     previousPlan: ImplementationPlan | null;
     specPath: string;
-    baseBranch?: string;
-    verificationPass?: boolean;
     onProgress?(event: CodexEvent): void;
   }): Promise<CodexExecutionResult>;
+  planIssue(input: { issue: JiraIssue }): Promise<CodexPlanningResult>;
 }

@@ -58,10 +58,12 @@ export interface JiraSearchItem {
 
 export interface JiraAdapter {
   enabled(): boolean;
+  searchPlanning(): Promise<JiraIssue[]>;
   searchReady(): Promise<JiraIssue[]>;
   getIssue(issueKey: string): Promise<JiraIssue>;
   transition(issueKey: string, statusName: string): Promise<unknown>;
   updateDescription(issueKey: string, description: string): Promise<unknown>;
+  updateSummaryAndDescription(issueKey: string, summary: string, description: string): Promise<unknown>;
   addComment(issueKey: string, body: string): Promise<unknown>;
   commentExists(issueKey: string, body: string): Promise<boolean>;
 }

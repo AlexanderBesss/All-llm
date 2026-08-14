@@ -81,7 +81,7 @@ export function buildSpecContent({ issue, runId, branchName, generatedAt = new D
     "",
     `# Specification: [${issueKey}] ${summary}`,
     "",
-    "> This specification is generated for an unattended factory run. It is the scope and decision record for one parent Jira issue, one lead implementation agent with optional investigation sub-agents, one autonomous writable verification pass, one branch, and one pull request.",
+    "> This specification is generated for an unattended factory run. It is the scope and decision record for one parent Jira issue, one lead implementation agent with optional investigation sub-agents, one branch, and one pull request.",
     "",
     "## Metadata",
     "",

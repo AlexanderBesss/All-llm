@@ -1,15 +1,19 @@
 export enum StageName {
   PLANNING = "planning",
   IMPLEMENTATION = "implementation",
-  PRE_PR_VERIFICATION = "pre_pr_verification",
-  /** @deprecated Persisted alias retained for compatibility with existing runs. */
-  CODE_REVIEW = "code_review",
   PULL_REQUEST = "pull_request",
   REVIEW = "review",
   BLOCKED = "blocked",
 }
 
 export const STAGES = StageName;
+
+/** Persisted stages from the removed post-implementation review pass. */
+export const REMOVED_REVIEW_STAGES = new Set(["pre_pr_verification", "code_review"]);
+
+export function isRemovedReviewStage(stage: string | null | undefined): boolean {
+  return REMOVED_REVIEW_STAGES.has(String(stage || ""));
+}
 
 export enum RunStatus {
   ACTIVE = "active",
@@ -52,12 +56,37 @@ export enum RunAction {
   Claimed = "claimed",
 }
 
+export enum FactoryLoop {
+  Planning = "planning",
+  Task = "task",
+  MergeCheck = "merge-check",
+  ReviewFix = "review-fix",
+}
+
 export function nowIso() {
   return new Date().toISOString();
 }
 
-export function formatFactoryLog(message: string, timestamp = Date.now()) {
-  return `[${new Date(timestamp).toISOString()}] [factory] ${message}`;
+export interface FactoryLogOptions {
+  loop?: string;
+  colors?: boolean;
+}
+
+const LOOP_COLORS: Record<string, string> = {
+  [FactoryLoop.Planning]: "\u001b[34m",
+  [FactoryLoop.Task]: "\u001b[36m",
+  [FactoryLoop.MergeCheck]: "\u001b[33m",
+  [FactoryLoop.ReviewFix]: "\u001b[35m",
+};
+
+export function formatFactoryLog(message: string, timestamp = Date.now(), options: FactoryLogOptions = {}) {
+  const loop = String(options.loop || "").trim();
+  const loopLabel = loop ? `[${loop}]` : "";
+  const formattedLoop = loopLabel && options.colors
+    ? `${LOOP_COLORS[loop] || "\u001b[34m"}${loopLabel}\u001b[0m`
+    : loopLabel;
+  const scope = formattedLoop ? ` ${formattedLoop}` : "";
+  return `[${new Date(timestamp).toISOString()}]${scope} ${message}`;
 }
 
 export function makeRunId(issueKey: string, clock = Date.now()) {

@@ -21,6 +21,9 @@ test("factory defaults to one attempt and no subtask configuration", () => {
     assert.equal(defaultConfig(".").maxAttempts, 4);
     assert.deepEqual(validateConfig({ ...config, maxAttempts: 4 }, { live: false }), []);
     assert.ok(validateConfig({ ...config, maxAttempts: 0 }, { live: false }).includes("maxAttempts must be a positive integer"));
+    assert.ok(validateConfig({ ...config, planningConcurrency: 0 }, { live: false }).includes("planningConcurrency must be a positive integer"));
+    assert.ok(validateConfig({ ...config, implementationConcurrency: 0 }, { live: false }).includes("implementationConcurrency must be a positive integer"));
+    assert.ok(validateConfig({ ...config, mergeCheckConcurrency: 0 }, { live: false }).includes("mergeCheckConcurrency must be a positive integer"));
   } finally {
     if (previous === undefined) delete process.env.FACTORY_MAX_ATTEMPTS;
     else process.env.FACTORY_MAX_ATTEMPTS = previous;
@@ -250,7 +253,7 @@ test("MCP Jira serializes calls and gives queued mutations priority over reads",
   assert.deepEqual(order, ["read", "mutation", "read"]);
 });
 
-test("MCP Jira emits queue, request, validation, and duration telemetry", async () => {
+test("MCP Jira emits one completion summary per logical call", async () => {
   const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
   const executor: JiraExecutor = {
     async run() {
@@ -266,11 +269,11 @@ test("MCP Jira emits queue, request, validation, and duration telemetry", async 
 
   await adapter.searchReady();
 
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:queued"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:start" && typeof entry.details?.queueMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:request-complete" && typeof entry.details?.durationMs === "number"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:response-validated"));
-  assert.ok(events.some((entry) => entry.event === "jira:mcp:complete" && typeof entry.details?.durationMs === "number"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, "jira:mcp:complete");
+  assert.equal(events[0].details?.operation, "search-ready");
+  assert.equal(typeof events[0].details?.queueMs, "number");
+  assert.equal(typeof events[0].details?.durationMs, "number");
 });
 
 test("MCP Jira description correction follows a format error instead of repeating the bad payload", async () => {
@@ -290,6 +293,26 @@ test("MCP Jira description correction follows a format error instead of repeatin
   assert.equal(requests.length, 2);
   assert.match(requests[1].task, /switch contentFormat to "adf"/);
   assert.match(requests[1].task, /valid ADF document object/);
+});
+
+test("MCP Jira transition correction stays focused on the destination status", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      return requests.length === 1
+        ? { output: JSON.stringify({ ok: false, issueKey: "FACT-1", key: "FACT-1", details: 'The issue remained "In Review".' }) }
+        : { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "transitioned" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.transition("FACT-1", "Done");
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].task, /destination status named exactly/);
+  assert.match(requests[1].task, /destination status is exactly the requested target status/);
+  assert.doesNotMatch(requests[1].task, /fields\.description/);
 });
 
 test("MCP Jira mutations do not retry an unknown provider-timeout outcome", async () => {
@@ -397,6 +420,14 @@ test("Jira ready discovery includes Ready issues with or without a sprint", asyn
   assert.deepEqual((await jira.searchReady()).map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);
 });
 
+test("Jira planning discovery includes only Planning issues", async () => {
+  const jira = new InMemoryJiraAdapter([
+    { key: "FACT-PLAN", fields: { status: { name: "Planning" } } },
+    { key: "FACT-READY", fields: { status: { name: "Ready" } } },
+  ]);
+  assert.deepEqual((await jira.searchPlanning()).map((issue) => issue.key), ["FACT-PLAN"]);
+});
+
 test("factory claims a Ready issue without a sprint", async () => {
   const fixtureData = await fixture();
   fixtureData.jira.issues.set("FACT-2", {
@@ -420,7 +451,7 @@ test("factory claims a Ready issue without a sprint", async () => {
   const nextPoll = await worker.runOnce();
   assert.equal(claimed.issueKey, "FACT-1");
   assert.equal(nextPoll.issueKey, "FACT-2");
-  assert.equal(agentCalls, 4);
+  assert.equal(agentCalls, 2);
   fixtureData.db.close();
 });
 
@@ -439,6 +470,44 @@ test("REST Jira ready discovery searches all Ready issues in the project", async
   await jira.searchReady();
   const body = JSON.parse(String(requests[0].options?.body));
   assert.equal(body.jql, 'project = FACT AND status = "Ready" ORDER BY priority DESC, updated ASC');
+});
+
+test("REST Jira planning discovery uses the configured Planning status", async () => {
+  const requests: Array<{ url: string; options?: RequestInit }> = [];
+  const jira = new JiraRestAdapter({
+    baseUrl: "https://jira.example.test",
+    projectKey: "FACT",
+    planningStatus: "Refinement",
+    email: "factory@example.test",
+    apiToken: "token",
+  }, async (url, options) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, async text() { return JSON.stringify({ issues: [] }); } };
+  });
+  await jira.searchPlanning();
+  const body = JSON.parse(String(requests[0].options?.body));
+  assert.equal(body.jql, 'project = FACT AND status = "Refinement" ORDER BY priority DESC, updated ASC');
+});
+
+test("REST Jira planning mutation updates title and description together", async () => {
+  const requests: Array<{ url: string; options?: RequestInit }> = [];
+  const jira = new JiraRestAdapter({
+    baseUrl: "https://jira.example.test",
+    projectKey: "FACT",
+    email: "factory@example.test",
+    apiToken: "token",
+  }, async (url, options) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, async text() { return "{}"; } };
+  });
+
+  await jira.updateSummaryAndDescription("FACT-1", "[FACT-1] Add factory coverage", "Refined description");
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options?.method, "PUT");
+  const body = JSON.parse(String(requests[0].options?.body));
+  assert.equal(body.fields.summary, "[FACT-1] Add factory coverage");
+  assert.equal(body.fields.description.content[0].content[0].text, "Refined description");
 });
 
 test("Codex Jira ready discovery includes backlog issues without sprint metadata", async () => {
@@ -461,6 +530,36 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
   assert.match(calls[0].task, /status = "Ready" ORDER BY priority DESC/);
   assert.deepEqual(issues.map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);
   assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1", state: null, boardId: null, originBoardId: null, startDate: null, endDate: null, completeDate: null, goal: null }]);
+});
+
+test("MCP Jira planning discovery uses configured project and status", async () => {
+  const calls = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      calls.push(input);
+      return { output: JSON.stringify({ issues: [] }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", planningStatus: "Refinement" }, executor);
+  await adapter.searchPlanning();
+  assert.match(calls[0].task, /project = FACT AND status = "Refinement"/);
+});
+
+test("MCP Jira planning mutation sends title and description in one edit", async () => {
+  const calls = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      calls.push(input);
+      return { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.updateSummaryAndDescription("FACT-1", "[FACT-1] Add factory coverage", "Refined description");
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].task, /"fields":\{"summary":"\[FACT-1\] Add factory coverage","description":"Refined description"\}/);
+  assert.match(calls[0].task, /replace the title and description/);
 });
 
 test("MCP Jira lookup accepts an existing issue in Error status", async () => {

@@ -16,11 +16,25 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.jira.adapter, JiraAdapterKind.CodexMcp);
   assert.equal(config.jira.mcpModel, "gpt-5.6-luna");
   assert.equal(config.jira.mcpReasoningEffort, "low");
+  assert.equal(config.planningIntervalMs, 60_000);
+  assert.equal(config.planningConcurrency, 2);
+  assert.equal(config.implementationConcurrency, 2);
+  assert.equal(config.mergeCheckConcurrency, 2);
+  assert.equal(config.jira.statuses?.planning, "Planning");
+  assert.equal(config.jira.statuses?.todo, "To Do");
   assert.equal(config.codex.model, "gpt-5.6-luna");
   assert.equal(config.codex.reasoningEffort, "max");
   assert.equal(config.codex.featureModel, "gpt-5.6-sol");
   assert.equal(config.codex.featureReasoningEffort, "medium");
   assert.equal(config.opencode.model, "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL");
+});
+
+test("standalone planning validation does not require GitHub", () => {
+  const config = defaultConfig(".");
+  config.github.repositoryFullName = "";
+  config.github.provider = "";
+  assert.ok(validateConfig(config, { live: true }).some((error) => error.includes("github.repositoryFullName")));
+  assert.ok(!validateConfig(config, { live: true, requireGitHub: false }).some((error) => error.includes("github.")));
 });
 
 test("the repository factory/config.json is loaded when no override is supplied", async () => {

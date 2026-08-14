@@ -124,6 +124,13 @@ export class JiraRestAdapter {
     return this.search(jql);
   }
 
+  async searchPlanning() {
+    const project = this.config.projectKey;
+    const status = this.config.planningStatus || "Planning";
+    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" ORDER BY priority DESC, updated ASC`;
+    return this.search(jql);
+  }
+
   async getIssue(issueKey: string): Promise<JiraIssue> {
     try {
       return await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, undefined, {
@@ -164,6 +171,13 @@ export class JiraRestAdapter {
     return this.updateIssue(issueKey, { description: textToAdf(description) });
   }
 
+  async updateSummaryAndDescription(issueKey, summary, description) {
+    return this.updateIssue(issueKey, {
+      summary,
+      description: textToAdf(description),
+    });
+  }
+
   async addComment(issueKey, body) {
     if (await this.commentExists(issueKey, body)) return {};
     return this.request("POST", `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
@@ -196,6 +210,11 @@ export class InMemoryJiraAdapter {
       issue.fields?.status?.name === "Ready");
   }
 
+  async searchPlanning(): Promise<JiraIssue[]> {
+    return [...this.issues.values()].filter((issue) =>
+      issue.fields?.status?.name === "Planning");
+  }
+
   async getIssue(key) {
     const issue = this.issues.get(key);
     if (!issue) throw new JiraIssueNotFoundError(key);
@@ -211,6 +230,13 @@ export class InMemoryJiraAdapter {
 
   async updateDescription(key, description) {
     const issue = await this.getIssue(key);
+    issue.fields.description = description;
+    this.issues.set(key, issue);
+  }
+
+  async updateSummaryAndDescription(key, summary, description) {
+    const issue = await this.getIssue(key);
+    issue.fields.summary = summary;
     issue.fields.description = description;
     this.issues.set(key, issue);
   }

@@ -7,7 +7,8 @@ import { GitHubCliAdapter } from "./github.js";
 import { GitAdapter, isAbortError } from "./git.js";
 import { createAgentExecutors } from "./agent-strategy.js";
 import { formatFactoryLog } from "./types.js";
-import { FactoryWorker, runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker.js";
+import { currentFactoryLoop, isFactoryLogColorEnabled, writeFactoryLog } from "./logging.js";
+import { FactoryWorker, runLoop, runMergeCheckLoop, runPlanningLoop, runReviewFixLoop } from "./worker.js";
 import { commandDoctor } from "./cli/doctor.js";
 import { CliCommand } from "./model/cli.js";
 import { JiraAdapterKind } from "./model/config.js";
@@ -36,11 +37,15 @@ function normalizedJiraConfig(config: FactoryConfig, signal?: AbortSignal): Jira
   return {
     ...config.jira,
     repoPath: config.repoPath,
+    planningStatus: config.jira.statuses.planning,
     readyStatus: config.jira.statuses.ready,
     signal,
     log(level, event, details) {
       const suffix = details && Object.keys(details).length ? ` ${JSON.stringify(details)}` : "";
-      console[level]?.(formatFactoryLog(`${event}${suffix}`));
+      writeFactoryLog(console, level, formatFactoryLog(`${event}${suffix}`, Date.now(), {
+        loop: currentFactoryLoop(),
+        colors: isFactoryLogColorEnabled(),
+      }));
     },
   };
 }
@@ -62,13 +67,16 @@ function normalizedGitHubConfig(config: FactoryConfig, signal?: AbortSignal): Gi
   };
 }
 
-async function makeWorker(config: FactoryConfig, signal?: AbortSignal, { syncBaseBranch = true } = {}) {
+async function makeWorker(config: FactoryConfig, signal?: AbortSignal, {
+  syncBaseBranch = true,
+  requireGitHubHealth = true,
+}: { syncBaseBranch?: boolean; requireGitHubHealth?: boolean } = {}) {
   const git = new GitAdapter(normalizedGitConfig(config, signal));
   if (syncBaseBranch) await git.syncBaseBranch();
   const db = await openStateDatabase(config.stateDir);
   try {
     const github = new GitHubCliAdapter(normalizedGitHubConfig(config, signal));
-    await github.health();
+    if (requireGitHubHealth) await github.health();
     const { strategy, agent } = createAgentExecutors(config, signal);
     await agent.health({ requireJiraMcp: config.jira.adapter !== JiraAdapterKind.Rest });
     const jira = config.jira.adapter === JiraAdapterKind.Rest
@@ -99,7 +107,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
   if (args.command === CliCommand.Help) {
-    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-jira-tasks|start-pull-request-check|start-review-fix|status|install> [--config path] [--dry-run] [--json]");
+    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-planning|start-jira-tasks|start-pull-request-check|start-review-fix|status|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
   if (args.command === CliCommand.Doctor) {
@@ -118,17 +126,24 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   }
   const loopCommands = [
     CliCommand.Start,
+    CliCommand.StartPlanning,
     CliCommand.StartJiraTasks,
     CliCommand.StartPullRequestCheck,
     CliCommand.StartReviewFix,
   ];
   if (![CliCommand.RunOnce, ...loopCommands].includes(args.command as CliCommand)) throw new Error(`Unknown command: ${args.command}`);
-  const errors = validateConfig(config, { live: true });
+  const errors = validateConfig(config, {
+    live: true,
+    requireGitHub: args.command !== CliCommand.StartPlanning,
+  });
   if (errors.length) throw new Error(`Factory is not configured:\n- ${errors.join("\n- ")}`);
   const controller = new AbortController();
   const onShutdown = () => {
     if (controller.signal.aborted) return;
-    console.warn(formatFactoryLog("shutdown requested; cancelling active operations..."));
+    console.warn(formatFactoryLog("shutdown requested; cancelling active operations...", Date.now(), {
+      loop: currentFactoryLoop(),
+      colors: isFactoryLogColorEnabled(),
+    }));
     controller.abort();
   };
   const shutdownSignals = ["SIGINT", "SIGTERM"];
@@ -141,24 +156,53 @@ export async function main(argv: string[] = process.argv.slice(2)) {
       // The pull-request checker only reads GitHub and updates Jira. Avoid
       // making two independently started loops synchronize the repository at
       // the same time.
-      syncBaseBranch: args.command !== CliCommand.StartPullRequestCheck && args.command !== CliCommand.StartReviewFix,
+      syncBaseBranch: args.command !== CliCommand.StartPlanning && args.command !== CliCommand.StartPullRequestCheck && args.command !== CliCommand.StartReviewFix,
+      requireGitHubHealth: args.command !== CliCommand.StartPlanning,
     }));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
-    else if (args.command === CliCommand.StartJiraTasks) {
-      await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
+    else if (args.command === CliCommand.StartPlanning) {
+      await runPlanningLoop(runtimeWorker, {
+        signal: controller.signal,
+        intervalMs: config.planningIntervalMs,
+        concurrency: config.planningConcurrency,
+      });
+    } else if (args.command === CliCommand.StartJiraTasks) {
+      await runLoop(runtimeWorker, {
+        signal: controller.signal,
+        pollIntervalMs: config.pollIntervalMs,
+        concurrency: config.implementationConcurrency,
+      });
     } else if (args.command === CliCommand.StartPullRequestCheck) {
-      await runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs });
+      await runMergeCheckLoop(runtimeWorker, {
+        signal: controller.signal,
+        intervalMs: config.mergeCheckIntervalMs,
+        concurrency: config.mergeCheckConcurrency,
+      });
     } else if (args.command === CliCommand.StartReviewFix) {
       await runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs });
     } else {
       await Promise.all([
-        runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
-        runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),
+        runPlanningLoop(runtimeWorker, {
+          signal: controller.signal,
+          intervalMs: config.planningIntervalMs,
+          concurrency: config.planningConcurrency,
+        }),
+        runLoop(runtimeWorker, {
+          signal: controller.signal,
+          pollIntervalMs: config.pollIntervalMs,
+          concurrency: config.implementationConcurrency,
+        }),
+        runMergeCheckLoop(runtimeWorker, {
+          signal: controller.signal,
+          intervalMs: config.mergeCheckIntervalMs,
+          concurrency: config.mergeCheckConcurrency,
+        }),
         runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs }),
       ]);
     }
   } finally {
     shutdownSignals.forEach((name) => process.removeListener(name, onShutdown));
+    if (runtimeWorker) db?.reapLeasesForOwners([runtimeWorker.leaseOwner]);
     db?.close();
   }
   return 0;
@@ -167,11 +211,17 @@ export async function main(argv: string[] = process.argv.slice(2)) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch((error) => {
     if (isAbortError(error)) {
-      console.log(formatFactoryLog("shutdown complete."));
+      console.log(formatFactoryLog("shutdown complete.", Date.now(), {
+        loop: currentFactoryLoop(),
+        colors: isFactoryLogColorEnabled(),
+      }));
       process.exitCode = 0;
       return;
     }
-    console.error(formatFactoryLog(`fatal: ${error.stack || error.message || error}`));
+    console.error(formatFactoryLog(`fatal: ${error.stack || error.message || error}`, Date.now(), {
+      loop: currentFactoryLoop(),
+      colors: isFactoryLogColorEnabled(),
+    }));
     process.exitCode = 1;
   });
 }

@@ -42,22 +42,26 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     provider: AgentProvider.Codex,
     stateDir,
     repoPath: stateDir,
+    planningIntervalMs: 60_000,
+    planningConcurrency: 2,
     leaseMs: 60_000,
     reviewFixIntervalMs: 300_000,
     pollIntervalMs: 60_000,
+    implementationConcurrency: 2,
     mergeCheckIntervalMs: 300_000,
+    mergeCheckConcurrency: 2,
     maxAttempts,
     continueFailedTasks,
     retryBackoffMs: 0,
     factory: { branchPrefix: "factory" },
     jira: {
       projectKey: "FACT",
-      statuses: { ready: "Ready", implementation: "In Progress", review: "In Review", done: "Done", error: "Error" },
+      statuses: { planning: "Planning", todo: "To Do", ready: "Ready", implementation: "In Progress", review: "In Review", done: "Done", error: "Error" },
     },
     github: { repositoryFullName: "example/factory" },
     git: { baseBranch: "main" },
-    codex: {},
-    opencode: {},
+    codex: { model: "gpt-5.6-luna", reasoningEffort: "max", featureModel: "gpt-5.6-sol", featureReasoningEffort: "medium" },
+    opencode: { model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL" },
   };
   return { db, jira, github, git, config };
 }
@@ -87,9 +91,11 @@ export function executionFor(overrides = {}) {
 export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) {
   const jira = {
     enabled: fixtureData.jira.enabled.bind(fixtureData.jira),
+    searchPlanning: fixtureData.jira.searchPlanning.bind(fixtureData.jira),
     searchReady: fixtureData.jira.searchReady.bind(fixtureData.jira),
     getIssue: fixtureData.jira.getIssue.bind(fixtureData.jira),
     updateDescription: fixtureData.jira.updateDescription.bind(fixtureData.jira),
+    updateSummaryAndDescription: fixtureData.jira.updateSummaryAndDescription.bind(fixtureData.jira),
     addComment: fixtureData.jira.addComment.bind(fixtureData.jira),
     commentExists: fixtureData.jira.commentExists.bind(fixtureData.jira),
     async transition(key, statusName) {

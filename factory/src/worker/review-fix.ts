@@ -5,6 +5,18 @@ import type { PullRequest, PullRequestReviewThread } from "../model/github.js";
 import { assertSchema, factorySchemaPath } from "../schema-validation.js";
 import type { FactoryWorker } from "../worker.js";
 
+const AI_REVIEW_MARKER = "<!-- ai-review -->";
+const NEGATIVE_REVIEW_MARKER = "❌";
+
+function isAiReviewFinding(thread: PullRequestReviewThread): boolean {
+  const firstComment = thread.comments[0];
+  return Boolean(firstComment && firstComment.body.trimStart().startsWith(AI_REVIEW_MARKER));
+}
+
+function eligibleReviewThreads(threads: PullRequestReviewThread[]): PullRequestReviewThread[] {
+  return threads.filter((thread) => !thread.isResolved && isAiReviewFinding(thread) && thread.comments.length === 1);
+}
+
 function assertReviewResult(value: unknown, threads: PullRequestReviewThread[]): ReviewFixResult {
   const result = value as ReviewFixResult;
   const expected = new Set(threads.map((thread) => thread.id));
@@ -14,11 +26,14 @@ function assertReviewResult(value: unknown, threads: PullRequestReviewThread[]):
     throw new Error("Review-fix agent must return exactly one outcome for every supplied thread.");
   }
   for (const outcome of result.threads) {
-    if (outcome.disposition === ReviewThreadDisposition.Addressed && outcome.reply) {
+    if (outcome.disposition === ReviewThreadDisposition.Addressed && outcome.reply.trim()) {
       throw new Error(`Addressed review thread ${outcome.threadId} must not include a reply.`);
     }
-    if (outcome.disposition === ReviewThreadDisposition.Disputed && !outcome.reply.trim()) {
-      throw new Error(`Disputed review thread ${outcome.threadId} requires a reply.`);
+    if (outcome.disposition === ReviewThreadDisposition.Disputed) {
+      if (!outcome.reply.trim()) throw new Error(`Disputed review thread ${outcome.threadId} requires a reply.`);
+      if (!outcome.reply.includes(NEGATIVE_REVIEW_MARKER)) {
+        throw new Error(`Disputed review thread ${outcome.threadId} requires a reply containing ${NEGATIVE_REVIEW_MARKER}.`);
+      }
     }
   }
   return result;
@@ -27,13 +42,13 @@ function assertReviewResult(value: unknown, threads: PullRequestReviewThread[]):
 async function processPullRequest(worker: FactoryWorker, pullRequest: PullRequest): Promise<{ addressed: number; disputed: number }> {
   const getThreads = worker.github.getUnresolvedReviewThreads;
   if (!getThreads) throw new Error("GitHub adapter does not support review threads.");
-  const threads = await getThreads.call(worker.github, pullRequest.number);
+  const availableThreads = await getThreads.call(worker.github, pullRequest.number);
+  const threads = eligibleReviewThreads(availableThreads);
   if (!threads.length) {
-    if (pullRequest.labels?.includes("ai-fix") && worker.github.requestAiReview) {
-      await worker.github.requestAiReview(pullRequest.number);
-      worker.log("info", "review-fix:requeued-ai-review-no-threads", { prNumber: pullRequest.number });
-    }
-    worker.log("info", "review-fix:no-unresolved-threads", { prNumber: pullRequest.number });
+    worker.log("info", "review-fix:no-eligible-threads", {
+      prNumber: pullRequest.number,
+      availableThreads: availableThreads.length,
+    });
     return { addressed: 0, disputed: 0 };
   }
   const worktree = await worker.git.preparePullRequestWorktree(`ai-fix-pr-${pullRequest.number}`, pullRequest.head.ref);

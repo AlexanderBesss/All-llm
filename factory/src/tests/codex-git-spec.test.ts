@@ -144,12 +144,37 @@ test("Codex build runs disable Jira while dedicated Jira runs retain it", async 
   assert.ok(!calls[1].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
 });
 
+test("Codex planning runs with read-only repository access and no Jira tools", async () => {
+  const calls: Array<{ args: string[]; options?: ProcessOptions }> = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: { command: "codex", model: "gpt-5.6-luna", reasoningEffort: "max" },
+  }, async (_command, args, options) => {
+    calls.push({ args, options });
+    const output = JSON.stringify({
+      description: "Refined implementation-ready scope.",
+      acceptanceCriteria: ["The behavior is observable."],
+    });
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: output } }), stderr: "" };
+  });
+
+  const planned = await executor.planIssue({
+    issue: { key: "FACT-1", fields: { summary: "Refine work", description: "Unclear request" } },
+  });
+
+  assert.equal(planned.result.description, "Refined implementation-ready scope.");
+  assert.ok(calls[0].args.includes("read-only"));
+  assert.ok(calls[0].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
+  assert.match(calls[0].options?.input || "", /Inspect the repository in read-only mode/);
+  assert.match(calls[0].options?.input || "", /acceptance criteria/i);
+});
+
 test("OpenCode build configuration denies Jira tools", async () => {
   const config = JSON.parse(await readFile(path.resolve("..", "opencode.json"), "utf8"));
   assert.equal(config.agent.build.permission["jira_*"], "deny");
   assert.equal(config.agent["factory-jira"].permission["jira_*"], "allow");
 });
-test("Codex executor uses configurable Luna max-effort settings", async () => {
+test("Codex executor lets Luna choose its context-window settings", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const config = {
     repoPath: ".",
@@ -180,14 +205,39 @@ test("Codex executor uses configurable Luna max-effort settings", async () => {
   assert.deepEqual(calls[0].args.slice(0, 6), ["exec", "--ephemeral", "--json", "--model", "gpt-5.6-luna", "-c"]);
   assert.ok(calls[0].args.includes('model_reasoning_effort="max"'));
   assert.ok(calls[0].args.includes('approval_policy="never"'));
-  assert.ok(calls[0].args.includes("model_context_window=250000"));
-  assert.ok(calls[0].args.includes("model_auto_compact_token_limit=225000"));
+  assert.ok(!calls[0].args.some((arg) => arg.startsWith("model_context_window=")));
+  assert.ok(!calls[0].args.some((arg) => arg.startsWith("model_auto_compact_token_limit=")));
   assert.ok(calls[0].args.includes("danger-full-access"));
   assert.equal(calls[0].args.at(-1), "-");
   assert.match(calls[0].options?.input || "", /Return a JSON health result/);
   assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
   assert.equal(calls[0].options.cwd, ".");
   assert.equal(calls[0].options.timeoutMs, 1234);
+});
+
+test("Codex executor keeps configured context-window settings for non-Luna models", async () => {
+  const calls: string[][] = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: {
+      command: "codex",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      contextWindowTokens: 250000,
+      autoCompactTokenLimit: 225000,
+      timeoutMs: 1234,
+    },
+  }, async (_command, args) => {
+    calls.push(args);
+    return {
+      stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{}" } }),
+      stderr: "",
+    };
+  });
+
+  await executor.run({ task: "Return a JSON health result.", cwd: "../factory-worktree" });
+  assert.ok(calls[0].includes("model_context_window=250000"));
+  assert.ok(calls[0].includes("model_auto_compact_token_limit=225000"));
 });
 
 test("Codex executor routes Jira features to Sol with medium reasoning", async () => {
@@ -207,19 +257,16 @@ test("Codex executor routes Jira features to Sol with medium reasoning", async (
     return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
   });
 
-  for (const verificationPass of [false, true]) {
-    await executor.execute({
-      issue: { key: "FACT-1", fields: { summary: "Build capability", issuetype: { name: "Feature" } } },
-      runId: "FACT-1-run",
-      branchName: "factory/FACT-1",
-      cwd: "../factory-worktree",
-      previousPlan: verificationPass ? executionFor().plan : null,
-      specPath: "specs/factory-FACT-1.md",
-      verificationPass,
-    });
-  }
+  await executor.execute({
+    issue: { key: "FACT-1", fields: { summary: "Build capability", issuetype: { name: "Feature" } } },
+    runId: "FACT-1-run",
+    branchName: "factory/FACT-1",
+    cwd: "../factory-worktree",
+    previousPlan: null,
+    specPath: "specs/factory-FACT-1.md",
+  });
 
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
   for (const call of calls) {
     assert.equal(call.args[call.args.indexOf("--model") + 1], "gpt-5.6-sol");
     assert.ok(call.args.includes('model_reasoning_effort="medium"'));
@@ -330,37 +377,6 @@ test("agent results are validated against the complete JSON Schema", async () =>
     cwd: "../factory-worktree",
     specPath: "specs/factory-FACT-1.md",
   }), /does not satisfy.*status/);
-});
-
-test("pre-PR verification runs with editable tools and an explicit refinement mandate", async () => {
-  const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
-  const executor = new CodexAgentExecutor({
-    repoPath: ".",
-    codex: { command: "codex", timeoutMs: 1234 },
-  }, async (command, args, options) => {
-    calls.push({ command, args, options });
-    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(executionFor()) } }), stderr: "" };
-  });
-  const result = await executor.execute({
-    issue: { key: "FACT-1", fields: { summary: "Implement change", description: "Details" } },
-    runId: "FACT-1-run",
-    branchName: "factory/FACT-1",
-    baseBranch: "main",
-    cwd: "../factory-worktree",
-    specPath: "specs/factory-FACT-1.md",
-    previousPlan: executionFor().plan,
-    verificationPass: true,
-  });
-  const prompt = calls[0].options?.input || "";
-  assert.equal(result.result.summary, "Implemented the parent task");
-  assert.match(prompt, /verification and refinement agent/);
-  assert.match(prompt, /complete diff from main to HEAD/);
-  assert.match(prompt, /fix it directly/);
-  assert.match(prompt, /Do not merely report defects/);
-  assert.match(prompt, /Work autonomously without asking for user input/);
-  assert.notEqual(calls[0].args[calls[0].args.indexOf("--sandbox") + 1], "read-only");
-  assert.equal(calls[0].args[calls[0].args.indexOf("-C") + 1], "../factory-worktree");
-  assert.match(calls[0].args[calls[0].args.indexOf("--output-schema") + 1], /execution-result\.schema\.json$/);
 });
 
 test("Codex health uses the runtime CODEX_HOME and verifies the Jira MCP", async () => {

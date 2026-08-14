@@ -10,6 +10,8 @@ export enum AgentProvider {
 }
 
 export enum JiraStatusKey {
+  Planning = "planning",
+  Todo = "todo",
   Ready = "ready",
   Implementation = "implementation",
   Review = "review",
@@ -18,6 +20,8 @@ export enum JiraStatusKey {
 }
 
 export interface FactoryStatuses {
+  planning: string;
+  todo: string;
   ready: string;
   implementation: string;
   review: string;
@@ -45,6 +49,7 @@ export interface JiraConfig {
   log?: (level: "info" | "warn" | "error", event: string, details?: Record<string, unknown>) => void;
   email?: string;
   apiToken?: string;
+  planningStatus?: string;
   readyStatus?: string;
   statuses?: FactoryStatuses;
   repoPath?: string;
@@ -100,8 +105,12 @@ export interface FactoryConfig {
   agentProvider?: AgentProvider;
   repoPath: string;
   stateDir: string;
+  planningIntervalMs: number;
+  planningConcurrency: number;
   pollIntervalMs: number;
+  implementationConcurrency: number;
   mergeCheckIntervalMs: number;
+  mergeCheckConcurrency: number;
   reviewFixIntervalMs: number;
   leaseMs: number;
   maxAttempts: number;

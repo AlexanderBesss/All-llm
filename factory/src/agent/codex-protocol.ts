@@ -1,4 +1,4 @@
-import type { CodexEvent, CodexJsonLinesResult, ExecutionResult } from "../model/codex.js";
+import type { CodexEvent, CodexJsonLinesResult, ExecutionResult, JiraPlanningResult } from "../model/codex.js";
 
 export function parseJsonLines(stdout: string): CodexJsonLinesResult {
   const events: CodexEvent[] = [];
@@ -32,4 +32,17 @@ export function assertExecution(execution: unknown): ExecutionResult {
     throw new Error("Implementation result must include tests and blockers arrays.");
   }
   return candidate as ExecutionResult;
+}
+
+export function assertPlanningResult(value: unknown): JiraPlanningResult {
+  if (!value || typeof value !== "object") throw new Error("Planning result must be an object.");
+  const candidate = value as Partial<JiraPlanningResult>;
+  if (typeof candidate.description !== "string" || !candidate.description.trim()) {
+    throw new Error("Planning result must include a non-empty description.");
+  }
+  if (!Array.isArray(candidate.acceptanceCriteria) || candidate.acceptanceCriteria.length === 0
+    || candidate.acceptanceCriteria.some((criterion) => typeof criterion !== "string" || !criterion.trim())) {
+    throw new Error("Planning result must include non-empty acceptance criteria.");
+  }
+  return candidate as JiraPlanningResult;
 }
