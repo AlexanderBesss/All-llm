@@ -23,6 +23,12 @@ import type { BoundedBatchResult } from "./worker/concurrency.js";
 
 type BeforeRunAdvance = (claimed: boolean) => Promise<void>;
 
+interface RunOnceOptions {
+  dryRun?: boolean;
+  beforeAdvance?: BeforeRunAdvance;
+  excludeRunIds?: ReadonlySet<string>;
+}
+
 export class FactoryWorker {
   config: FactoryConfig;
   db: FactoryWorkerOptions["db"];
@@ -81,7 +87,7 @@ export class FactoryWorker {
     };
   }
 
-  async runOnce({ dryRun = false, beforeAdvance }: { dryRun?: boolean; beforeAdvance?: BeforeRunAdvance } = {}): Promise<FactoryRunResult> {
+  async runOnce({ dryRun = false, beforeAdvance, excludeRunIds = new Set<string>() }: RunOnceOptions = {}): Promise<FactoryRunResult> {
     this.throwIfStopping();
     this.log("info", "task:start", { dryRun });
     const deadOwners = this.db.listRuns(50)
@@ -97,6 +103,7 @@ export class FactoryWorker {
     this.db.reapExpiredLeases();
     const resumable = this.db.listRuns(50).find((run) =>
       !this.inFlightRunIds.has(run.id)
+      && !excludeRunIds.has(run.id)
       && ((run.status === RUN_STATUSES.RETRY_WAIT && due(run.next_attempt_at))
         || (run.status === RUN_STATUSES.ACTIVE
           && (!run.lease_owner || run.lease_owner === this.leaseOwner)
@@ -226,9 +233,12 @@ export class FactoryWorker {
   }
 
   /**
-   * Claim a bounded implementation batch before advancing any one run. The
-   * claim barrier keeps a fast item from completing while a sibling is still
-   * discovering and claiming its Ready issue.
+   * Keep a bounded set of implementation lanes busy until the currently
+   * available Ready queue is drained. The first claim in every lane passes a
+   * barrier before advancing, so two available tickets are durably claimed
+   * before either implementation begins. A lane that finishes early can then
+   * claim another ticket without waiting for a slower sibling or the next
+   * polling interval.
    */
   async runBatch({ dryRun = false, concurrency = this.config.implementationConcurrency }: { dryRun?: boolean; concurrency?: number } = {}): Promise<BoundedBatchResult<FactoryRunResult>> {
     const limit = normalizeConcurrency(concurrency);
@@ -246,10 +256,12 @@ export class FactoryWorker {
     const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
     const results: FactoryRunResult[] = [];
     const failures: unknown[] = [];
+    const attemptedRunIds = new Set<string>();
     const slots = Array.from({ length: limit }, (_, index) => index);
 
     await runBounded(slots, limit, async () => {
       let joined = false;
+      let handledRuns = 0;
       const joinClaimBarrier = () => {
         if (joined) return;
         joined = true;
@@ -257,13 +269,32 @@ export class FactoryWorker {
         if (arrived === limit) releaseGate();
       };
       try {
-        results.push(await this.runOnce({
-          dryRun,
-          beforeAdvance: async () => {
-            joinClaimBarrier();
-            await gate;
-          },
-        }));
+        while (true) {
+          const result = await this.runOnce({
+            dryRun,
+            excludeRunIds: attemptedRunIds,
+            ...(joined ? {} : {
+              beforeAdvance: async () => {
+                joinClaimBarrier();
+                await gate;
+              },
+            }),
+          });
+          if (!result.runId) {
+            // Preserve idle/disabled results for lanes that found no work so
+            // the outer loop can still coalesce a completely idle poll.
+            if (handledRuns === 0) results.push(result);
+            break;
+          }
+          attemptedRunIds.add(result.runId);
+          handledRuns += 1;
+          results.push(result);
+          this.log("info", "task:lane-available", {
+            completedRunId: result.runId,
+            issueKey: result.issueKey,
+            action: result.action,
+          });
+        }
       } catch (error) {
         // A discovery or claim failure happens before runOnce can reach the
         // barrier. Count it as an arrived worker so siblings are not stranded.

@@ -899,6 +899,60 @@ test("implementation loop claims two Ready issues concurrently with one durable 
   fixtureData.db.close();
 });
 
+test("implementation pool refills a free lane without exceeding two active agents", async () => {
+  const fixtureData = await fixture();
+  for (const [key, summary] of [["FACT-2", "Second factory task"], ["FACT-3", "Third factory task"]]) {
+    fixtureData.jira.issues.set(key, {
+      key,
+      fields: {
+        summary,
+        description: `Implement ${key}.`,
+        project: { key: "FACT" },
+        status: { name: "Ready" },
+        issuetype: { name: "Task" },
+        labels: [],
+      },
+    });
+  }
+
+  let activeAgents = 0;
+  let maxActiveAgents = 0;
+  const startedIssues: string[] = [];
+  let resolveThirdStarted: (() => void) | undefined;
+  const thirdStarted = new Promise<void>((resolve) => { resolveThirdStarted = resolve; });
+  let releaseLongImplementations: (() => void) | undefined;
+  const holdLongImplementations = new Promise<void>((resolve) => { releaseLongImplementations = resolve; });
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      activeAgents += 1;
+      maxActiveAgents = Math.max(maxActiveAgents, activeAgents);
+      startedIssues.push(input.issue.key);
+      if (input.issue.key === "FACT-3") resolveThirdStarted?.();
+      if (input.issue.key !== "FACT-2") await holdLongImplementations;
+      activeAgents -= 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+
+  const batch = worker.runBatch({ concurrency: 2 });
+  await thirdStarted;
+
+  assert.deepEqual(new Set(startedIssues), new Set(["FACT-1", "FACT-2", "FACT-3"]));
+  assert.equal(activeAgents, 2);
+  assert.equal(maxActiveAgents, 2);
+
+  releaseLongImplementations?.();
+  const result = await batch;
+
+  assert.equal(result.concurrency, 2);
+  assert.equal(result.completed, 3);
+  assert.equal(result.failed, 0);
+  assert.equal(maxActiveAgents, 2);
+  assert.equal(fixtureData.github.pullRequests.length, 3);
+  assert.ok(fixtureData.db.listRuns(10).every((run) => run.status === RUN_STATUSES.AWAITING_REVIEW));
+  fixtureData.db.close();
+});
+
 test("implementation batch claims every selected issue before a fast agent can complete", async () => {
   const fixtureData = await fixture();
   fixtureData.jira.issues.set("FACT-2", {
