@@ -2,6 +2,7 @@ import { abortError, isAbortError } from "../git.js";
 import { FactoryLoop, formatFactoryLog } from "../types.js";
 import { isFactoryLogColorEnabled, runWithFactoryLoop } from "../logging.js";
 import type { FactoryLogger } from "../model/worker.js";
+import { normalizeConcurrency, runBounded } from "./concurrency.js";
 
 type LoopLogLevel = "info" | "warn" | "error";
 
@@ -17,6 +18,7 @@ export interface FactoryLoopOptions<TResult extends object> {
   label: string;
   shutdownEvent: string;
   failureMessage: string;
+  concurrency?: number;
   execute(): Promise<TResult>;
 }
 
@@ -41,9 +43,45 @@ async function waitForInterval(intervalMs: number, signal?: AbortSignal): Promis
   });
 }
 
+async function executeBoundedPoll<TResult extends object>(
+  worker: FactoryLoopWorker,
+  {
+    label,
+    failureMessage,
+    concurrency,
+    signal,
+    execute,
+  }: Pick<FactoryLoopOptions<TResult>, "label" | "failureMessage" | "concurrency" | "signal" | "execute">,
+): Promise<object> {
+  const limit = normalizeConcurrency(concurrency);
+  if (limit === 1) return execute();
+
+  const results: TResult[] = [];
+  const failures: unknown[] = [];
+  const slots = Array.from({ length: limit }, (_, index) => index);
+  await runBounded(slots, limit, async () => {
+    try {
+      results.push(await execute());
+    } catch (error) {
+      if (isAbortError(error) || signal?.aborted) throw error;
+      failures.push(error);
+      worker.logger.error?.(formatFactoryLog(`${failureMessage}: ${errorMessage(error)}`, Date.now(), {
+        loop: label,
+        colors: isFactoryLogColorEnabled(),
+      }));
+    }
+  }, signal);
+  return {
+    concurrency: limit,
+    completed: results.length,
+    failed: failures.length,
+    results,
+  };
+}
+
 export async function runFactoryLoop<TResult extends object>(
   worker: FactoryLoopWorker,
-  { signal = worker.signal, intervalMs, label, shutdownEvent, failureMessage, execute }: FactoryLoopOptions<TResult>,
+  { signal = worker.signal, intervalMs, label, shutdownEvent, failureMessage, concurrency = 1, execute }: FactoryLoopOptions<TResult>,
 ): Promise<void> {
   return runWithFactoryLoop(label, async () => {
     let stopped = false;
@@ -55,7 +93,13 @@ export async function runFactoryLoop<TResult extends object>(
     worker.log?.("info", `${label}:loop:started`, { intervalMs });
     while (!stopped) {
       try {
-        const result = await execute();
+        const result = await executeBoundedPoll(worker, {
+          label,
+          failureMessage,
+          concurrency,
+          signal,
+          execute,
+        });
         worker.logger.info?.(formatFactoryLog(JSON.stringify({ ...result, loop: label }), Date.now(), {
           loop: label,
           colors: isFactoryLogColorEnabled(),
@@ -89,15 +133,17 @@ export async function runFactoryLoop<TResult extends object>(
 
 export interface PollLoopWorker extends FactoryLoopWorker {
   runOnce(): Promise<object>;
+  runBatch?(options?: { concurrency?: number }): Promise<object>;
 }
 
 export interface PlanningLoopWorker extends FactoryLoopWorker {
   planNextIssue(): Promise<object>;
+  planBatch?(options?: { concurrency?: number }): Promise<object>;
 }
 
 export function runPlanningLoop(
   worker: PlanningLoopWorker,
-  { signal = worker.signal, intervalMs = 60_000 }: { signal?: AbortSignal; intervalMs?: number } = {},
+  { signal = worker.signal, intervalMs = 60_000, concurrency = 1 }: { signal?: AbortSignal; intervalMs?: number; concurrency?: number } = {},
 ): Promise<void> {
   return runFactoryLoop(worker, {
     signal,
@@ -105,13 +151,19 @@ export function runPlanningLoop(
     label: FactoryLoop.Planning,
     shutdownEvent: "planning-loop:shutdown-requested",
     failureMessage: "planning poll failed",
-    execute: () => worker.planNextIssue(),
+    // FactoryWorker.planBatch discovers and claims the bounded batch before
+    // advancing any selected issue. Keep the outer loop serial for that batch
+    // scheduler; small test doubles can still use the generic fallback.
+    concurrency: worker.planBatch ? 1 : concurrency,
+    execute: () => worker.planBatch
+      ? worker.planBatch({ concurrency })
+      : worker.planNextIssue(),
   });
 }
 
 export function runLoop(
   worker: PollLoopWorker,
-  { signal = worker.signal, pollIntervalMs = 60_000 }: { signal?: AbortSignal; pollIntervalMs?: number } = {},
+  { signal = worker.signal, pollIntervalMs = 60_000, concurrency = 1 }: { signal?: AbortSignal; pollIntervalMs?: number; concurrency?: number } = {},
 ): Promise<void> {
   return runFactoryLoop(worker, {
     signal,
@@ -119,17 +171,23 @@ export function runLoop(
     label: FactoryLoop.Poll,
     shutdownEvent: "loop:shutdown-requested",
     failureMessage: "poll failed",
-    execute: () => worker.runOnce(),
+    // FactoryWorker.runBatch claims every slot before advancing any run. Keep
+    // the outer loop serial for that batch scheduler; test doubles without it
+    // retain the generic bounded runOnce fallback.
+    concurrency: worker.runBatch ? 1 : concurrency,
+    execute: () => worker.runBatch
+      ? worker.runBatch({ concurrency })
+      : worker.runOnce(),
   });
 }
 
 export interface MergeCheckLoopWorker extends FactoryLoopWorker {
-  checkMergedPullRequests(): Promise<{ closed: number }>;
+  checkMergedPullRequests(concurrency?: number): Promise<{ closed: number }>;
 }
 
 export function runMergeCheckLoop(
   worker: MergeCheckLoopWorker,
-  { signal = worker.signal, intervalMs = 300_000 }: { signal?: AbortSignal; intervalMs?: number } = {},
+  { signal = worker.signal, intervalMs = 300_000, concurrency = 1 }: { signal?: AbortSignal; intervalMs?: number; concurrency?: number } = {},
 ): Promise<void> {
   return runFactoryLoop(worker, {
     signal,
@@ -137,7 +195,10 @@ export function runMergeCheckLoop(
     label: FactoryLoop.MergeCheck,
     shutdownEvent: "merge-check-loop:shutdown-requested",
     failureMessage: "merge-check failed",
-    execute: () => worker.checkMergedPullRequests(),
+    // Merge-check discovers its whole batch in one poll and applies this
+    // limit while evaluating individual pull requests.
+    concurrency: 1,
+    execute: () => worker.checkMergedPullRequests(concurrency),
   });
 }
 

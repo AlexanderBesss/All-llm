@@ -4,10 +4,20 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
+import { abortError } from "../git.js";
 import { RUN_STATUSES, STAGES, RunAction, ArtifactKind } from "../types.js";
 import { AgentProvider } from "../model/config.js";
 import { executionFor, fixture, makeWorker, planFor } from "./support.js";
 import { implementationModel, pullRequestDescription } from "../worker.js";
+import { runLoop } from "../worker/loops.js";
+
+async function waitFor(condition: () => boolean, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.fail(message);
+}
 test("processes one parent ticket with one agent and one aggregate PR", async () => {
   const fixtureData = await fixture();
   const events = [];
@@ -729,5 +739,261 @@ test("review-fix loop retries the AI review label when an ai-fix pull request ha
 
   assert.deepEqual(result, { pullRequests: 1, addressed: 0, disputed: 0, failed: 0 });
   assert.deepEqual(pr.labels, ["ai-review"]);
+  fixtureData.db.close();
+});
+
+test("implementation loop claims two Ready issues concurrently with one durable run each", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Second factory task",
+      description: "Implement the second task.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const controller = new AbortController();
+  let activeAgents = 0;
+  let maxActiveAgents = 0;
+  const startedIssues: string[] = [];
+  let resolveBothStarted: (() => void) | undefined;
+  const bothStarted = new Promise<void>((resolve) => { resolveBothStarted = resolve; });
+  let releaseImplementations: (() => void) | undefined;
+  const release = new Promise<void>((resolve) => { releaseImplementations = resolve; });
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      activeAgents += 1;
+      maxActiveAgents = Math.max(maxActiveAgents, activeAgents);
+      startedIssues.push(input.issue.key);
+      if (activeAgents === 2) resolveBothStarted?.();
+      await release;
+      activeAgents -= 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+  worker.signal = controller.signal;
+  worker.config.implementationConcurrency = 2;
+
+  const loop = runLoop(worker, {
+    signal: controller.signal,
+    pollIntervalMs: 10_000,
+    concurrency: 2,
+  });
+  await bothStarted;
+  const activeRuns = fixtureData.db.listRuns(10).filter((run) => run.status === RUN_STATUSES.ACTIVE);
+  assert.equal(maxActiveAgents, 2);
+  assert.deepEqual(startedIssues.sort(), ["FACT-1", "FACT-2"]);
+  assert.equal(activeRuns.length, 2);
+  assert.deepEqual(new Set(activeRuns.map((run) => run.issue_key)), new Set(["FACT-1", "FACT-2"]));
+
+  releaseImplementations?.();
+  await waitFor(
+    () => fixtureData.db.listRuns(10).filter((run) => run.status === RUN_STATUSES.AWAITING_REVIEW).length === 2,
+    "both implementation runs should reach awaiting review",
+  );
+  controller.abort();
+  await loop;
+
+  const runs = fixtureData.db.listRuns(10);
+  assert.equal(runs.length, 2);
+  assert.equal(new Set(runs.map((run) => run.pr_number)).size, 2);
+  assert.ok(runs.every((run) => run.status === RUN_STATUSES.AWAITING_REVIEW));
+  assert.equal(fixtureData.github.pullRequests.length, 2);
+  fixtureData.db.close();
+});
+
+test("implementation batch claims every selected issue before a fast agent can complete", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Second factory task",
+      description: "Implement the second task.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      const activeIssueKeys = fixtureData.db.listRuns(10)
+        .filter((run) => run.status === RUN_STATUSES.ACTIVE)
+        .map((run) => run.issue_key);
+      assert.deepEqual(new Set(activeIssueKeys), new Set(["FACT-1", "FACT-2"]));
+      return { result: executionFor(), raw: {} };
+    },
+  });
+  const searchReady = worker.jira.searchReady.bind(worker.jira);
+  let searchCalls = 0;
+  worker.jira.searchReady = async () => {
+    searchCalls += 1;
+    if (searchCalls === 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    return searchReady();
+  };
+
+  const result = await worker.runBatch({ concurrency: 2 });
+
+  assert.equal(result.completed, 2);
+  assert.equal(result.failed, 0);
+  assert.equal(fixtureData.db.listRuns(10).length, 2);
+  assert.equal(fixtureData.github.pullRequests.length, 2);
+  assert.ok(fixtureData.db.listRuns(10).every((run) => run.status === RUN_STATUSES.AWAITING_REVIEW));
+  fixtureData.db.close();
+});
+
+test("implementation batch records one item failure while its sibling completes", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Second factory task",
+      description: "Implement the second task.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const logs: string[] = [];
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      if (input.issue.key === "FACT-1") throw new Error("first implementation failed");
+      return { result: executionFor(), raw: {} };
+    },
+  }, { logs });
+
+  const result = await worker.runBatch({ concurrency: 2 });
+  const runs = fixtureData.db.listRuns(10);
+
+  assert.equal(result.failed, 0);
+  assert.equal(runs.length, 2);
+  assert.equal(runs.find((run) => run.issue_key === "FACT-1")?.status, RUN_STATUSES.BLOCKED);
+  assert.equal(runs.find((run) => run.issue_key === "FACT-2")?.status, RUN_STATUSES.AWAITING_REVIEW);
+  assert.ok(logs.some((entry) => entry.includes("stage:failed") && entry.includes("first implementation failed")));
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  fixtureData.db.close();
+});
+
+test("merge-check evaluates awaiting-review pull requests concurrently and closes only merged items", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Second factory task",
+      description: "Implement the second task.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+  const first = await worker.runOnce();
+  const second = await worker.runOnce();
+  const firstRun = fixtureData.db.getRun(first.runId);
+  const secondRun = fixtureData.db.getRun(second.runId);
+  await fixtureData.github.mergePullRequest(firstRun.pr_number);
+
+  let activeChecks = 0;
+  let maxActiveChecks = 0;
+  let resolveBothStarted: (() => void) | undefined;
+  const bothStarted = new Promise<void>((resolve) => { resolveBothStarted = resolve; });
+  let releaseChecks: (() => void) | undefined;
+  const release = new Promise<void>((resolve) => { releaseChecks = resolve; });
+  const originalGetPullRequest = worker.github.getPullRequest.bind(worker.github);
+  worker.github.getPullRequest = async (prNumber) => {
+    activeChecks += 1;
+    maxActiveChecks = Math.max(maxActiveChecks, activeChecks);
+    if (activeChecks === 2) resolveBothStarted?.();
+    await release;
+    activeChecks -= 1;
+    return originalGetPullRequest(prNumber);
+  };
+  worker.config.mergeCheckConcurrency = 2;
+
+  const check = worker.checkMergedPullRequests();
+  await bothStarted;
+  assert.equal(maxActiveChecks, 2);
+  releaseChecks?.();
+  const result = await check;
+
+  assert.equal(result.closed, 1);
+  assert.equal(fixtureData.db.getRun(firstRun.id).status, RUN_STATUSES.COMPLETED);
+  assert.equal(fixtureData.db.getRun(secondRun.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.status?.name, "Done");
+  assert.equal((await fixtureData.jira.getIssue("FACT-2")).fields.status?.name, "In Review");
+  fixtureData.db.close();
+});
+
+test("merge-check isolates a pull-request read failure from a merged sibling", async () => {
+  const fixtureData = await fixture();
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Second factory task",
+      description: "Implement the second task.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const logs: string[] = [];
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { logs });
+  const first = await worker.runOnce();
+  const second = await worker.runOnce();
+  const firstRun = fixtureData.db.getRun(first.runId);
+  const secondRun = fixtureData.db.getRun(second.runId);
+  await fixtureData.github.mergePullRequest(secondRun.pr_number);
+  const originalGetPullRequest = worker.github.getPullRequest.bind(worker.github);
+  worker.github.getPullRequest = async (prNumber) => {
+    if (prNumber === firstRun.pr_number) throw new Error("GitHub read failed");
+    return originalGetPullRequest(prNumber);
+  };
+
+  const result = await worker.checkMergedPullRequests(2);
+
+  assert.equal(result.closed, 1);
+  assert.equal(fixtureData.db.getRun(firstRun.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  assert.equal(fixtureData.db.getRun(secondRun.id).status, RUN_STATUSES.COMPLETED);
+  assert.ok(logs.some((entry) => entry.includes("merge-check:error") && entry.includes("GitHub read failed")));
+  fixtureData.db.close();
+});
+
+test("implementation shutdown cancels active work and releases its lease without starting new work", async () => {
+  const fixtureData = await fixture();
+  const controller = new AbortController();
+  let resolveAgentStarted: (() => void) | undefined;
+  const agentStarted = new Promise<void>((resolve) => { resolveAgentStarted = resolve; });
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      resolveAgentStarted?.();
+      await new Promise<void>((_resolve, reject) => {
+        controller.signal.addEventListener("abort", () => reject(abortError("test shutdown")), { once: true });
+      });
+      throw new Error("unreachable");
+    },
+  });
+  worker.signal = controller.signal;
+
+  const loop = runLoop(worker, {
+    signal: controller.signal,
+    pollIntervalMs: 10_000,
+    concurrency: 2,
+  });
+  await agentStarted;
+  await waitFor(() => fixtureData.db.listRuns(10).length === 1, "the Ready issue should be claimed before shutdown");
+  controller.abort();
+  await loop;
+
+  const run = fixtureData.db.listRuns(10)[0];
+  assert.equal(run.lease_owner, null);
+  assert.equal(run.lease_until, null);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.equal(fixtureData.db.listRuns(10).length, 1);
   fixtureData.db.close();
 });

@@ -21,6 +21,9 @@ test("factory defaults to one attempt and no subtask configuration", () => {
     assert.equal(defaultConfig(".").maxAttempts, 4);
     assert.deepEqual(validateConfig({ ...config, maxAttempts: 4 }, { live: false }), []);
     assert.ok(validateConfig({ ...config, maxAttempts: 0 }, { live: false }).includes("maxAttempts must be a positive integer"));
+    assert.ok(validateConfig({ ...config, planningConcurrency: 0 }, { live: false }).includes("planningConcurrency must be a positive integer"));
+    assert.ok(validateConfig({ ...config, implementationConcurrency: 0 }, { live: false }).includes("implementationConcurrency must be a positive integer"));
+    assert.ok(validateConfig({ ...config, mergeCheckConcurrency: 0 }, { live: false }).includes("mergeCheckConcurrency must be a positive integer"));
   } finally {
     if (previous === undefined) delete process.env.FACTORY_MAX_ATTEMPTS;
     else process.env.FACTORY_MAX_ATTEMPTS = previous;

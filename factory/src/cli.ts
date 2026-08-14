@@ -161,23 +161,48 @@ export async function main(argv: string[] = process.argv.slice(2)) {
     }));
     if (args.command === CliCommand.RunOnce) console.log(JSON.stringify(await runtimeWorker.runOnce({ dryRun: args.dryRun }), null, 2));
     else if (args.command === CliCommand.StartPlanning) {
-      await runPlanningLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.planningIntervalMs });
+      await runPlanningLoop(runtimeWorker, {
+        signal: controller.signal,
+        intervalMs: config.planningIntervalMs,
+        concurrency: config.planningConcurrency,
+      });
     } else if (args.command === CliCommand.StartJiraTasks) {
-      await runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs });
+      await runLoop(runtimeWorker, {
+        signal: controller.signal,
+        pollIntervalMs: config.pollIntervalMs,
+        concurrency: config.implementationConcurrency,
+      });
     } else if (args.command === CliCommand.StartPullRequestCheck) {
-      await runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs });
+      await runMergeCheckLoop(runtimeWorker, {
+        signal: controller.signal,
+        intervalMs: config.mergeCheckIntervalMs,
+        concurrency: config.mergeCheckConcurrency,
+      });
     } else if (args.command === CliCommand.StartReviewFix) {
       await runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs });
     } else {
       await Promise.all([
-        runPlanningLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.planningIntervalMs }),
-        runLoop(runtimeWorker, { signal: controller.signal, pollIntervalMs: config.pollIntervalMs }),
-        runMergeCheckLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.mergeCheckIntervalMs }),
+        runPlanningLoop(runtimeWorker, {
+          signal: controller.signal,
+          intervalMs: config.planningIntervalMs,
+          concurrency: config.planningConcurrency,
+        }),
+        runLoop(runtimeWorker, {
+          signal: controller.signal,
+          pollIntervalMs: config.pollIntervalMs,
+          concurrency: config.implementationConcurrency,
+        }),
+        runMergeCheckLoop(runtimeWorker, {
+          signal: controller.signal,
+          intervalMs: config.mergeCheckIntervalMs,
+          concurrency: config.mergeCheckConcurrency,
+        }),
         runReviewFixLoop(runtimeWorker, { signal: controller.signal, intervalMs: config.reviewFixIntervalMs }),
       ]);
     }
   } finally {
     shutdownSignals.forEach((name) => process.removeListener(name, onShutdown));
+    if (runtimeWorker) db?.reapLeasesForOwners([runtimeWorker.leaseOwner]);
     db?.close();
   }
   return 0;
