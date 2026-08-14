@@ -611,6 +611,35 @@ test("merged pull request transitions Jira without a preliminary target-status r
   fixtureData.db.close();
 });
 
+test("merged pull request remains pending when Jira stays in review", async () => {
+  const fixtureData = await fixture();
+  const logs: string[] = [];
+  const worker = makeWorker(
+    fixtureData,
+    { async execute() { return { result: executionFor(), raw: {} }; } },
+    { logs },
+  );
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+  await fixtureData.github.mergePullRequest(run.pr_number);
+  worker.jira.transition = async () => {
+    throw new Error('Transition succeeded, but the resulting status was "In Review" rather than "Done".');
+  };
+
+  const checkResult = await worker.checkMergedPullRequests();
+
+  assert.equal(checkResult.closed, 0);
+  assert.equal(fixtureData.db.getRun(run.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  const transitionLog = logs.find((entry) => entry.includes("merge-check:transition-failed"));
+  assert.ok(transitionLog);
+  assert.match(transitionLog, /"targetStatus":"Done"/);
+  assert.match(transitionLog, /"currentStatus":"In Review"/);
+  assert.match(transitionLog, /"retryable":true/);
+  assert.match(transitionLog, /left-awaiting-review-for-next-poll/);
+  assert.match(transitionLog, /did not reach/);
+  fixtureData.db.close();
+});
+
 test("merge check skips pull requests that are not yet merged", async () => {
   const fixtureData = await fixture();
   const worker = makeWorker(

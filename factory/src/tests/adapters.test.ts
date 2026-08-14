@@ -295,6 +295,26 @@ test("MCP Jira description correction follows a format error instead of repeatin
   assert.match(requests[1].task, /valid ADF document object/);
 });
 
+test("MCP Jira transition correction stays focused on the destination status", async () => {
+  const requests = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      requests.push(input);
+      return requests.length === 1
+        ? { output: JSON.stringify({ ok: false, issueKey: "FACT-1", key: "FACT-1", details: 'The issue remained "In Review".' }) }
+        : { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "transitioned" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.transition("FACT-1", "Done");
+
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].task, /destination status named exactly/);
+  assert.match(requests[1].task, /destination status is exactly the requested target status/);
+  assert.doesNotMatch(requests[1].task, /fields\.description/);
+});
+
 test("MCP Jira mutations do not retry an unknown provider-timeout outcome", async () => {
   const requests = [];
   const executor: JiraExecutor = {

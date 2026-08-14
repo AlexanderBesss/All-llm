@@ -3,6 +3,7 @@ import { RUN_STATUSES } from "../types.js";
 import type { FactoryRun } from "../model/database.js";
 import type { FactoryWorker } from "../worker.js";
 import { runBounded } from "./concurrency.js";
+import { JiraTransitionFailedError } from "./failure.js";
 
 export async function checkMergedPullRequests(
   worker: FactoryWorker,
@@ -77,6 +78,15 @@ async function processPullRequest(worker: FactoryWorker, run: FactoryRun): Promi
       worker.log("error", "merge-check:transition-failed", {
         runId: run.id,
         issueKey: run.issue_key,
+        prNumber: pr.number,
+        targetStatus: worker.config.jira.statuses.done,
+        ...(error instanceof JiraTransitionFailedError
+          ? {
+            currentStatus: error.currentStatus || "unknown",
+            retryable: true,
+            nextAction: "left-awaiting-review-for-next-poll",
+          }
+          : {}),
         error: error?.message || String(error),
       });
       return false;

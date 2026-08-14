@@ -214,7 +214,11 @@ export class McpJiraAdapter {
     const correction = (reason: string) => {
       const formatCorrection = /expected a markdown string[\s\S]*got object|pass contentformat[\s\S]*adf/i.test(reason)
         ? "The MCP error specifically says the description was received as an object while contentFormat was markdown. For this correction, switch contentFormat to \"adf\" and send fields.description as one valid ADF document object (type=doc, version=1, content=[...]); keep the exact requested text as the document's text. This overrides the earlier Markdown-format payload instruction."
-        : "For description updates, fields.description must be the complete Markdown string itself; never send an ADF object, a nested value object, or {} under fields.description.";
+        : operation === "transition"
+          ? "This is a Jira status-transition correction. Do not edit fields, comments, or any other issue. Use one transition whose destination status is exactly the requested target status; do not select a transition only because its label looks similar. Verify the resulting issue status before returning ok=true. If the target status cannot be reached, return ok=false with the actual status and the available transition names."
+          : operation === "add-comment"
+            ? "This is a Jira comment correction. Do not transition the issue or edit any fields. Add exactly the requested comment once, preserving its exact body."
+            : "Correct only the requested Jira mutation using the reported failure. Do not edit any other field or issue.";
       return request(
         `${task}\n\nThe previous one-call attempt failed before returning a usable result. The failure was: ${JSON.stringify(reason)}. This is the one permitted correction attempt. Correct only the request payload using that failure, call the Jira tool exactly once, and then return ok=true only if it succeeds or ok=false with the final error. Do not make any further tool calls. ${formatCorrection}`,
       );
@@ -309,7 +313,7 @@ export class McpJiraAdapter {
     let result;
     try {
       result = await this.structured(
-        `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the status named exactly ${JSON.stringify(statusName)}. Return ok=true only after the transition succeeds; do not change any other issue.`,
+        `Use the configured Jira MCP server to transition Jira issue ${issueKey} to the destination status named exactly ${JSON.stringify(statusName)}. If the available transition label differs from the destination status, choose the transition whose destination status matches exactly. Verify the resulting issue status before returning ok=true; if it remains different, return ok=false with the actual status. Do not change any other issue.`,
         this.mutationSchema,
         { retryMutation: true, operation: "transition", priority: "mutation" },
       );
