@@ -397,6 +397,14 @@ test("Jira ready discovery includes Ready issues with or without a sprint", asyn
   assert.deepEqual((await jira.searchReady()).map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);
 });
 
+test("Jira planning discovery includes only Planning issues", async () => {
+  const jira = new InMemoryJiraAdapter([
+    { key: "FACT-PLAN", fields: { status: { name: "Planning" } } },
+    { key: "FACT-READY", fields: { status: { name: "Ready" } } },
+  ]);
+  assert.deepEqual((await jira.searchPlanning()).map((issue) => issue.key), ["FACT-PLAN"]);
+});
+
 test("factory claims a Ready issue without a sprint", async () => {
   const fixtureData = await fixture();
   fixtureData.jira.issues.set("FACT-2", {
@@ -441,6 +449,23 @@ test("REST Jira ready discovery searches all Ready issues in the project", async
   assert.equal(body.jql, 'project = FACT AND status = "Ready" ORDER BY priority DESC, updated ASC');
 });
 
+test("REST Jira planning discovery uses the configured Planning status", async () => {
+  const requests: Array<{ url: string; options?: RequestInit }> = [];
+  const jira = new JiraRestAdapter({
+    baseUrl: "https://jira.example.test",
+    projectKey: "FACT",
+    planningStatus: "Refinement",
+    email: "factory@example.test",
+    apiToken: "token",
+  }, async (url, options) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, async text() { return JSON.stringify({ issues: [] }); } };
+  });
+  await jira.searchPlanning();
+  const body = JSON.parse(String(requests[0].options?.body));
+  assert.equal(body.jql, 'project = FACT AND status = "Refinement" ORDER BY priority DESC, updated ASC');
+});
+
 test("Codex Jira ready discovery includes backlog issues without sprint metadata", async () => {
   const calls = [];
   const executor = {
@@ -461,6 +486,19 @@ test("Codex Jira ready discovery includes backlog issues without sprint metadata
   assert.match(calls[0].task, /status = "Ready" ORDER BY priority DESC/);
   assert.deepEqual(issues.map((issue) => issue.key), ["FACT-BOARD", "FACT-BACKLOG"]);
   assert.deepEqual(issues[0].fields.sprint, [{ id: 1, name: "Sprint 1", state: null, boardId: null, originBoardId: null, startDate: null, endDate: null, completeDate: null, goal: null }]);
+});
+
+test("MCP Jira planning discovery uses configured project and status", async () => {
+  const calls = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      calls.push(input);
+      return { output: JSON.stringify({ issues: [] }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", planningStatus: "Refinement" }, executor);
+  await adapter.searchPlanning();
+  assert.match(calls[0].task, /project = FACT AND status = "Refinement"/);
 });
 
 test("MCP Jira lookup accepts an existing issue in Error status", async () => {

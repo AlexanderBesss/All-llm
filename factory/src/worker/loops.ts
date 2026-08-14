@@ -91,6 +91,24 @@ export interface PollLoopWorker extends FactoryLoopWorker {
   runOnce(): Promise<object>;
 }
 
+export interface PlanningLoopWorker extends FactoryLoopWorker {
+  planNextIssue(): Promise<object>;
+}
+
+export function runPlanningLoop(
+  worker: PlanningLoopWorker,
+  { signal = worker.signal, intervalMs = 60_000 }: { signal?: AbortSignal; intervalMs?: number } = {},
+): Promise<void> {
+  return runFactoryLoop(worker, {
+    signal,
+    intervalMs,
+    label: FactoryLoop.Planning,
+    shutdownEvent: "planning-loop:shutdown-requested",
+    failureMessage: "planning poll failed",
+    execute: () => worker.planNextIssue(),
+  });
+}
+
 export function runLoop(
   worker: PollLoopWorker,
   { signal = worker.signal, pollIntervalMs = 60_000 }: { signal?: AbortSignal; pollIntervalMs?: number } = {},

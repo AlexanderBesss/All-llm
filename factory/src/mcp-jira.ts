@@ -273,6 +273,17 @@ export class McpJiraAdapter {
     return (result.issues || []).map(normalizeIssue);
   }
 
+  async searchPlanning() {
+    const status = String(this.config.planningStatus || "Planning").replace(/"/g, '\\"');
+    const project = String(this.config.projectKey || "").replace(/[^A-Za-z0-9_-]/g, "");
+    const result = await this.structured(
+      `Use the configured Jira MCP server to run this read-only Jira JQL search: project = ${project} AND status = "${status}" ORDER BY priority DESC, updated ASC. Return at most 50 matching issues, normalized to the requested JSON schema. Do not filter by labels.`,
+      this.issuesSchema,
+      { retryInvalidJson: true, operation: "search-planning", priority: "read" },
+    );
+    return (result.issues || []).map(normalizeIssue);
+  }
+
   async getIssue(issueKey) {
     const task = `Use the configured Jira MCP server to read exactly Jira issue ${issueKey}. The issue may have any current Jira status, including Error; determine existence only from the exact issue key, never from its status. Return that one issue normalized to the requested JSON schema. Do not search broadly.`;
     const result = await this.structured(task, this.issuesSchema, { retryInvalidJson: true, operation: "get-issue", priority: "read" });

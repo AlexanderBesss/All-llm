@@ -3,6 +3,7 @@
   "repoPath": ".",
   "stateDir": "./tmp/AllLlmFactory",
   "pollIntervalMs": 60000,
+  "planningIntervalMs": 60000,
   "mergeCheckIntervalMs": 300000,
   "reviewFixIntervalMs": 300000,
   "leaseMs": 900000,
@@ -17,6 +18,8 @@
     "mcpAgent": "factory-jira",
     "projectKey": "KAN",
     "statuses": {
+      "planning": "Planning",
+      "todo": "To Do",
       "ready": "Ready",
       "implementation": "In Progress",
       "review": "In Review",

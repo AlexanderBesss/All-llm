@@ -58,6 +58,7 @@ export interface JiraSearchItem {
 
 export interface JiraAdapter {
   enabled(): boolean;
+  searchPlanning(): Promise<JiraIssue[]>;
   searchReady(): Promise<JiraIssue[]>;
   getIssue(issueKey: string): Promise<JiraIssue>;
   transition(issueKey: string, statusName: string): Promise<unknown>;

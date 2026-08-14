@@ -16,6 +16,7 @@ import { checkMergedPullRequests } from "./worker/merge-check.js";
 import { fixPullRequestReviews } from "./worker/review-fix.js";
 import { isRemovedReviewStage } from "./types.js";
 import { currentFactoryLoop, isFactoryLogColorEnabled } from "./logging.js";
+import { planNextIssue } from "./worker/planning.js";
 
 export class FactoryWorker {
   config: FactoryConfig;
@@ -192,6 +193,10 @@ export class FactoryWorker {
     return { action: RunAction.Idle };
   }
 
+  async planNextIssue(options: { dryRun?: boolean } = {}) {
+    return planNextIssue(this, options);
+  }
+
   async advanceRun(run, { dryRun = false } = {}) {
     let current = run;
     for (let step = 0; step < 4; step += 1) {
@@ -316,4 +321,4 @@ export class FactoryWorker {
 }
 
 export { implementationModel, pullRequestDescription } from "./worker/format.js";
-export { runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker/loops.js";
+export { runLoop, runMergeCheckLoop, runPlanningLoop, runReviewFixLoop } from "./worker/loops.js";

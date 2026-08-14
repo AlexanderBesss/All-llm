@@ -1,15 +1,25 @@
 # AI Software Factory
 
-This worker processes Jira tickets in the configured Ready status through a durable local
-state machine:
+This worker has an independent AI planning loop and a durable implementation state
+machine:
 
 ```text
-Ready -> In Progress -> In Review -> Done (human)
-          \-> Error after bounded failure
+Planning --AI refinement--> To Do --human verification--> Ready
+                                                        |
+                                                        v
+                                      In Progress -> In Review -> Done (human)
+                                           \-> Error after bounded failure
 ```
 
-It uses one aggregate `factory/<JIRA-KEY>` branch and one pull request per
-parent ticket. `Ready` means the ticket is waiting to be processed. `In Progress`
+Planning replaces the parent description with an implementation-ready scope and
+acceptance criteria, then moves the issue to `To Do` for user verification. It
+does not create a factory run, branch, commit, or pull request. Its poller can run
+at the same time as implementation and neither loop waits for the other. The
+standalone planning command also skips base-branch synchronization and GitHub
+health checks because planning requires neither Git nor GitHub mutations.
+
+Implementation uses one aggregate `factory/<JIRA-KEY>` branch and one pull request per
+parent ticket. `Ready` means the verified ticket is waiting to be processed. `In Progress`
 means one lead implementation agent is working on the complete parent issue in one
 factory worktree. The lead may spawn several bounded sub-agents for read-only
 investigation, repository exploration, test discovery, or independent analysis;
@@ -65,7 +75,7 @@ user questions. Dry runs retain their existing no-worktree-mutation behavior.
 
 Factory log lines begin with an ISO-8601 UTC timestamp, for example
 `[2026-08-11T16:00:42.689Z] [factory] [poll] poll:start`.
-The loop badge is colored on interactive terminals: `poll` is cyan,
+The loop badge is colored on interactive terminals: `planning` is blue, `poll` is cyan,
 `merge-check` is yellow, and `review-fix` is magenta. Set `FORCE_COLOR=1` to
 enable colors when output is redirected, or set `NO_COLOR=1` to disable them.
 Structured loop results retain their `loop` field for machine-readable logs.
@@ -224,6 +234,7 @@ npm test
 npm run status
 npm run run-once
 npm start
+npm run start:planning
 npm run start:jira-tasks
 npm run start:pull-request-check
 npm run start:review-fix
@@ -232,11 +243,12 @@ npm run install-task
 ```
 
 Useful additional commands are `npm run dry-run`,
-`npm run status:json`, and `npm test`. Use `npm run start:jira-tasks` to run
+`npm run status:json`, and `npm test`. Use `npm run start:planning` to run only
+the Planning-to-To-Do refinement loop. Use `npm run start:jira-tasks` to run
 only the Jira Ready-ticket polling and implementation loop. Use
 `npm run start:pull-request-check` to run only the GitHub pull-request merge
 checker that closes the Jira ticket after a merge. `npm start` and
-`npm run start:all` run all three loops together. The generic
+`npm run start:all` run all four loops together. The generic
 `npm run factory -- <command>` form also forwards any supported CLI command or
 option.
 
@@ -260,7 +272,8 @@ transition results are reconciled with one status read. The individual loop comm
 process managers because they share the same durable SQLite state directory.
 
 `npm run start:review-fix` runs only the `ai-fix` review loop. `npm start` and
-`npm run start:all` run the Jira task, review-fix, and merge-check loops together.
+`npm run start:all` run planning, Jira implementation, review-fix, and merge-check
+loops together.
 
 `npm run run-once` performs one poll and reports `retry_scheduled` when a stage
 fails before the retry limit. It does not wait for the retry; use `npm start`
@@ -289,6 +302,7 @@ restartable Windows Scheduled Task. State and logs belong under the project-loca
 
 ## Safety behavior
 
+- Planning reads repository context without write access. The supervisor alone updates the parent description and transitions the issue to the configured `To Do` status; implementation continues to poll only `Ready`.
 - Tickets in the configured Ready status are claimed from the configured Jira project whether they are on a board or in the backlog; sprint assignment is not required.
 - Runs use stable IDs, branch names, and Jira markers to reconcile retries.
 - On startup, a worker immediately releases active leases owned by a no-longer-running factory process, so an interrupted run does not wait for the normal lease timeout before resuming. Leases owned by live processes remain protected.
