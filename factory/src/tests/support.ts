@@ -56,8 +56,8 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     },
     github: { repositoryFullName: "example/factory" },
     git: { baseBranch: "main" },
-    codex: {},
-    opencode: {},
+    codex: { model: "gpt-5.6-luna", featureModel: "gpt-5.6-sol" },
+    opencode: { model: "llamacpp/unsloth/Qwen3.6-27B-UD-Q4_K_XL" },
   };
   return { db, jira, github, git, config };
 }

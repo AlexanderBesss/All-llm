@@ -8,7 +8,7 @@ import type { JiraIssue } from "./model/jira.js";
 import { assertExecution, parseJsonLines } from "./agent/codex-protocol.js";
 import { buildExecutionTask } from "./agent/codex-prompts.js";
 import { assertSchema, factorySchemaPath } from "./schema-validation.js";
-import { jiraText } from "./worker/format.js";
+import { codexImplementationModel, jiraText } from "./worker/format.js";
 
 export { parseJsonLines } from "./agent/codex-protocol.js";
 
@@ -163,7 +163,7 @@ export class CodexAgentExecutor {
       cwd,
       outputSchema,
       ...(isFeature ? {
-        model: this.config.codex.featureModel,
+        model: codexImplementationModel(this.config.codex, issue),
         reasoningEffort: this.config.codex.featureReasoningEffort,
       } : {}),
       toolScope: AgentToolScope.Build,

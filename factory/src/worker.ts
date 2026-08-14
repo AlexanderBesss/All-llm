@@ -311,5 +311,5 @@ export class FactoryWorker {
   }
 }
 
-export { pullRequestDescription } from "./worker/format.js";
+export { implementationModel, pullRequestDescription } from "./worker/format.js";
 export { runLoop, runMergeCheckLoop, runReviewFixLoop } from "./worker/loops.js";

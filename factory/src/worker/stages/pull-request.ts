@@ -3,7 +3,7 @@ import { makeRunMarker, RUN_STATUSES, STAGES, StageRunStatus, ArtifactKind } fro
 import type { FactoryRun } from "../../model/database.js";
 import type { JiraIssue } from "../../model/jira.js";
 import type { FactoryWorker } from "../../worker.js";
-import { hashInput, jiraText, normalizePlan, pullRequestDescription } from "../format.js";
+import { hashInput, implementationModel, jiraText, normalizePlan, pullRequestDescription } from "../format.js";
 
 export async function processPullRequest(worker: FactoryWorker, run: FactoryRun, { dryRun }: { dryRun: boolean }) {
   worker.throwIfStopping();
@@ -27,6 +27,7 @@ export async function processPullRequest(worker: FactoryWorker, run: FactoryRun,
     const taskName = jiraText(issue.fields?.summary, "summary");
     const taskType = jiraText(issue.fields?.issuetype);
     const title = buildPullRequestTitle({ taskNumber, taskName, taskType });
+    const model = implementationModel(worker.config, issue);
     const specPath = worker.db.findArtifact(ArtifactKind.Spec, branchName)?.artifact_value || "";
     const persistedPr = !dryRun && run.pr_number && run.pr_url
       ? { number: run.pr_number, html_url: run.pr_url, head: { ref: branchName } }
@@ -52,6 +53,7 @@ export async function processPullRequest(worker: FactoryWorker, run: FactoryRun,
             issueKey: run.issue_key,
             plan,
             specPath,
+            model,
           }),
           head: branchName,
           base: worker.config.git.baseBranch,

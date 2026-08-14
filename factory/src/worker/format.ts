@@ -1,7 +1,27 @@
 import crypto from "node:crypto";
 import { adfToText } from "../jira.js";
+import { AgentProvider } from "../model/config.js";
 import { makeRunMarker } from "../types.js";
+import type { CodexSettings, FactoryConfig } from "../model/config.js";
 import type { ImplementationPlan } from "../model/codex.js";
+import type { JiraIssue } from "../model/jira.js";
+
+function usableModel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const model = value.trim().replace(/\s+/g, " ");
+  return model || undefined;
+}
+
+export function codexImplementationModel(settings: CodexSettings, issue: JiraIssue): string | undefined {
+  const isFeature = jiraText(issue.fields?.issuetype).trim().toLowerCase() === "feature";
+  const preferred = isFeature ? settings.featureModel : settings.model;
+  return usableModel(preferred) || (isFeature ? usableModel(settings.model) : undefined);
+}
+
+export function implementationModel(config: Pick<FactoryConfig, "provider" | "codex" | "opencode">, issue: JiraIssue): string | undefined {
+  if (config.provider === AgentProvider.OpenCode) return usableModel(config.opencode?.model);
+  return codexImplementationModel(config.codex, issue);
+}
 
 export function jiraText(value: unknown, property: "name" | "key" | "summary" = "name"): string {
   if (typeof value === "string") return value;
@@ -63,11 +83,12 @@ export function planDescription(originalDescription: unknown, plan: Implementati
   ].join("\n");
 }
 
-export function pullRequestDescription({ runId, issueKey, plan, specPath = "" }: {
+export function pullRequestDescription({ runId, issueKey, plan, specPath = "", model }: {
   runId: string;
   issueKey: string;
   plan: ImplementationPlan;
   specPath?: string;
+  model?: string;
 }): string {
   const implementationAreas = plan.files.length
     ? plan.files.map((item) => `- ${item}`)
@@ -75,7 +96,9 @@ export function pullRequestDescription({ runId, issueKey, plan, specPath = "" }:
   const validationChecks = plan.tests.length
     ? plan.tests.map((item) => `- ${item}`)
     : ["- Relevant repository tests and validation checks."];
+  const normalizedModel = usableModel(model);
   return [
+    ...(normalizedModel ? [`Implemented by ${normalizedModel}`, ""] : []),
     makeRunMarker(runId),
     "",
     "## Intent",
