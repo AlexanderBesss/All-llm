@@ -95,6 +95,7 @@ export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) 
     searchReady: fixtureData.jira.searchReady.bind(fixtureData.jira),
     getIssue: fixtureData.jira.getIssue.bind(fixtureData.jira),
     updateDescription: fixtureData.jira.updateDescription.bind(fixtureData.jira),
+    updateSummaryAndDescription: fixtureData.jira.updateSummaryAndDescription.bind(fixtureData.jira),
     addComment: fixtureData.jira.addComment.bind(fixtureData.jira),
     commentExists: fixtureData.jira.commentExists.bind(fixtureData.jira),
     async transition(key, statusName) {

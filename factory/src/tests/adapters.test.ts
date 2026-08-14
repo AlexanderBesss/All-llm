@@ -489,6 +489,27 @@ test("REST Jira planning discovery uses the configured Planning status", async (
   assert.equal(body.jql, 'project = FACT AND status = "Refinement" ORDER BY priority DESC, updated ASC');
 });
 
+test("REST Jira planning mutation updates title and description together", async () => {
+  const requests: Array<{ url: string; options?: RequestInit }> = [];
+  const jira = new JiraRestAdapter({
+    baseUrl: "https://jira.example.test",
+    projectKey: "FACT",
+    email: "factory@example.test",
+    apiToken: "token",
+  }, async (url, options) => {
+    requests.push({ url: String(url), options });
+    return { ok: true, status: 200, async text() { return "{}"; } };
+  });
+
+  await jira.updateSummaryAndDescription("FACT-1", "[FACT-1] Add factory coverage", "Refined description");
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options?.method, "PUT");
+  const body = JSON.parse(String(requests[0].options?.body));
+  assert.equal(body.fields.summary, "[FACT-1] Add factory coverage");
+  assert.equal(body.fields.description.content[0].content[0].text, "Refined description");
+});
+
 test("Codex Jira ready discovery includes backlog issues without sprint metadata", async () => {
   const calls = [];
   const executor = {
@@ -522,6 +543,23 @@ test("MCP Jira planning discovery uses configured project and status", async () 
   const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT", planningStatus: "Refinement" }, executor);
   await adapter.searchPlanning();
   assert.match(calls[0].task, /project = FACT AND status = "Refinement"/);
+});
+
+test("MCP Jira planning mutation sends title and description in one edit", async () => {
+  const calls = [];
+  const executor: JiraExecutor = {
+    async run(input) {
+      calls.push(input);
+      return { output: JSON.stringify({ ok: true, issueKey: "FACT-1", key: "FACT-1", details: "updated" }) };
+    },
+  };
+  const adapter = new McpJiraAdapter({ repoPath: ".", projectKey: "FACT" }, executor);
+
+  await adapter.updateSummaryAndDescription("FACT-1", "[FACT-1] Add factory coverage", "Refined description");
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].task, /"fields":\{"summary":"\[FACT-1\] Add factory coverage","description":"Refined description"\}/);
+  assert.match(calls[0].task, /replace the title and description/);
 });
 
 test("MCP Jira lookup accepts an existing issue in Error status", async () => {

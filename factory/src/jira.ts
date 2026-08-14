@@ -171,6 +171,13 @@ export class JiraRestAdapter {
     return this.updateIssue(issueKey, { description: textToAdf(description) });
   }
 
+  async updateSummaryAndDescription(issueKey, summary, description) {
+    return this.updateIssue(issueKey, {
+      summary,
+      description: textToAdf(description),
+    });
+  }
+
   async addComment(issueKey, body) {
     if (await this.commentExists(issueKey, body)) return {};
     return this.request("POST", `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
@@ -223,6 +230,13 @@ export class InMemoryJiraAdapter {
 
   async updateDescription(key, description) {
     const issue = await this.getIssue(key);
+    issue.fields.description = description;
+    this.issues.set(key, issue);
+  }
+
+  async updateSummaryAndDescription(key, summary, description) {
+    const issue = await this.getIssue(key);
+    issue.fields.summary = summary;
     issue.fields.description = description;
     this.issues.set(key, issue);
   }

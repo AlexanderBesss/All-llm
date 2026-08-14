@@ -11,7 +11,7 @@ Planning --AI refinement--> To Do --human verification--> Ready
                                            \-> Error after bounded failure
 ```
 
-Planning replaces the parent description with an implementation-ready scope and
+Planning updates the parent title to include its Jira key and replaces the description with an implementation-ready scope and
 acceptance criteria, then moves the issue to `To Do` for user verification. It
 does not create a factory run, branch, commit, or pull request. Its poller can run
 at the same time as implementation and neither loop waits for the other. The

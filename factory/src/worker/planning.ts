@@ -28,6 +28,15 @@ export function formatPlannedDescription(description: string, acceptanceCriteria
   return `${body}\n\n## Acceptance criteria\n\n${criteria.map((criterion) => `- ${criterion}`).join("\n")}`;
 }
 
+export function formatPlannedSummary(issueKey: string, summary: string): string {
+  const key = String(issueKey).trim();
+  const body = String(summary || "").trim();
+  const prefix = `[${key}]`;
+  return body.toLowerCase().startsWith(prefix.toLowerCase())
+    ? body
+    : `${prefix} ${body || key}`;
+}
+
 export async function planNextIssue(
   worker: FactoryWorker,
   { dryRun = false, beforePlan }: { dryRun?: boolean; beforePlan?: BeforePlanning } = {},
@@ -120,6 +129,7 @@ async function planIssue(worker: FactoryWorker, issue: JiraIssue, dryRun: boolea
   worker.log("info", "planning:agent-start", { issueKey: issue.key });
   const { result } = await worker.agent.planIssue({ issue });
   worker.throwIfStopping();
+  const summary = formatPlannedSummary(issue.key, issue.fields?.summary || "");
   const description = formatPlannedDescription(result.description, result.acceptanceCriteria);
   const targetStatus = worker.config.jira.statuses.todo;
   if (dryRun) {
@@ -132,26 +142,27 @@ async function planIssue(worker: FactoryWorker, issue: JiraIssue, dryRun: boolea
     };
   }
 
+  const originalSummary = issue.fields?.summary || "";
   const originalDescription = adfToText(issue.fields?.description);
-  let descriptionMutationStarted = false;
+  let issueMutationStarted = false;
   try {
-    descriptionMutationStarted = true;
-    await worker.jira.updateDescription(issue.key, description);
+    issueMutationStarted = true;
+    await worker.jira.updateSummaryAndDescription(issue.key, summary, description);
     worker.throwIfStopping();
     await worker.transitionIfNeeded(issue.key, targetStatus, { skipStatusCheck: true });
   } catch (error) {
-    if (!descriptionMutationStarted) throw error;
+    if (!issueMutationStarted) throw error;
     try {
-      await worker.jira.updateDescription(issue.key, originalDescription);
-      worker.log("warn", "planning:description-rolled-back", { issueKey: issue.key });
+      await worker.jira.updateSummaryAndDescription(issue.key, originalSummary, originalDescription);
+      worker.log("warn", "planning:issue-rolled-back", { issueKey: issue.key });
     } catch (rollbackError) {
-      worker.log("error", "planning:description-rollback-failed", {
+      worker.log("error", "planning:issue-rollback-failed", {
         issueKey: issue.key,
         error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
       });
       throw new AggregateError(
         [error, rollbackError],
-        `Planning failed for ${issue.key}, and restoring the original description also failed.`,
+        `Planning failed for ${issue.key}, and restoring the original title and description also failed.`,
       );
     }
     throw error;

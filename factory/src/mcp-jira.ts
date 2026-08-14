@@ -322,6 +322,30 @@ export class McpJiraAdapter {
     return result;
   }
 
+  async updateSummaryAndDescription(issueKey, summary, description) {
+    const markdownPayload = JSON.stringify({
+      issueIdOrKey: issueKey,
+      fields: { summary, description },
+      contentFormat: "markdown",
+    });
+    let result;
+    try {
+      result = await this.structured(
+        `Use the configured Jira MCP server to replace the title and description of Jira issue ${issueKey}. Call the Jira edit tool exactly once. Use this exact JSON arguments shape; fields.summary is the complete title and fields.description is one JSON string, not an object or a set of Markdown-derived keys:\n${markdownPayload}\nDo not alter the serialized title or description values. If the tool returns an error, stop immediately and return ok=false; do not retry the edit. Return ok=true only after the update succeeds. Do not change any other field or issue.`,
+        this.mutationSchema,
+        { retryMutation: true, operation: "update-summary-description", priority: "mutation" },
+      );
+    } catch (error) {
+      const issue = await this.getIssue(issueKey);
+      if (issue.fields?.summary === summary && adfToText(issue.fields?.description) === description) {
+        return { ok: true, issueKey, key: issueKey, details: "confirmed after ambiguous failure" };
+      }
+      throw error;
+    }
+    if (!result.ok) throw new Error(`Jira title and description update failed for ${issueKey}: ${result.details || "unknown error"}`);
+    return result;
+  }
+
   async addComment(issueKey, body) {
     if (await this.commentExists(issueKey, body)) return { ok: true, issueKey, key: issueKey, details: "comment already exists" };
     const commentBody = JSON.stringify(String(body));

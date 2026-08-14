@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { InMemoryJiraAdapter } from "../jira.js";
 import { assertPlanningResult } from "../agent/codex-protocol.js";
-import { formatPlannedDescription, PlanningAction } from "../worker/planning.js";
+import { formatPlannedDescription, formatPlannedSummary, PlanningAction } from "../worker/planning.js";
 import { runPlanningLoop } from "../worker/loops.js";
 import { fixture, makeWorker } from "./support.js";
 
@@ -48,6 +48,7 @@ test("planning refines a Planning issue and moves it to To Do", async () => {
     "- Planning issues receive a refined description.",
     "- Planned issues move to To Do for user verification.",
   ].join("\n"));
+  assert.equal(planned.fields.summary, "[FACT-1] Add factory coverage");
   assert.deepEqual(events, ["status:To Do"]);
 });
 
@@ -179,6 +180,7 @@ test("planning dry-run performs no Jira mutations", async () => {
   const unchanged = await data.jira.getIssue("FACT-1");
 
   assert.equal(result.action, PlanningAction.DryRun);
+  assert.equal(unchanged.fields.summary, "Add factory coverage");
   assert.equal(unchanged.fields.description, "Original description");
   assert.equal(unchanged.fields.status?.name, "Planning");
   assert.deepEqual(events, []);
@@ -197,6 +199,7 @@ test("planning restores the original description when the transition fails", asy
   await assert.rejects(worker.planNextIssue(), /transition unavailable/);
 
   const unchanged = await data.jira.getIssue("FACT-1");
+  assert.equal(unchanged.fields.summary, "Add factory coverage");
   assert.equal(unchanged.fields.description, "Original description");
   assert.equal(unchanged.fields.status?.name, "Planning");
 });
@@ -210,6 +213,11 @@ test("planning is idle when no issue is in Planning", async () => {
 test("planned description formatting is deterministic", () => {
   assert.equal(formatPlannedDescription("  Scope  ", [" First ", "Second"]),
     "Scope\n\n## Acceptance criteria\n\n- First\n- Second");
+});
+
+test("planned summaries contain the Jira issue key without duplicating an existing prefix", () => {
+  assert.equal(formatPlannedSummary("FACT-1", "Add factory coverage"), "[FACT-1] Add factory coverage");
+  assert.equal(formatPlannedSummary("FACT-1", "[FACT-1] Add factory coverage"), "[FACT-1] Add factory coverage");
 });
 
 test("planning result validation rejects missing acceptance criteria", () => {
