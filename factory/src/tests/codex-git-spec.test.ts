@@ -144,6 +144,31 @@ test("Codex build runs disable Jira while dedicated Jira runs retain it", async 
   assert.ok(!calls[1].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
 });
 
+test("Codex planning runs with read-only repository access and no Jira tools", async () => {
+  const calls: Array<{ args: string[]; options?: ProcessOptions }> = [];
+  const executor = new CodexAgentExecutor({
+    repoPath: ".",
+    codex: { command: "codex", model: "gpt-5.6-luna", reasoningEffort: "max" },
+  }, async (_command, args, options) => {
+    calls.push({ args, options });
+    const output = JSON.stringify({
+      description: "Refined implementation-ready scope.",
+      acceptanceCriteria: ["The behavior is observable."],
+    });
+    return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: output } }), stderr: "" };
+  });
+
+  const planned = await executor.planIssue({
+    issue: { key: "FACT-1", fields: { summary: "Refine work", description: "Unclear request" } },
+  });
+
+  assert.equal(planned.result.description, "Refined implementation-ready scope.");
+  assert.ok(calls[0].args.includes("read-only"));
+  assert.ok(calls[0].args.includes("mcp_servers.Atlassian-Rovo-MCP.enabled=false"));
+  assert.match(calls[0].options?.input || "", /Inspect the repository in read-only mode/);
+  assert.match(calls[0].options?.input || "", /acceptance criteria/i);
+});
+
 test("OpenCode build configuration denies Jira tools", async () => {
   const config = JSON.parse(await readFile(path.resolve("..", "opencode.json"), "utf8"));
   assert.equal(config.agent.build.permission["jira_*"], "deny");

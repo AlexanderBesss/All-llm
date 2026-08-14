@@ -124,6 +124,13 @@ export class JiraRestAdapter {
     return this.search(jql);
   }
 
+  async searchPlanning() {
+    const project = this.config.projectKey;
+    const status = this.config.planningStatus || "Planning";
+    const jql = `project = ${project} AND status = "${status.replace(/"/g, "\\\"")}" ORDER BY priority DESC, updated ASC`;
+    return this.search(jql);
+  }
+
   async getIssue(issueKey: string): Promise<JiraIssue> {
     try {
       return await this.request("GET", `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, undefined, {
@@ -194,6 +201,11 @@ export class InMemoryJiraAdapter {
   async searchReady(): Promise<JiraIssue[]> {
     return [...this.issues.values()].filter((issue) =>
       issue.fields?.status?.name === "Ready");
+  }
+
+  async searchPlanning(): Promise<JiraIssue[]> {
+    return [...this.issues.values()].filter((issue) =>
+      issue.fields?.status?.name === "Planning");
   }
 
   async getIssue(key) {

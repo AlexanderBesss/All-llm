@@ -7,6 +7,7 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "factory": "npm run build && node dist/cli.js",
     "start": "npm run build && node dist/cli.js start",
+    "start:planning": "npm run build && node dist/cli.js start-planning",
     "start:jira-tasks": "npm run build && node dist/cli.js start-jira-tasks",
     "start:pull-request-check": "npm run build && node dist/cli.js start-pull-request-check",
     "start:review-fix": "npm run build && node dist/cli.js start-review-fix",

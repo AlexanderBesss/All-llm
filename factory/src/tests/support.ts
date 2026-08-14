@@ -42,6 +42,7 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     provider: AgentProvider.Codex,
     stateDir,
     repoPath: stateDir,
+    planningIntervalMs: 60_000,
     leaseMs: 60_000,
     reviewFixIntervalMs: 300_000,
     pollIntervalMs: 60_000,
@@ -52,7 +53,7 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     factory: { branchPrefix: "factory" },
     jira: {
       projectKey: "FACT",
-      statuses: { ready: "Ready", implementation: "In Progress", review: "In Review", done: "Done", error: "Error" },
+      statuses: { planning: "Planning", todo: "To Do", ready: "Ready", implementation: "In Progress", review: "In Review", done: "Done", error: "Error" },
     },
     github: { repositoryFullName: "example/factory" },
     git: { baseBranch: "main" },
@@ -87,6 +88,7 @@ export function executionFor(overrides = {}) {
 export function makeWorker(fixtureData, agent, { events = [], logs = [] } = {}) {
   const jira = {
     enabled: fixtureData.jira.enabled.bind(fixtureData.jira),
+    searchPlanning: fixtureData.jira.searchPlanning.bind(fixtureData.jira),
     searchReady: fixtureData.jira.searchReady.bind(fixtureData.jira),
     getIssue: fixtureData.jira.getIssue.bind(fixtureData.jira),
     updateDescription: fixtureData.jira.updateDescription.bind(fixtureData.jira),

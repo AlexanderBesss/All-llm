@@ -20,6 +20,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     provider,
     repoPath: resolvedRepoPath,
     stateDir,
+    planningIntervalMs: 60_000,
     pollIntervalMs: 60_000,
     mergeCheckIntervalMs: 5 * 60_000,
     reviewFixIntervalMs: 5 * 60_000,
@@ -41,6 +42,8 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       email: process.env.JIRA_EMAIL || "",
       apiToken: process.env.JIRA_API_TOKEN || "",
       statuses: {
+        planning: "Planning",
+        todo: "To Do",
         ready: "Ready",
         implementation: "In Progress",
         review: "In Review",
@@ -190,7 +193,10 @@ export async function readOpenCodeDoctorSettings(config: FactoryConfig): Promise
   };
 }
 
-export function validateConfig(config: FactoryConfig, { live = true }: { live?: boolean } = {}): string[] {
+export function validateConfig(config: FactoryConfig, {
+  live = true,
+  requireGitHub = true,
+}: { live?: boolean; requireGitHub?: boolean } = {}): string[] {
   const errors = [];
   if (!config.repoPath) errors.push("repoPath is required");
   if (!config.provider || ![AgentProvider.Codex, AgentProvider.OpenCode].includes(config.provider)) {
@@ -211,6 +217,9 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
   }
   if (!Number.isInteger(config.reviewFixIntervalMs) || config.reviewFixIntervalMs <= 0) {
     errors.push("reviewFixIntervalMs must be a positive integer");
+  }
+  if (!Number.isInteger(config.planningIntervalMs) || config.planningIntervalMs <= 0) {
+    errors.push("planningIntervalMs must be a positive integer");
   }
   if (typeof config.continueFailedTasks !== "boolean") {
     errors.push("continueFailedTasks must be a boolean");
@@ -245,8 +254,10 @@ export function validateConfig(config: FactoryConfig, { live = true }: { live?: 
     for (const statusName of Object.values(JiraStatusKey)) {
       if (!config.jira?.statuses?.[statusName]) errors.push(`jira.statuses.${statusName} is required`);
     }
-    if (!config.github?.repositoryFullName) errors.push("github.repositoryFullName is required");
-    if (config.github?.provider !== "gh") errors.push("github.provider must be gh");
+    if (requireGitHub) {
+      if (!config.github?.repositoryFullName) errors.push("github.repositoryFullName is required");
+      if (config.github?.provider !== "gh") errors.push("github.provider must be gh");
+    }
   }
   return errors;
 }

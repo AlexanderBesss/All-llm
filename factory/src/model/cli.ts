@@ -7,6 +7,7 @@ export enum CliCommand {
   Install = "install",
   RunOnce = "run-once",
   Start = "start",
+  StartPlanning = "start-planning",
   StartJiraTasks = "start-jira-tasks",
   StartPullRequestCheck = "start-pull-request-check",
   StartReviewFix = "start-review-fix",

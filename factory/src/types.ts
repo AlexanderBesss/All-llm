@@ -57,6 +57,7 @@ export enum RunAction {
 }
 
 export enum FactoryLoop {
+  Planning = "planning",
   Poll = "poll",
   MergeCheck = "merge-check",
   ReviewFix = "review-fix",
@@ -72,6 +73,7 @@ export interface FactoryLogOptions {
 }
 
 const LOOP_COLORS: Record<string, string> = {
+  [FactoryLoop.Planning]: "\u001b[34m",
   [FactoryLoop.Poll]: "\u001b[36m",
   [FactoryLoop.MergeCheck]: "\u001b[33m",
   [FactoryLoop.ReviewFix]: "\u001b[35m",

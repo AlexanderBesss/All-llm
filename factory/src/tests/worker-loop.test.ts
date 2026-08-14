@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runFactoryLoop } from "../worker/loops.js";
+import { runFactoryLoop, runLoop, runPlanningLoop } from "../worker/loops.js";
 import { formatFactoryLog } from "../types.js";
 import { currentFactoryLoop, runWithFactoryLoop } from "../logging.js";
 
@@ -93,4 +93,43 @@ test("concurrent factory loop contexts remain isolated across awaits", async () 
   await Promise.all([run("poll", 2), run("merge-check", 0)]);
 
   assert.deepEqual(observed.sort(), ["merge-check:after", "merge-check:before", "poll:after", "poll:before"]);
+});
+
+test("planning and implementation loops run independently", async () => {
+  const controller = new AbortController();
+  const errors: string[] = [];
+  let planningAttempts = 0;
+  let implementationPolls = 0;
+  const common = {
+    signal: controller.signal,
+    logger: {
+      info() {},
+      error(message: string) { errors.push(message); },
+    },
+    log() {},
+  };
+  const planningWorker = {
+    ...common,
+    async planNextIssue() {
+      planningAttempts += 1;
+      throw new Error("planner unavailable");
+    },
+  };
+  const implementationWorker = {
+    ...common,
+    async runOnce() {
+      implementationPolls += 1;
+      setImmediate(() => controller.abort());
+      return { action: "idle" };
+    },
+  };
+
+  await Promise.all([
+    runPlanningLoop(planningWorker, { intervalMs: 1 }),
+    runLoop(implementationWorker, { pollIntervalMs: 1 }),
+  ]);
+
+  assert.ok(planningAttempts >= 1);
+  assert.equal(implementationPolls, 1);
+  assert.ok(errors.some((message) => message.includes("planning poll failed") && message.includes("planner unavailable")));
 });
