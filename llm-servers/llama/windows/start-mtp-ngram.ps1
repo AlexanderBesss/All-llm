@@ -19,8 +19,9 @@
   --ubatch-size 1024 `
   --no-mmap `
   --jinja `
-  --temp 0.6 `
+  --temp 1.0 `
   --top-p 0.95 `
+  --top-k 20 `
   --min-p 0.0 `
   --repeat-penalty 1.0 `
   --metrics `
