@@ -1,0 +1,6 @@
+{
+  "schema": "tts-reader/windows-voice-profile/v1",
+  "name": "Windows natural voice profile",
+  "description": "Uses the configured Windows voice through the local System.Speech processor and the default audio device.",
+  "voiceName": null
+}
