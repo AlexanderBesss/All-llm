@@ -37,7 +37,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         return _synthesizer;
     }
 
-    public void Speak(string text, int caretIndex, BackendDefinition backend)
+    public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate)
     {
         var remaining = GetTextFromCaret(text, caretIndex);
 
@@ -46,11 +46,23 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
             var synthesizer = EnsureSynthesizer();
             synthesizer.SpeakAsyncCancelAll();
             _activeCaretIndex = caretIndex;
+            synthesizer.Rate = MapPlaybackRate(playbackRate);
             synthesizer.SelectVoice(string.IsNullOrWhiteSpace(backend.VoiceName)
                 ? synthesizer.Voice.Name
                 : backend.VoiceName);
             synthesizer.SpeakAsync(remaining);
         }
+    }
+
+    public static int MapPlaybackRate(double playbackRate)
+    {
+        if (double.IsNaN(playbackRate) || double.IsInfinity(playbackRate) || playbackRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(playbackRate));
+
+        // System.Speech exposes an integer rate from -10 to 10 rather than a
+        // multiplier. These values give the requested 1.0x, 1.25x, and 1.5x
+        // choices a predictable stepped mapping.
+        return Math.Clamp((int)Math.Round((playbackRate - 1.0) * 8.0), -10, 10);
     }
 
     public static string GetTextFromCaret(string text, int caretIndex)

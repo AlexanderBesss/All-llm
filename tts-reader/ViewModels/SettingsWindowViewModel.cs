@@ -194,7 +194,10 @@ public sealed class SettingsWindowViewModel : ViewModel, IDisposable
     private static ReaderSettings CloneSettings(ReaderSettings settings) => new()
     {
         ActiveBackendId = settings.ActiveBackendId,
-        Backends = settings.Backends.Select(backend => backend.Clone()).ToList()
+        Backends = settings.Backends.Select(backend => backend.Clone()).ToList(),
+        PlaybackRate = settings.PlaybackRate,
+        LastFolderPath = settings.LastFolderPath,
+        LastSelectedFilePath = settings.LastSelectedFilePath
     };
 
     public void Dispose()

@@ -21,6 +21,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private string _backendStatus = string.Empty;
     private bool _isLoading;
     private bool _isPlaying;
+    private double _playbackRate;
     private int _caretIndex;
     private int _playbackIndex = -1;
     private int _playbackCharacterCount;
@@ -71,6 +72,30 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     }
 
     public int CaretIndex { get => _caretIndex; private set => SetProperty(ref _caretIndex, value); }
+    private static IReadOnlyList<PlaybackSpeedOption> AvailablePlaybackSpeeds { get; } =
+    [
+        new(1.0, "1.0×"),
+        new(1.25, "1.25×"),
+        new(1.5, "1.5×")
+    ];
+
+    public IReadOnlyList<PlaybackSpeedOption> PlaybackSpeeds => AvailablePlaybackSpeeds;
+
+    public double PlaybackRate
+    {
+        get => _playbackRate;
+        set
+        {
+            var normalized = NormalizePlaybackRate(value);
+            if (!SetProperty(ref _playbackRate, normalized))
+                return;
+            _settings.PlaybackRate = normalized;
+            TrySaveSettings();
+            if (IsPlaying)
+                StartFromCaret(true);
+        }
+    }
+
     public int PlaybackIndex { get => _playbackIndex; private set => SetProperty(ref _playbackIndex, value); }
     public int PlaybackCharacterCount
     {
@@ -101,6 +126,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         _interactions = interactions;
         _synchronizationContext = synchronizationContext ?? SynchronizationContext.Current;
         _settings = settingsStore.Load();
+        _playbackRate = NormalizePlaybackRate(_settings.PlaybackRate);
+        _settings.PlaybackRate = _playbackRate;
 
         OpenFolderCommand = new RelayCommand(_ => OpenFolder());
         SelectDocumentCommand = new AsyncRelayCommand(
@@ -281,7 +308,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
         try
         {
-            _speech.Speak(_renderedText, CaretIndex, backend);
+            _speech.Speak(_renderedText, CaretIndex, backend, PlaybackRate);
             IsPlaying = true;
             PlaybackCharacterCount = 1;
             PlaybackIndex = CaretIndex;
@@ -389,9 +416,13 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     {
         ActiveBackendId = settings.ActiveBackendId,
         Backends = settings.Backends.Select(backend => backend.Clone()).ToList(),
+        PlaybackRate = settings.PlaybackRate,
         LastFolderPath = settings.LastFolderPath,
         LastSelectedFilePath = settings.LastSelectedFilePath
     };
+
+    private static double NormalizePlaybackRate(double value) =>
+        AvailablePlaybackSpeeds.Any(option => option.Multiplier == value) ? value : 1.0;
 
     private string? TrySaveSettings()
     {

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Threading;
 using TtsReader.Models;
 using TtsReader.Services;
@@ -15,6 +16,8 @@ public partial class MainWindow : Window, IMainViewInteractions
     private readonly MarkdownDocumentRenderer _markdownRenderer = new();
     private readonly SettingsStore _settingsStore;
     private bool _suppressCaretRestart;
+    private Point _textMouseDownPoint;
+    private bool _textClickCandidate;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -57,6 +60,36 @@ public partial class MainWindow : Window, IMainViewInteractions
     {
         if (!_suppressCaretRestart)
             ViewModel.UpdateCaret(GetCaretIndex());
+    }
+
+    private void DocumentText_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _textMouseDownPoint = e.GetPosition(DocumentText);
+        _textClickCandidate = true;
+    }
+
+    private void DocumentText_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_textClickCandidate || e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        var point = e.GetPosition(DocumentText);
+        if (Math.Abs(point.X - _textMouseDownPoint.X) >= SystemParameters.MinimumHorizontalDragDistance ||
+            Math.Abs(point.Y - _textMouseDownPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)
+            _textClickCandidate = false;
+    }
+
+    private void DocumentText_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_textClickCandidate)
+            return;
+
+        _textClickCandidate = false;
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+        {
+            if (!_suppressCaretRestart && !ViewModel.IsPlaying)
+                ViewModel.PlayCommand.Execute(null);
+        }));
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)

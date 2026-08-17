@@ -18,4 +18,13 @@ public sealed class SpeechPlaybackServiceTests
     {
         Assert.Throws<InvalidOperationException>(() => SpeechPlaybackService.GetTextFromCaret("spoken   ", 6));
     }
+
+    [Theory]
+    [InlineData(1.0, 0)]
+    [InlineData(1.25, 2)]
+    [InlineData(1.5, 4)]
+    public void MapPlaybackRate_UsesSystemSpeechRateSteps(double multiplier, int expectedRate)
+    {
+        Assert.Equal(expectedRate, SpeechPlaybackService.MapPlaybackRate(multiplier));
+    }
 }

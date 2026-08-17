@@ -30,7 +30,7 @@ public interface ISpeechPlaybackService : IDisposable
 {
     event EventHandler<string>? PlaybackEnded;
     event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
-    void Speak(string text, int caretIndex, BackendDefinition backend);
+    void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate);
     void Stop();
 }
 

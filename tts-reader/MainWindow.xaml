@@ -23,6 +23,12 @@
                     <Button Content="Open folder..." Command="{Binding OpenFolderCommand}"/>
                     <Button Content="▶ Play from caret" Command="{Binding PlayCommand}"/>
                     <Button Content="■ Stop" Command="{Binding StopCommand}"/>
+                    <TextBlock Text="Speed:" VerticalAlignment="Center" Margin="10,0,2,0"/>
+                    <ComboBox Width="72" VerticalContentAlignment="Center"
+                              ItemsSource="{Binding PlaybackSpeeds}"
+                              DisplayMemberPath="Label" SelectedValuePath="Multiplier"
+                              SelectedValue="{Binding PlaybackRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              ToolTip="Speech speed"/>
                     <Button Content="Settings..." Command="{Binding OpenSettingsCommand}"/>
                 </StackPanel>
                 <TextBlock x:Name="BackendLabel" DockPanel.Dock="Right" VerticalAlignment="Center"
@@ -52,6 +58,9 @@
                          Padding="0" BorderThickness="0" Background="Transparent"
                          CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
                          SelectionTextBrush="#15171B" SelectionOpacity="0.8"
+                         PreviewMouseLeftButtonDown="DocumentText_PreviewMouseLeftButtonDown"
+                         PreviewMouseMove="DocumentText_PreviewMouseMove"
+                         PreviewMouseLeftButtonUp="DocumentText_PreviewMouseLeftButtonUp"
                          SelectionChanged="DocumentText_SelectionChanged"
                          AutomationProperties.Name="Rendered document"/>
         </Grid>

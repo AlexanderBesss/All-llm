@@ -36,6 +36,25 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void MainViewModel_ChangingPlaybackRateRestartsFromCurrentCaret()
+    {
+        var speech = new FakeSpeech();
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
+            new FakeExtractor("text"), new FakeStore(SettingsStore.CreateDefaults()), speech,
+            new FakeInteractions());
+        viewModel.SetRenderedText("read me");
+
+        viewModel.PlayCommand.Execute(null);
+        viewModel.UpdateCaret(4);
+        viewModel.PlaybackRate = 1.5;
+
+        Assert.Equal(3, speech.Calls.Count);
+        Assert.Equal(4, speech.Calls[2].Caret);
+        Assert.Equal(1.5, speech.Calls[2].PlaybackRate);
+    }
+
+    [Fact]
     public void MainViewModel_RemembersFolderAndSelectedFile()
     {
         var file = new DocumentNode { Name = "story.txt", FullPath = "library\\story.txt", IsFolder = false };
@@ -132,6 +151,9 @@ public sealed class ViewModelTests
     public async Task SettingsViewModel_EditsActivatesDownloadsAndPersists()
     {
         var settings = SettingsStore.CreateDefaults();
+        settings.PlaybackRate = 1.25;
+        settings.LastFolderPath = "library";
+        settings.LastSelectedFilePath = "library\\story.txt";
         var store = new FakeStore(settings, available: false);
         var downloader = new FakeDownloader();
         using var viewModel = new SettingsWindowViewModel(store, downloader, settings);
@@ -151,6 +173,9 @@ public sealed class ViewModelTests
         var saved = store.Saved.Backends.Single(backend => backend.Id == "downloaded-profile");
         Assert.Equal("https://example.test/profile", saved.DownloadSource);
         Assert.Equal("Test Voice", saved.VoiceName);
+        Assert.Equal(1.25, store.Saved.PlaybackRate);
+        Assert.Equal("library", store.Saved.LastFolderPath);
+        Assert.Equal("library\\story.txt", store.Saved.LastSelectedFilePath);
     }
 
     [Fact]
@@ -214,10 +239,11 @@ public sealed class ViewModelTests
 
     private sealed class FakeSpeech : ISpeechPlaybackService
     {
-        public List<(string Text, int Caret, BackendDefinition Backend)> Calls { get; } = [];
+        public List<(string Text, int Caret, BackendDefinition Backend, double PlaybackRate)> Calls { get; } = [];
         public event EventHandler<string>? PlaybackEnded;
         public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
-        public void Speak(string text, int caretIndex, BackendDefinition backend) => Calls.Add((text, caretIndex, backend));
+        public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate) =>
+            Calls.Add((text, caretIndex, backend, playbackRate));
         public void Stop() { }
         public void Dispose() { }
         public void Complete(string status) => PlaybackEnded?.Invoke(this, status);

@@ -14,6 +14,7 @@ public sealed class SettingsAndDownloadTests : IDisposable
         var settings = SettingsStore.CreateDefaults();
         settings.ActiveBackendId = "downloaded-profile";
         settings.Backends[1].DownloadSource = "https://example.test/voice.profile";
+        settings.PlaybackRate = 1.25;
         settings.LastFolderPath = "C:\\Documents";
         settings.LastSelectedFilePath = "C:\\Documents\\story.md";
 
@@ -23,6 +24,7 @@ public sealed class SettingsAndDownloadTests : IDisposable
         Assert.Equal("downloaded-profile", loaded.ActiveBackendId);
         Assert.Equal(2, loaded.Backends.Count);
         Assert.Equal("https://example.test/voice.profile", loaded.Backends[1].DownloadSource);
+        Assert.Equal(1.25, loaded.PlaybackRate);
         Assert.Equal(settings.LastFolderPath, loaded.LastFolderPath);
         Assert.Equal(settings.LastSelectedFilePath, loaded.LastSelectedFilePath);
     }
