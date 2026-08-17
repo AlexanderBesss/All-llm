@@ -23,7 +23,7 @@ test("Codex remains the default provider strategy", () => {
   assert.equal(config.jira.statuses?.planning, "Planning");
   assert.equal(config.jira.statuses?.todo, "To Do");
   assert.deepEqual(config.validation.commands.slice(0, 2), [
-    { name: "factory-dependencies", command: "npm", args: ["ci", "--prefix", "factory"] },
+    { name: "factory-dependencies", command: "npm", args: ["ci", "--include=dev", "--prefix", "factory"] },
     { name: "factory-tests", command: "npm", args: ["--prefix", "factory", "test"] },
   ]);
   assert.equal(config.codex.model, "gpt-5.6-luna");

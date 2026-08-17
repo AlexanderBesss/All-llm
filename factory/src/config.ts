@@ -41,7 +41,7 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
         {
           name: "factory-dependencies",
           command: "npm",
-          args: ["ci", "--prefix", "factory"],
+          args: ["ci", "--include=dev", "--prefix", "factory"],
         },
         {
           name: "factory-tests",
