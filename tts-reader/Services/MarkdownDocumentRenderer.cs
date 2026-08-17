@@ -1,5 +1,7 @@
-using System.Text;
-using System.Text.RegularExpressions;
+using Markdig;
+using Markdig.Extensions.Tables;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -7,49 +9,60 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using IOPath = System.IO.Path;
+using MarkdownListBlock = Markdig.Syntax.ListBlock;
+using MarkdownTable = Markdig.Extensions.Tables.Table;
+using WpfList = System.Windows.Documents.List;
+using WpfTable = System.Windows.Documents.Table;
 
 namespace TtsReader.Services;
 
 /// <summary>
-/// Turns Markdown into a native WPF FlowDocument. Keeping the rendered document
-/// in a RichTextBox means the visible content still has a useful caret for TTS.
+/// Parses Markdown with Markdig and maps supported nodes to a native FlowDocument.
+/// Native document text remains selectable and is the exact source used by TTS.
 /// </summary>
 public sealed class MarkdownDocumentRenderer
 {
-    private static readonly Regex HeadingPattern = new(@"^\s{0,3}(?<marks>#{1,6})\s+(?<text>.*?)(?:\s+#+)?\s*$", RegexOptions.Compiled);
-    private static readonly Regex FencePattern = new(@"^\s{0,3}(?<fence>`{3,}|~{3,})\s*(?<language>[^\s]+)?.*$", RegexOptions.Compiled);
-    private static readonly Regex ListPattern = new(@"^(?<indent>\s*)(?<marker>[-+*]|\d+[.)])\s+(?<text>.*)$", RegexOptions.Compiled);
-    private static readonly Regex TableSeparatorPattern = new(@"^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$", RegexOptions.Compiled);
-    private static readonly Regex MermaidEdgePattern = new(
-        @"(?<left>[A-Za-z0-9_]+(?:\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|\(\([^)]*\)\)))?)\s*(?<arrow>-->|-.->|==>|--|---)\s*(?<right>[A-Za-z0-9_]+(?:\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\}|\(\([^)]*\)\)))?)(?:\s*\|(?<label>[^|]+)\|)?",
-        RegexOptions.Compiled);
-    private static readonly Regex MermaidNodePattern = new(
-        @"(?<id>[A-Za-z0-9_]+)\s*(?<shape>\[\[[^\]]*\]\]|\[\([^]]*\)\]|\[\{[^}]*\}\]|\(\([^)]*\)\)|\[[^\]]*\]|\([^)]*\)|\{[^}]*\})?",
-        RegexOptions.Compiled);
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .DisableHtml()
+        .Build();
 
-    private static readonly Brush HeadingBrush = new SolidColorBrush(Color.FromRgb(88, 196, 255));
-    private static readonly Brush MutedBrush = new SolidColorBrush(Color.FromRgb(175, 183, 196));
-    private static readonly Brush CodeBackground = new SolidColorBrush(Color.FromRgb(39, 43, 51));
-    private static readonly Brush TableBorderBrush = new SolidColorBrush(Color.FromRgb(78, 86, 101));
-    private static readonly Brush TableHeaderBrush = new SolidColorBrush(Color.FromRgb(49, 56, 68));
-    private static readonly Brush DiagramBackground = new SolidColorBrush(Color.FromRgb(31, 36, 45));
-    private static readonly Brush DiagramNodeBrush = new SolidColorBrush(Color.FromRgb(49, 75, 98));
-    private static readonly Brush DiagramLineBrush = new SolidColorBrush(Color.FromRgb(124, 196, 234));
+    private static readonly Brush HeadingBrush = FrozenBrush(88, 196, 255);
+    private static readonly Brush MutedBrush = FrozenBrush(175, 183, 196);
+    private static readonly Brush CodeBackground = FrozenBrush(39, 43, 51);
+    private static readonly Brush TableBorderBrush = FrozenBrush(78, 86, 101);
+    private static readonly Brush TableHeaderBrush = FrozenBrush(49, 56, 68);
+    private static readonly Brush DiagramBackground = FrozenBrush(31, 36, 45);
+    private static readonly Brush DiagramNodeBrush = FrozenBrush(49, 75, 98);
+    private static readonly Brush DiagramLineBrush = FrozenBrush(124, 196, 234);
 
     public FlowDocument Render(string markdown, string? sourcePath = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
 
         var document = CreateDocument();
-        var lines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n');
-        var sourceDirectory = string.IsNullOrWhiteSpace(sourcePath)
-            ? null
-            : IOPath.GetDirectoryName(IOPath.GetFullPath(sourcePath));
+        var sourceDirectory = TryGetSourceDirectory(sourcePath);
+        MarkdownDocument parsed;
+        try
+        {
+            parsed = Markdown.Parse(markdown, Pipeline);
+        }
+        catch
+        {
+            // Opening a document is more important than styling it. Markdig is
+            // deliberately isolated so even an unexpected parser failure is safe.
+            return RenderPlainText(markdown);
+        }
 
-        RenderBlocks(lines, document.Blocks, sourceDirectory);
-        return document;
+        try
+        {
+            RenderBlocks(parsed, document.Blocks, sourceDirectory);
+            return document;
+        }
+        catch
+        {
+            return RenderPlainText(markdown);
+        }
     }
 
     public FlowDocument RenderPlainText(string text)
@@ -57,11 +70,9 @@ public sealed class MarkdownDocumentRenderer
         ArgumentNullException.ThrowIfNull(text);
 
         var document = CreateDocument();
-        var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n')
-            .Split('\n');
-        foreach (var line in lines)
-            document.Blocks.Add(new Paragraph(new Run(line)) { Margin = new Thickness(0, 0, 0, 8) });
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        foreach (var line in normalized.Split('\n'))
+            document.Blocks.Add(new Paragraph(new Run(line)) { Margin = new Thickness(0, 0, 0, 4) });
         return document;
     }
 
@@ -75,363 +86,350 @@ public sealed class MarkdownDocumentRenderer
         ColumnWidth = 10000
     };
 
-    private static void RenderBlocks(IReadOnlyList<string> lines, BlockCollection blocks, string? sourceDirectory)
+    private static Brush FrozenBrush(byte red, byte green, byte blue)
     {
-        for (var index = 0; index < lines.Count;)
+        var brush = new SolidColorBrush(Color.FromRgb(red, green, blue));
+        brush.Freeze();
+        return brush;
+    }
+
+    private static string? TryGetSourceDirectory(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return null;
+        try
         {
-            if (string.IsNullOrWhiteSpace(lines[index]))
-            {
-                index++;
-                continue;
-            }
-
-            var heading = HeadingPattern.Match(lines[index]);
-            if (heading.Success)
-            {
-                var level = heading.Groups["marks"].Length;
-                var paragraph = new Paragraph
-                {
-                    Margin = new Thickness(0, level == 1 ? 14 : 9, 0, level == 1 ? 10 : 6),
-                    FontSize = Math.Max(16, 30 - (level * 2)),
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = HeadingBrush
-                };
-                AddInline(paragraph.Inlines, heading.Groups["text"].Value, sourceDirectory);
-                blocks.Add(paragraph);
-                index++;
-                continue;
-            }
-
-            var fence = FencePattern.Match(lines[index]);
-            if (fence.Success)
-            {
-                var fenceCharacter = fence.Groups["fence"].Value[0];
-                var language = fence.Groups["language"].Value;
-                var code = new List<string>();
-                index++;
-                while (index < lines.Count && !IsClosingFence(lines[index], fenceCharacter))
-                    code.Add(lines[index++]);
-                if (index < lines.Count)
-                    index++;
-
-                if (language.Equals("mermaid", StringComparison.OrdinalIgnoreCase))
-                    AddMermaidDiagram(blocks, code);
-                else
-                    AddCodeBlock(blocks, string.Join(Environment.NewLine, code), language);
-                continue;
-            }
-
-            if (IsThematicBreak(lines[index]))
-            {
-                blocks.Add(new Paragraph(new Run("────────────────────────────────────────"))
-                {
-                    Foreground = MutedBrush,
-                    Margin = new Thickness(0, 8, 0, 8)
-                });
-                index++;
-                continue;
-            }
-
-            if (IsTableStart(lines, index))
-            {
-                index = AddTable(blocks, lines, index, sourceDirectory);
-                continue;
-            }
-
-            if (IsQuoteLine(lines[index]))
-            {
-                var quote = new Paragraph
-                {
-                    Margin = new Thickness(18, 2, 0, 8),
-                    Padding = new Thickness(12, 2, 0, 2),
-                    BorderBrush = HeadingBrush,
-                    BorderThickness = new Thickness(2, 0, 0, 0),
-                    Foreground = MutedBrush
-                };
-                while (index < lines.Count && IsQuoteLine(lines[index]))
-                {
-                    if (quote.Inlines.Count > 0)
-                        quote.Inlines.Add(new LineBreak());
-                    AddInline(quote.Inlines, RemoveQuotePrefix(lines[index++]), sourceDirectory);
-                }
-                blocks.Add(quote);
-                continue;
-            }
-
-            var listMatch = ListPattern.Match(lines[index]);
-            if (listMatch.Success)
-            {
-                index = AddList(blocks, lines, index, sourceDirectory, listMatch);
-                continue;
-            }
-
-            var paragraphLines = new List<string>();
-            while (index < lines.Count &&
-                   !string.IsNullOrWhiteSpace(lines[index]) &&
-                   !IsBlockStart(lines, index))
-            {
-                paragraphLines.Add(lines[index++].Trim());
-            }
-
-            if (paragraphLines.Count > 0)
-            {
-                var paragraph = new Paragraph { Margin = new Thickness(0, 0, 0, 9) };
-                for (var lineIndex = 0; lineIndex < paragraphLines.Count; lineIndex++)
-                {
-                    if (lineIndex > 0)
-                        paragraph.Inlines.Add(new Run(" "));
-                    AddInline(paragraph.Inlines, paragraphLines[lineIndex], sourceDirectory);
-                }
-                blocks.Add(paragraph);
-            }
-            else
-            {
-                index++;
-            }
+            return IOPath.GetDirectoryName(IOPath.GetFullPath(sourcePath));
+        }
+        catch (Exception) when (sourcePath is not null)
+        {
+            return null;
         }
     }
 
-    private static bool IsBlockStart(IReadOnlyList<string> lines, int index)
+    private static void RenderBlocks(ContainerBlock container, BlockCollection blocks, string? sourceDirectory)
     {
-        return HeadingPattern.IsMatch(lines[index]) ||
-               FencePattern.IsMatch(lines[index]) ||
-               IsThematicBreak(lines[index]) ||
-               IsQuoteLine(lines[index]) ||
-               ListPattern.IsMatch(lines[index]) ||
-               IsTableStart(lines, index);
+        foreach (var block in container)
+            RenderBlock(block, blocks, sourceDirectory);
     }
 
-    private static bool IsClosingFence(string line, char fenceCharacter) =>
-        line.TrimStart().StartsWith(new string(fenceCharacter, 3), StringComparison.Ordinal);
-
-    private static bool IsThematicBreak(string line)
+    private static void RenderBlock(Markdig.Syntax.Block block, BlockCollection blocks, string? sourceDirectory)
     {
-        var trimmed = line.Trim();
-        if (trimmed.Length < 3)
-            return false;
-        return trimmed.All(character => character is '-' or '*' or '_') &&
-               trimmed.Count(character => character != ' ') >= 3;
-    }
-
-    private static bool IsQuoteLine(string line) => line.TrimStart().StartsWith('>');
-
-    private static string RemoveQuotePrefix(string line)
-    {
-        var trimmed = line.TrimStart();
-        return trimmed.Length > 1 ? trimmed[1..].TrimStart() : string.Empty;
-    }
-
-    private static int AddList(BlockCollection blocks, IReadOnlyList<string> lines, int index,
-        string? sourceDirectory, Match firstMatch)
-    {
-        var ordered = char.IsDigit(firstMatch.Groups["marker"].Value[0]);
-        var list = new System.Windows.Documents.List
+        switch (block)
         {
-            MarkerStyle = ordered ? TextMarkerStyle.Decimal : TextMarkerStyle.Disc,
+            case HeadingBlock heading:
+                AddHeading(blocks, heading, sourceDirectory);
+                break;
+            case ParagraphBlock paragraph:
+                blocks.Add(CreateParagraph(paragraph.Inline, sourceDirectory));
+                break;
+            case QuoteBlock quote:
+                AddQuote(blocks, quote, sourceDirectory);
+                break;
+            case MarkdownListBlock list:
+                AddList(blocks, list, sourceDirectory);
+                break;
+            case FencedCodeBlock fenced:
+                AddCodeOrMermaid(blocks, fenced.Lines.ToString(), fenced.Info?.ToString() ?? string.Empty);
+                break;
+            case CodeBlock code:
+                AddCodeBlock(blocks, code.Lines.ToString(), string.Empty);
+                break;
+            case MarkdownTable table:
+                AddTable(blocks, table, sourceDirectory);
+                break;
+            case ThematicBreakBlock:
+                blocks.Add(new Paragraph
+                {
+                    BorderBrush = MutedBrush,
+                    BorderThickness = new Thickness(0, 0, 0, 1),
+                    Margin = new Thickness(0, 8, 0, 12),
+                    Padding = new Thickness(0, 2, 0, 2)
+                });
+                break;
+            case ContainerBlock nested:
+                RenderBlocks(nested, blocks, sourceDirectory);
+                break;
+            case LeafBlock leaf:
+                AddLeafFallback(blocks, leaf);
+                break;
+        }
+    }
+
+    private static void AddHeading(BlockCollection blocks, HeadingBlock heading, string? sourceDirectory)
+    {
+        var paragraph = CreateParagraph(heading.Inline, sourceDirectory);
+        paragraph.Margin = new Thickness(0, heading.Level == 1 ? 14 : 9, 0, heading.Level == 1 ? 10 : 6);
+        paragraph.FontSize = Math.Max(16, 30 - heading.Level * 2);
+        paragraph.FontWeight = FontWeights.SemiBold;
+        paragraph.Foreground = HeadingBrush;
+        blocks.Add(paragraph);
+    }
+
+    private static Paragraph CreateParagraph(ContainerInline? inline, string? sourceDirectory)
+    {
+        var paragraph = new Paragraph { Margin = new Thickness(0, 0, 0, 9) };
+        AddInlines(paragraph.Inlines, inline, sourceDirectory);
+        return paragraph;
+    }
+
+    private static void AddQuote(BlockCollection blocks, QuoteBlock quote, string? sourceDirectory)
+    {
+        var section = new Section
+        {
+            Margin = new Thickness(18, 2, 0, 8),
+            Padding = new Thickness(12, 2, 0, 2),
+            BorderBrush = HeadingBrush,
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            Foreground = MutedBrush
+        };
+        RenderBlocks(quote, section.Blocks, sourceDirectory);
+        blocks.Add(section);
+    }
+
+    private static void AddList(BlockCollection blocks, MarkdownListBlock source, string? sourceDirectory)
+    {
+        var list = new WpfList
+        {
+            MarkerStyle = source.IsOrdered ? TextMarkerStyle.Decimal : TextMarkerStyle.Disc,
+            StartIndex = source.IsOrdered && int.TryParse(source.OrderedStart, out var start) ? start : 1,
             Margin = new Thickness(12, 0, 0, 9),
             Padding = new Thickness(12, 0, 0, 0)
         };
-        var baseIndent = firstMatch.Groups["indent"].Value.Length;
 
-        while (index < lines.Count)
+        foreach (var child in source)
         {
-            var match = ListPattern.Match(lines[index]);
-            if (!match.Success || match.Groups["indent"].Value.Length != baseIndent ||
-                char.IsDigit(match.Groups["marker"].Value[0]) != ordered)
-                break;
-
-            var itemText = match.Groups["text"].Value;
-            var task = Regex.Match(itemText, @"^\[(?<mark>[ xX])\]\s+(?<text>.*)$");
-            if (task.Success)
-                itemText = $"{(task.Groups["mark"].Value.Equals("x", StringComparison.OrdinalIgnoreCase) ? "☑" : "☐")} {task.Groups["text"].Value}";
-
+            if (child is not ListItemBlock sourceItem)
+                continue;
             var item = new ListItem();
-            var paragraph = new Paragraph { Margin = new Thickness(0, 0, 0, 3) };
-            AddInline(paragraph.Inlines, itemText, sourceDirectory);
-            item.Blocks.Add(paragraph);
+            RenderBlocks(sourceItem, item.Blocks, sourceDirectory);
+            if (item.Blocks.Count == 0)
+                item.Blocks.Add(new Paragraph());
             list.ListItems.Add(item);
-            index++;
-
-            while (index < lines.Count &&
-                   !string.IsNullOrWhiteSpace(lines[index]) &&
-                   lines[index].Length > baseIndent &&
-                   !ListPattern.IsMatch(lines[index]) &&
-                   !IsBlockStart(lines, index))
-            {
-                var continuation = new Paragraph { Margin = new Thickness(0, 0, 0, 3) };
-                AddInline(continuation.Inlines, lines[index++].Trim(), sourceDirectory);
-                item.Blocks.Add(continuation);
-            }
         }
-
         blocks.Add(list);
-        return index;
     }
 
-    private static bool IsTableStart(IReadOnlyList<string> lines, int index) =>
-        index + 1 < lines.Count &&
-        lines[index].Contains('|', StringComparison.Ordinal) &&
-        TableSeparatorPattern.IsMatch(lines[index + 1]);
-
-    private static int AddTable(BlockCollection blocks, IReadOnlyList<string> lines, int index, string? sourceDirectory)
+    private static void AddCodeOrMermaid(BlockCollection blocks, string code, string language)
     {
-        var headers = SplitTableCells(lines[index++]);
-        var alignment = SplitTableCells(lines[index++]);
-        var rows = new List<IReadOnlyList<string>>();
-        while (index < lines.Count && !string.IsNullOrWhiteSpace(lines[index]) && lines[index].Contains('|', StringComparison.Ordinal))
-            rows.Add(SplitTableCells(lines[index++]));
+        var normalizedLanguage = language.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        if (normalizedLanguage.Equals("mermaid", StringComparison.OrdinalIgnoreCase))
+            AddMermaidDiagram(blocks, code);
+        else
+            AddCodeBlock(blocks, code, normalizedLanguage);
+    }
 
-        var columnCount = Math.Max(headers.Count, rows.Select(row => row.Count).DefaultIfEmpty(0).Max());
+    private static void AddCodeBlock(BlockCollection blocks, string code, string language)
+    {
+        var normalized = code.TrimEnd('\r', '\n');
+        var paragraph = new Paragraph
+        {
+            Background = CodeBackground,
+            FontFamily = new FontFamily("Consolas"),
+            Foreground = Brushes.White,
+            Padding = new Thickness(12),
+            Margin = new Thickness(0, 2, 0, 10)
+        };
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            paragraph.Inlines.Add(new Run(language) { Foreground = HeadingBrush, FontSize = 12 });
+            paragraph.Inlines.Add(new LineBreak());
+        }
+        paragraph.Inlines.Add(new Run(normalized));
+        blocks.Add(paragraph);
+    }
+
+    private static void AddTable(BlockCollection blocks, MarkdownTable source, string? sourceDirectory)
+    {
+        var rows = source.OfType<Markdig.Extensions.Tables.TableRow>().ToList();
+        var columnCount = rows.Select(row => row.Count).DefaultIfEmpty(0).Max();
         if (columnCount == 0)
-            return index;
+            return;
 
-        var table = new Table
+        var table = new WpfTable
         {
             CellSpacing = 0,
             Margin = new Thickness(0, 2, 0, 12),
             BorderBrush = TableBorderBrush,
             BorderThickness = new Thickness(1)
         };
-        for (var column = 0; column < columnCount; column++)
+        for (var index = 0; index < columnCount; index++)
             table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });
 
-        var headerGroup = new TableRowGroup();
-        headerGroup.Rows.Add(CreateTableRow(headers, columnCount, sourceDirectory, isHeader: true));
-        table.RowGroups.Add(headerGroup);
-        if (rows.Count > 0)
+        var rowGroup = new TableRowGroup();
+        foreach (var sourceRow in rows)
         {
-            var bodyGroup = new TableRowGroup();
-            foreach (var row in rows)
-                bodyGroup.Rows.Add(CreateTableRow(row, columnCount, sourceDirectory, isHeader: false));
-            table.RowGroups.Add(bodyGroup);
+            var row = new System.Windows.Documents.TableRow();
+            var isHeader = sourceRow.IsHeader;
+            foreach (var sourceCell in sourceRow.OfType<Markdig.Extensions.Tables.TableCell>())
+            {
+                var cell = new System.Windows.Documents.TableCell
+                {
+                    Padding = new Thickness(8, 5, 8, 5),
+                    BorderBrush = TableBorderBrush,
+                    BorderThickness = new Thickness(0.5),
+                    Background = isHeader ? TableHeaderBrush : Brushes.Transparent
+                };
+                RenderBlocks(sourceCell, cell.Blocks, sourceDirectory);
+                if (isHeader)
+                    foreach (var paragraph in cell.Blocks.OfType<Paragraph>())
+                        paragraph.FontWeight = FontWeights.Bold;
+                row.Cells.Add(cell);
+            }
+            while (row.Cells.Count < columnCount)
+                row.Cells.Add(new System.Windows.Documents.TableCell(new Paragraph()));
+            rowGroup.Rows.Add(row);
         }
-
+        table.RowGroups.Add(rowGroup);
         blocks.Add(table);
-        return index;
     }
 
-    private static TableRow CreateTableRow(IReadOnlyList<string> values, int columnCount, string? sourceDirectory,
-        bool isHeader)
+    private static void AddLeafFallback(BlockCollection blocks, LeafBlock leaf)
     {
-        var row = new TableRow();
-        for (var column = 0; column < columnCount; column++)
+        var fallback = leaf.Lines.ToString().TrimEnd('\r', '\n');
+        if (!string.IsNullOrWhiteSpace(fallback))
+            blocks.Add(new Paragraph(new Run(fallback)) { Margin = new Thickness(0, 0, 0, 9) });
+    }
+
+    private static void AddInlines(InlineCollection target, ContainerInline? source, string? sourceDirectory)
+    {
+        for (var inline = source?.FirstChild; inline is not null; inline = inline.NextSibling)
+            AddInline(target, inline, sourceDirectory);
+    }
+
+    private static void AddInline(InlineCollection target, Markdig.Syntax.Inlines.Inline inline, string? sourceDirectory)
+    {
+        switch (inline)
         {
-            var cell = new TableCell
-            {
-                Padding = new Thickness(8, 5, 8, 5),
-                BorderBrush = TableBorderBrush,
-                BorderThickness = new Thickness(0.5),
-                Background = isHeader ? TableHeaderBrush : Brushes.Transparent
-            };
-            var paragraph = new Paragraph { Margin = new Thickness(0) };
-            if (isHeader)
-            {
-                var bold = new Bold();
-                AddInline(bold.Inlines, column < values.Count ? values[column] : string.Empty, sourceDirectory);
-                paragraph.Inlines.Add(bold);
-            }
-            else
-            {
-                AddInline(paragraph.Inlines, column < values.Count ? values[column] : string.Empty, sourceDirectory);
-            }
-            cell.Blocks.Add(paragraph);
-            row.Cells.Add(cell);
+            case LiteralInline literal:
+                target.Add(new Run(literal.Content.ToString()));
+                break;
+            case CodeInline code:
+                target.Add(new Run(code.Content)
+                {
+                    FontFamily = new FontFamily("Consolas"),
+                    Background = CodeBackground,
+                    Foreground = Brushes.White
+                });
+                break;
+            case EmphasisInline emphasis:
+                var span = emphasis.DelimiterChar == '~'
+                    ? new Span { TextDecorations = TextDecorations.Strikethrough }
+                    : emphasis.DelimiterCount >= 2 ? new Bold() : new Italic();
+                AddInlines(span.Inlines, emphasis, sourceDirectory);
+                target.Add(span);
+                break;
+            case LinkInline link when link.IsImage:
+                AddImage(target, link, sourceDirectory);
+                break;
+            case LinkInline link:
+                var hyperlink = new Hyperlink { Foreground = HeadingBrush };
+                if (Uri.TryCreate(link.Url, UriKind.RelativeOrAbsolute, out var uri))
+                    hyperlink.NavigateUri = uri;
+                AddInlines(hyperlink.Inlines, link, sourceDirectory);
+                target.Add(hyperlink);
+                break;
+            case LineBreakInline lineBreak:
+                target.Add(lineBreak.IsHard ? new LineBreak() : new Run(" "));
+                break;
+            case AutolinkInline autoLink:
+                target.Add(new Run(autoLink.Url) { Foreground = HeadingBrush });
+                break;
+            case HtmlEntityInline entity:
+                target.Add(new Run(entity.Transcoded.ToString()));
+                break;
+            case ContainerInline container:
+                AddInlines(target, container, sourceDirectory);
+                break;
         }
-        return row;
     }
 
-    private static IReadOnlyList<string> SplitTableCells(string line)
+    private static void AddImage(InlineCollection target, LinkInline image, string? sourceDirectory)
     {
-        var trimmed = line.Trim();
-        if (trimmed.StartsWith('|'))
-            trimmed = trimmed[1..];
-        if (trimmed.EndsWith('|'))
-            trimmed = trimmed[..^1];
-
-        var cells = new List<string>();
-        var current = new StringBuilder();
-        var escaped = false;
-        var inCode = false;
-        foreach (var character in trimmed)
+        var alt = GetInlineText(image);
+        if (string.IsNullOrWhiteSpace(alt))
+            alt = "image";
+        var imagePath = ResolveImagePath(image.Url, sourceDirectory);
+        if (imagePath is not null)
         {
-            if (escaped)
+            try
             {
-                current.Append(character);
-                escaped = false;
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
+                bitmap.EndInit();
+                bitmap.Freeze();
+                target.Add(new InlineUIContainer(new Image
+                {
+                    Source = bitmap,
+                    MaxWidth = 720,
+                    MaxHeight = 480,
+                    Stretch = Stretch.Uniform,
+                    ToolTip = alt
+                }));
+                target.Add(new LineBreak());
             }
-            else if (character == '\\')
+            catch
             {
-                escaped = true;
-                current.Append(character);
-            }
-            else if (character == '`')
-            {
-                inCode = !inCode;
-                current.Append(character);
-            }
-            else if (character == '|' && !inCode)
-            {
-                cells.Add(current.ToString().Trim());
-                current.Clear();
-            }
-            else
-            {
-                current.Append(character);
+                // The caption below remains the readable fallback.
             }
         }
-        cells.Add(current.ToString().Trim());
-        return cells;
+        target.Add(new Run($"[Image: {alt}]") { Foreground = MutedBrush });
     }
 
-    private static void AddCodeBlock(BlockCollection blocks, string code, string language)
+    private static string GetInlineText(ContainerInline container)
     {
-        var panel = new StackPanel();
-        if (!string.IsNullOrWhiteSpace(language))
+        var parts = new List<string>();
+        for (var child = container.FirstChild; child is not null; child = child.NextSibling)
         {
-            panel.Children.Add(new TextBlock
+            switch (child)
             {
-                Text = language,
-                Foreground = HeadingBrush,
-                FontSize = 12,
-                Margin = new Thickness(0, 0, 0, 4)
-            });
+                case LiteralInline literal:
+                    parts.Add(literal.Content.ToString());
+                    break;
+                case CodeInline code:
+                    parts.Add(code.Content);
+                    break;
+                case ContainerInline nested:
+                    parts.Add(GetInlineText(nested));
+                    break;
+            }
         }
-        panel.Children.Add(new TextBlock
-        {
-            Text = code,
-            Foreground = Brushes.White,
-            FontFamily = new FontFamily("Consolas"),
-            TextWrapping = TextWrapping.NoWrap
-        });
-
-        blocks.Add(new BlockUIContainer(new Border
-        {
-            Background = CodeBackground,
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(12),
-            Margin = new Thickness(0, 2, 0, 10),
-            Child = panel
-        }));
-        blocks.Add(new Paragraph(new Run(code))
-        {
-            Foreground = Brushes.Transparent,
-            FontSize = 1,
-            Margin = new Thickness(0, -1, 0, -1)
-        });
+        return string.Concat(parts);
     }
 
-    private static void AddMermaidDiagram(BlockCollection blocks, IReadOnlyList<string> sourceLines)
+    private static string? ResolveImagePath(string? target, string? sourceDirectory)
     {
-        var source = string.Join(Environment.NewLine, sourceLines);
-        var diagram = MermaidDiagram.TryCreate(source);
+        if (string.IsNullOrWhiteSpace(target))
+            return null;
+        try
+        {
+            if (Uri.TryCreate(target, UriKind.Absolute, out var uri))
+                return uri.IsFile && File.Exists(uri.LocalPath) ? uri.LocalPath : null;
+            if (string.IsNullOrWhiteSpace(sourceDirectory))
+                return null;
+            var decoded = Uri.UnescapeDataString(target).Replace('/', IOPath.DirectorySeparatorChar);
+            var path = IOPath.GetFullPath(IOPath.Combine(sourceDirectory, decoded));
+            return File.Exists(path) ? path : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void AddMermaidDiagram(BlockCollection blocks, string source)
+    {
+        var normalized = source.TrimEnd('\r', '\n');
+        var diagram = MermaidDiagram.TryCreate(normalized);
         if (diagram is null)
         {
-            AddCodeBlock(blocks, source, "mermaid");
+            AddCodeBlock(blocks, normalized, "mermaid");
             return;
         }
 
-        var description = diagram.Description;
-        blocks.Add(new Paragraph(new Run($"Diagram: {description}"))
+        blocks.Add(new Paragraph(new Run($"Diagram: {diagram.Description}"))
         {
             Foreground = MutedBrush,
             FontStyle = FontStyles.Italic,
@@ -440,169 +438,15 @@ public sealed class MarkdownDocumentRenderer
         blocks.Add(new BlockUIContainer(diagram.CreateVisual()));
     }
 
-    private static void AddInline(InlineCollection inlines, string text, string? sourceDirectory)
-    {
-        for (var index = 0; index < text.Length;)
-        {
-            if (text[index] == '\\' && index + 1 < text.Length && IsMarkdownPunctuation(text[index + 1]))
-            {
-                inlines.Add(new Run(text[index + 1].ToString()));
-                index += 2;
-                continue;
-            }
-
-            if (TryAddImage(inlines, text, ref index, sourceDirectory) ||
-                TryAddLink(inlines, text, ref index) ||
-                TryAddDelimited(inlines, text, ref index, "**", isBold: true) ||
-                TryAddDelimited(inlines, text, ref index, "__", isBold: true) ||
-                TryAddDelimited(inlines, text, ref index, "~~", isStrike: true) ||
-                TryAddDelimited(inlines, text, ref index, "`", isCode: true) ||
-                TryAddDelimited(inlines, text, ref index, "*", isItalic: true) ||
-                TryAddDelimited(inlines, text, ref index, "_", isItalic: true))
-                continue;
-
-            var start = index++;
-            while (index < text.Length && text[index] != '\\' &&
-                   !"![]`*_~".Contains(text[index], StringComparison.Ordinal))
-                index++;
-            if (start == index)
-            {
-                inlines.Add(new Run(text[index].ToString()));
-                index++;
-            }
-            else
-            {
-                inlines.Add(new Run(text[start..index]));
-            }
-        }
-    }
-
-    private static bool TryAddDelimited(InlineCollection inlines, string text, ref int index, string delimiter,
-        bool isBold = false, bool isItalic = false, bool isStrike = false, bool isCode = false)
-    {
-        if (!text.AsSpan(index).StartsWith(delimiter, StringComparison.Ordinal))
-            return false;
-        var end = text.IndexOf(delimiter, index + delimiter.Length, StringComparison.Ordinal);
-        if (end <= index + delimiter.Length)
-            return false;
-
-        var value = text.Substring(index + delimiter.Length, end - index - delimiter.Length);
-        Inline inline;
-        if (isCode)
-        {
-            inline = new Run(value)
-            {
-                FontFamily = new FontFamily("Consolas"),
-                Background = CodeBackground,
-                Foreground = Brushes.White
-            };
-        }
-        else
-        {
-            var span = isBold ? new Bold() : isItalic ? new Italic() : new Span();
-            if (isStrike)
-                span.TextDecorations = TextDecorations.Strikethrough;
-            AddInline(span.Inlines, value, null);
-            inline = span;
-        }
-
-        inlines.Add(inline);
-        index = end + delimiter.Length;
-        return true;
-    }
-
-    private static bool TryAddLink(InlineCollection inlines, string text, ref int index)
-    {
-        if (text[index] != '[' || index > 0 && text[index - 1] == '!')
-            return false;
-        var labelEnd = text.IndexOf(']', index + 1);
-        if (labelEnd < 0 || labelEnd + 1 >= text.Length || text[labelEnd + 1] != '(')
-            return false;
-        var targetEnd = text.IndexOf(')', labelEnd + 2);
-        if (targetEnd < 0)
-            return false;
-
-        var label = text.Substring(index + 1, labelEnd - index - 1);
-        var target = text.Substring(labelEnd + 2, targetEnd - labelEnd - 2).Trim();
-        var titleSeparator = target.IndexOfAny([' ', '\t']);
-        if (titleSeparator >= 0)
-            target = target[..titleSeparator];
-        var hyperlink = new Hyperlink { Foreground = HeadingBrush };
-        if (Uri.TryCreate(target, UriKind.RelativeOrAbsolute, out var uri))
-            hyperlink.NavigateUri = uri;
-        AddInline(hyperlink.Inlines, label, null);
-        inlines.Add(hyperlink);
-        index = targetEnd + 1;
-        return true;
-    }
-
-    private static bool TryAddImage(InlineCollection inlines, string text, ref int index, string? sourceDirectory)
-    {
-        if (!text.AsSpan(index).StartsWith("![", StringComparison.Ordinal))
-            return false;
-        var altEnd = text.IndexOf(']', index + 2);
-        if (altEnd < 0 || altEnd + 1 >= text.Length || text[altEnd + 1] != '(')
-            return false;
-        var targetEnd = text.IndexOf(')', altEnd + 2);
-        if (targetEnd < 0)
-            return false;
-
-        var alt = text.Substring(index + 2, altEnd - index - 2);
-        var target = text.Substring(altEnd + 2, targetEnd - altEnd - 2).Trim();
-        var titleSeparator = target.IndexOfAny([' ', '\t']);
-        if (titleSeparator >= 0)
-            target = target[..titleSeparator];
-
-        var imagePath = ResolveImagePath(target, sourceDirectory);
-        if (imagePath is not null)
-        {
-            try
-            {
-                var imageSource = new BitmapImage();
-                imageSource.BeginInit();
-                imageSource.CacheOption = BitmapCacheOption.OnLoad;
-                imageSource.UriSource = new Uri(imagePath, UriKind.Absolute);
-                imageSource.EndInit();
-                imageSource.Freeze();
-                inlines.Add(new InlineUIContainer(new Image
-                {
-                    Source = imageSource,
-                    MaxWidth = 720,
-                    MaxHeight = 480,
-                    Stretch = Stretch.Uniform,
-                    ToolTip = alt
-                }));
-            }
-            catch (Exception) when (imagePath is not null)
-            {
-                inlines.Add(new Run($"[Image: {alt}]") { Foreground = MutedBrush });
-            }
-        }
-        else
-        {
-            inlines.Add(new Run($"[Image: {alt}]") { Foreground = MutedBrush });
-        }
-
-        index = targetEnd + 1;
-        return true;
-    }
-
-    private static string? ResolveImagePath(string target, string? sourceDirectory)
-    {
-        if (Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.IsFile)
-            return uri.LocalPath;
-        if (Uri.TryCreate(target, UriKind.Absolute, out uri) && uri.Scheme is "http" or "https")
-            return null;
-        if (string.IsNullOrWhiteSpace(sourceDirectory) || string.IsNullOrWhiteSpace(target))
-            return null;
-        var path = IOPath.GetFullPath(IOPath.Combine(sourceDirectory, target.Replace('/', IOPath.DirectorySeparatorChar)));
-        return File.Exists(path) ? path : null;
-    }
-
-    private static bool IsMarkdownPunctuation(char character) => "\\`*_{}[]<>()#+-.!|~".Contains(character, StringComparison.Ordinal);
-
     private sealed class MermaidDiagram
     {
+        private static readonly System.Text.RegularExpressions.Regex EdgePattern = new(
+            @"^(?<left>[A-Za-z0-9_]+(?:\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\}))?)\s*(?:-->|-.->|==>|---?)\s*(?:\|(?<label>[^|]+)\|\s*)?(?<right>[A-Za-z0-9_]+(?:\s*(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\}))?)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        private static readonly System.Text.RegularExpressions.Regex NodePattern = new(
+            @"^(?<id>[A-Za-z0-9_]+)\s*(?<shape>\[\[[^\]]*\]\]|\[\([^]]*\)\]|\[\{[^}]*\}\]|\(\([^)]*\)\)|\[[^\]]*\]|\([^)]*\)|\{[^}]*\})?",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
         private readonly List<Node> _nodes;
         private readonly List<Edge> _edges;
         private readonly bool _horizontal;
@@ -619,10 +463,11 @@ public sealed class MarkdownDocumentRenderer
         public static MermaidDiagram? TryCreate(string source)
         {
             var lines = source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
-                .Select(line => line.Trim())
+                .Select(line => line.Trim().TrimEnd(';'))
                 .Where(line => line.Length > 0 && !line.StartsWith("%%", StringComparison.Ordinal))
                 .ToList();
-            if (lines.Count == 0 || !lines[0].StartsWith("graph ", StringComparison.OrdinalIgnoreCase) &&
+            if (lines.Count == 0 ||
+                !lines[0].StartsWith("graph ", StringComparison.OrdinalIgnoreCase) &&
                 !lines[0].StartsWith("flowchart ", StringComparison.OrdinalIgnoreCase))
                 return null;
 
@@ -631,20 +476,16 @@ public sealed class MarkdownDocumentRenderer
             var nodes = new List<Node>();
             var nodeById = new Dictionary<string, Node>(StringComparer.OrdinalIgnoreCase);
             var edges = new List<Edge>();
-
-            foreach (var line in lines.Skip(1))
+            foreach (var statement in lines.Skip(1).SelectMany(line => line.Split(';', StringSplitOptions.RemoveEmptyEntries)))
             {
-                var edgeMatch = MermaidEdgePattern.Match(line);
-                if (!edgeMatch.Success)
+                var match = EdgePattern.Match(statement.Trim());
+                if (!match.Success)
                     continue;
-                var left = GetOrAddNode(edgeMatch.Groups["left"].Value, nodes, nodeById);
-                var right = GetOrAddNode(edgeMatch.Groups["right"].Value, nodes, nodeById);
-                edges.Add(new Edge(left, right, edgeMatch.Groups["label"].Value.Trim()));
+                var left = GetOrAddNode(match.Groups["left"].Value, nodes, nodeById);
+                var right = GetOrAddNode(match.Groups["right"].Value, nodes, nodeById);
+                edges.Add(new Edge(left, right, match.Groups["label"].Value.Trim()));
             }
-
-            if (nodes.Count < 2 || edges.Count == 0)
-                return null;
-            return new MermaidDiagram(nodes, edges, horizontal);
+            return nodes.Count >= 2 && edges.Count > 0 ? new MermaidDiagram(nodes, edges, horizontal) : null;
         }
 
         public UIElement CreateVisual()
@@ -656,23 +497,19 @@ public sealed class MarkdownDocumentRenderer
             {
                 Width = _horizontal ? _nodes.Count * (nodeWidth + gap) : 260,
                 Height = _horizontal ? nodeHeight + 84 : _nodes.Count * (nodeHeight + gap),
-                Background = DiagramBackground,
-                Margin = new Thickness(0)
+                Background = DiagramBackground
             };
             var positions = new Dictionary<Node, Point>();
             for (var index = 0; index < _nodes.Count; index++)
-            {
-                var point = _horizontal
+                positions[_nodes[index]] = _horizontal
                     ? new Point(20 + index * (nodeWidth + gap), 15)
                     : new Point(50, 15 + index * (nodeHeight + gap));
-                positions[_nodes[index]] = point;
-            }
 
             foreach (var edge in _edges)
             {
                 var from = positions[edge.From];
                 var to = positions[edge.To];
-                var line = new Line
+                canvas.Children.Add(new Line
                 {
                     X1 = from.X + (_horizontal ? nodeWidth : nodeWidth / 2),
                     Y1 = from.Y + (_horizontal ? nodeHeight / 2 : nodeHeight),
@@ -680,8 +517,7 @@ public sealed class MarkdownDocumentRenderer
                     Y2 = to.Y + (_horizontal ? nodeHeight / 2 : 0),
                     Stroke = DiagramLineBrush,
                     StrokeThickness = 2
-                };
-                canvas.Children.Add(line);
+                });
                 if (!string.IsNullOrWhiteSpace(edge.Label))
                 {
                     var label = new TextBlock { Text = edge.Label, Foreground = Brushes.White, FontSize = 12 };
@@ -701,7 +537,7 @@ public sealed class MarkdownDocumentRenderer
                     Background = DiagramNodeBrush,
                     BorderBrush = DiagramLineBrush,
                     BorderThickness = new Thickness(1),
-                    CornerRadius = node.Shape == NodeShape.Decision ? new CornerRadius(0) : new CornerRadius(7),
+                    CornerRadius = node.IsDecision ? new CornerRadius(0) : new CornerRadius(7),
                     Child = new TextBlock
                     {
                         Text = node.Label,
@@ -729,21 +565,19 @@ public sealed class MarkdownDocumentRenderer
 
         private static Node GetOrAddNode(string expression, List<Node> nodes, Dictionary<string, Node> nodeById)
         {
-            var match = MermaidNodePattern.Match(expression.Trim());
+            var match = NodePattern.Match(expression.Trim());
             var id = match.Success ? match.Groups["id"].Value : expression.Trim();
             if (nodeById.TryGetValue(id, out var existing))
                 return existing;
-
             var shape = match.Groups["shape"].Value;
-            var label = shape.Length > 0 ? shape[1..^1].Trim('[', '(', ')', '{', '}') : id;
-            var node = new Node(id, label, shape.Contains('{', StringComparison.Ordinal) ? NodeShape.Decision : NodeShape.Rectangle);
+            var label = shape.Length > 0 ? shape[1..^1].Trim('[', '(', ')', '{', '}', '"') : id;
+            var node = new Node(id, label, shape.Contains('{', StringComparison.Ordinal));
             nodeById.Add(id, node);
             nodes.Add(node);
             return node;
         }
 
-        private sealed record Node(string Id, string Label, NodeShape Shape);
+        private sealed record Node(string Id, string Label, bool IsDecision);
         private sealed record Edge(Node From, Node To, string Label);
-        private enum NodeShape { Rectangle, Decision }
     }
 }
