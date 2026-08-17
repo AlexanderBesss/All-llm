@@ -5,7 +5,7 @@ import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { openStateDatabase } from "../db.js";
 import { abortError } from "../git.js";
-import { RUN_STATUSES, STAGES, RunAction, ArtifactKind } from "../types.js";
+import { RUN_STATUSES, STAGES, RunAction, ArtifactKind, EventType, StageRunStatus } from "../types.js";
 import { AgentProvider } from "../model/config.js";
 import { executionFor, fixture, makeWorker, planFor } from "./support.js";
 import { implementationModel, pullRequestDescription } from "../worker.js";
@@ -80,6 +80,235 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   const run = fixtureData.db.getRun(result.runId);
   assert.equal(run.stage, STAGES.REVIEW);
   assert.equal(run.status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("cancels a newly claimed Done issue before implementation side effects", async () => {
+  const fixtureData = await fixture();
+  const discovered = await fixtureData.jira.getIssue("FACT-1");
+  discovered.fields.status = { name: "Ready" };
+  const authoritative = await fixtureData.jira.getIssue("FACT-1");
+  authoritative.fields.status = { name: "Done" };
+  fixtureData.jira.issues.set("FACT-1", authoritative);
+
+  let discoveryCalls = 0;
+  let agentCalls = 0;
+  let worktreeCalls = 0;
+  let descriptionUpdates = 0;
+  const logs: string[] = [];
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      return { result: executionFor(), raw: {} };
+    },
+  }, { logs });
+  worker.jira.searchReady = async () => discoveryCalls++ === 0 ? [discovered] : [];
+  worker.git.prepareWorktree = async () => {
+    worktreeCalls += 1;
+    return "unused";
+  };
+  worker.jira.updateDescription = async () => {
+    descriptionUpdates += 1;
+  };
+
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+
+  assert.equal(result.action, RunAction.Cancelled);
+  assert.match(result.reason, /FACT-1/);
+  assert.match(result.reason, /Done/);
+  assert.equal(run.status, RUN_STATUSES.CANCELLED);
+  assert.equal(run.lease_owner, null);
+  assert.equal(run.lease_until, null);
+  assert.equal(run.next_attempt_at, null);
+  assert.match(run.last_error, /FACT-1/);
+  assert.match(run.last_error, /Done/);
+  assert.equal(agentCalls, 0);
+  assert.equal(worktreeCalls, 0);
+  assert.equal(descriptionUpdates, 0);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.deepEqual(fixtureData.jira.transitions, []);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.status?.name, "Done");
+  assert.ok(logs.some((entry) => entry.includes("run:cancelled-done-jira") && entry.includes('"cancellationReason":"jira_issue_done"')));
+
+  const event = fixtureData.db.db.prepare(
+    "SELECT event_type, payload_json FROM events WHERE run_id = ? AND event_type = ?",
+  ).get(run.id, EventType.RunCancelled) as { event_type: string; payload_json: string };
+  assert.equal(event.event_type, EventType.RunCancelled);
+  assert.deepEqual(JSON.parse(event.payload_json), {
+    reason: "jira_issue_done",
+    issueKey: "FACT-1",
+    message: run.last_error,
+    doneStatus: "Done",
+    observedStatus: "Done",
+  });
+
+  const nextPoll = await worker.runOnce();
+  assert.equal(nextPoll.action, RunAction.Idle);
+  assert.equal(fixtureData.db.listRuns(10).length, 1);
+  fixtureData.db.close();
+});
+
+test("cancels a persisted blocked continuation before transitioning Jira to In Progress", async () => {
+  const fixtureData = await fixture({ continueFailedTasks: true });
+  const claimed = fixtureData.db.claimRun({
+    id: "FACT-1-done-continuation",
+    issueKey: "FACT-1",
+    projectKey: "FACT",
+    issue: await fixtureData.jira.getIssue("FACT-1"),
+    stage: STAGES.IMPLEMENTATION,
+    leaseOwner: "dead-worker",
+    leaseUntil: "2000-01-01T00:00:00.000Z",
+  });
+  const attempt = fixtureData.db.startStage(claimed.run.id, STAGES.IMPLEMENTATION);
+  fixtureData.db.finishStage(
+    claimed.run.id,
+    STAGES.IMPLEMENTATION,
+    attempt,
+    null,
+    StageRunStatus.Failed,
+    "previous implementation failure",
+  );
+  fixtureData.db.updateRun(claimed.run.id, {
+    stage: STAGES.BLOCKED,
+    status: RUN_STATUSES.BLOCKED,
+    continuations: 0,
+    next_attempt_at: new Date(Date.now() + 60_000).toISOString(),
+    lease_owner: "dead-worker",
+    lease_until: "2000-01-01T00:00:00.000Z",
+  });
+  const doneIssue = await fixtureData.jira.getIssue("FACT-1");
+  doneIssue.fields.status = { name: "Done" };
+  fixtureData.jira.issues.set("FACT-1", doneIssue);
+
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(claimed.run.id);
+
+  assert.equal(result.action, RunAction.Cancelled);
+  assert.equal(run.status, RUN_STATUSES.CANCELLED);
+  assert.equal(run.lease_owner, null);
+  assert.equal(run.lease_until, null);
+  assert.equal(run.next_attempt_at, null);
+  assert.equal(agentCalls, 0);
+  assert.deepEqual(fixtureData.jira.transitions, []);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.status?.name, "Done");
+  fixtureData.db.close();
+});
+
+test("cancels before pull-request work when Jira becomes Done after implementation", async () => {
+  const fixtureData = await fixture();
+  let agentCalls = 0;
+  const logs: string[] = [];
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      const issue = await fixtureData.jira.getIssue("FACT-1");
+      issue.fields.status = { name: "Done" };
+      fixtureData.jira.issues.set("FACT-1", issue);
+      return { result: executionFor(), raw: {} };
+    },
+  }, { logs });
+
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+
+  assert.equal(result.action, RunAction.Cancelled);
+  assert.equal(agentCalls, 1);
+  assert.equal(run.status, RUN_STATUSES.CANCELLED);
+  assert.equal(fixtureData.db.countStageAttempts(run.id, STAGES.PULL_REQUEST), 0);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.deepEqual(fixtureData.jira.transitions.map((item) => item.statusName), ["In Progress"]);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.status?.name, "Done");
+  assert.ok(logs.some((entry) => entry.includes("run:cancelled-done-jira")));
+  fixtureData.db.close();
+});
+
+test("does not treat a Jira status-read failure as Done and resumes on the next poll", async () => {
+  const fixtureData = await fixture();
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      return { result: executionFor(), raw: {} };
+    },
+  });
+  const getIssue = worker.jira.getIssue.bind(worker.jira);
+  let failStatusRead = true;
+  worker.jira.getIssue = async (issueKey) => {
+    if (failStatusRead) throw new Error("Jira status read outage");
+    return getIssue(issueKey);
+  };
+
+  await assert.rejects(worker.runOnce(), /Jira status read outage/);
+  const failedReadRun = fixtureData.db.listRuns(10)[0];
+  assert.equal(failedReadRun.status, RUN_STATUSES.ACTIVE);
+  assert.notEqual(failedReadRun.status, RUN_STATUSES.CANCELLED);
+  assert.equal(agentCalls, 0);
+  assert.deepEqual(fixtureData.jira.transitions, []);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+
+  failStatusRead = false;
+  const result = await worker.runOnce();
+  assert.equal(result.action, RunAction.Resumed);
+  assert.equal(agentCalls, 1);
+  assert.equal(fixtureData.db.getRun(failedReadRun.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("keeps an unrelated Ready issue flowing when a batch cancels a Done claim", async () => {
+  const fixtureData = await fixture();
+  const doneDiscovery = await fixtureData.jira.getIssue("FACT-1");
+  doneDiscovery.fields.status = { name: "Ready" };
+  const doneIssue = await fixtureData.jira.getIssue("FACT-1");
+  doneIssue.fields.status = { name: "Done" };
+  fixtureData.jira.issues.set("FACT-1", doneIssue);
+  fixtureData.jira.issues.set("FACT-2", {
+    key: "FACT-2",
+    fields: {
+      summary: "Unrelated Ready task",
+      description: "Keep processing this issue.",
+      project: { key: "FACT" },
+      status: { name: "Ready" },
+      issuetype: { name: "Task" },
+      labels: [],
+    },
+  });
+  const readyIssue = await fixtureData.jira.getIssue("FACT-2");
+  let searchCalls = 0;
+  const startedIssues: string[] = [];
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      startedIssues.push(input.issue.key);
+      return { result: executionFor(), raw: {} };
+    },
+  });
+  worker.jira.searchReady = async () => {
+    searchCalls += 1;
+    return searchCalls <= 2 ? [doneDiscovery, readyIssue] : [];
+  };
+
+  const result = await worker.runBatch({ concurrency: 2 });
+  const runs = fixtureData.db.listRuns(10);
+
+  assert.equal(result.completed, 2);
+  assert.equal(result.failed, 0);
+  assert.deepEqual(startedIssues, ["FACT-2"]);
+  assert.equal(runs.length, 2);
+  assert.equal(runs.find((run) => run.issue_key === "FACT-1")?.status, RUN_STATUSES.CANCELLED);
+  assert.equal(runs.find((run) => run.issue_key === "FACT-2")?.status, RUN_STATUSES.AWAITING_REVIEW);
+  assert.deepEqual(fixtureData.jira.transitions.map((item) => `${item.key}:${item.statusName}`), [
+    "FACT-2:In Progress",
+    "FACT-2:In Review",
+  ]);
   fixtureData.db.close();
 });
 
