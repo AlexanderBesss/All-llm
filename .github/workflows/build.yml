@@ -27,7 +27,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore whisper-note/WhisperNote.csproj
+        run: dotnet restore whisper-note/tests/WhisperNote.Tests.csproj
 
       - name: Build
         run: dotnet build whisper-note/WhisperNote.csproj -c Release --no-restore
