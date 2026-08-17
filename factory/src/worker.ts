@@ -13,7 +13,7 @@ import type { FactoryRun } from "./model/database.js";
 import type { FactoryConfig } from "./model/config.js";
 import type { CodexAgent } from "./model/codex.js";
 import type { GitAdapterLike } from "./model/git.js";
-import type { GitHubAdapter } from "./model/github.js";
+import type { GitHubAdapter, PullRequest } from "./model/github.js";
 import type { JiraAdapter } from "./model/jira.js";
 import type { FactoryLogger, FactoryRunResult, FactoryWorkerOptions } from "./model/worker.js";
 import { due, isJiraIssueMissing, leaseOwnerProcessId, processIsAlive, resumableStage } from "./worker/state.js";
@@ -80,7 +80,9 @@ export class FactoryWorker {
   }
 
   runResult(action: string, run: FactoryRun | null, issueKey?: string): FactoryRunResult {
-    const effectiveAction = run?.status === RUN_STATUSES.CANCELLED
+    const effectiveAction = run?.status === RUN_STATUSES.COMPLETED
+      ? RunAction.Completed
+      : run?.status === RUN_STATUSES.CANCELLED
       ? RunAction.Cancelled
       : run?.status === RUN_STATUSES.RETRY_WAIT
         ? RunAction.RetryScheduled
@@ -135,6 +137,10 @@ export class FactoryWorker {
           stage: resumable.stage,
           status: resumable.status,
         });
+        if (!dryRun && resumable.pr_number && await this.closeResumableRunIfPullRequestMerged(resumable)) {
+          await beforeAdvance?.(true);
+          return this.runResult(RunAction.Completed, this.db.getRun(resumable.id), resumable.issue_key);
+        }
         const issue = await this.verifyResumableIssue(resumable);
         if (!issue) {
           await beforeAdvance?.(false);
@@ -425,6 +431,57 @@ export class FactoryWorker {
       await this.cancelRun(run, RunCancellationReason.JiraIssueMissing, message);
       return null;
     }
+  }
+
+  async completeMergedPullRequest(run: FactoryRun, pullRequest: PullRequest) {
+    this.log("info", "merge-check:merged", {
+      runId: run.id,
+      issueKey: run.issue_key,
+      prNumber: pullRequest.number,
+      prUrl: pullRequest.html_url,
+      mergedAt: pullRequest.mergedAt,
+    });
+    // The adapter reconciles an ambiguous mutation with one authoritative
+    // read, so the normal path does not pay for a redundant status lookup.
+    await this.transitionIfNeeded(run.issue_key, this.config.jira.statuses.done, { skipStatusCheck: true });
+    this.db.updateRun(run.id, {
+      status: RUN_STATUSES.COMPLETED,
+      stage: STAGES.REVIEW,
+      last_error: null,
+      lease_owner: null,
+      lease_until: null,
+      next_attempt_at: null,
+    });
+    this.log("info", "merge-check:task-closed", {
+      runId: run.id,
+      issueKey: run.issue_key,
+      prNumber: pullRequest.number,
+    });
+  }
+
+  async closeResumableRunIfPullRequestMerged(run: FactoryRun): Promise<boolean> {
+    if (!run.pr_number) return false;
+    const pullRequest = await this.github.getPullRequest(run.pr_number);
+    if (!pullRequest) {
+      this.log("warn", "run:resume-pr-not-found", {
+        runId: run.id,
+        issueKey: run.issue_key,
+        prNumber: run.pr_number,
+      });
+      return false;
+    }
+    if (pullRequest.number !== run.pr_number) {
+      this.log("warn", "run:resume-pr-mismatch", {
+        runId: run.id,
+        issueKey: run.issue_key,
+        expected: run.pr_number,
+        found: pullRequest.number,
+      });
+      return false;
+    }
+    if (!pullRequest.merged) return false;
+    await this.completeMergedPullRequest(run, pullRequest);
+    return true;
   }
 
   async verifyResumableIssue(run) {

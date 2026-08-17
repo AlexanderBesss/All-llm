@@ -56,34 +56,60 @@ public sealed class SettingsStore : ISettingsStore
         SpeechEngines.Piper => File.Exists(backend.ExecutablePath) &&
                                File.Exists(backend.ModelPath) &&
                                File.Exists(backend.ModelPath + ".json"),
+        SpeechEngines.Chatterbox or SpeechEngines.Qwen3Tts => IsLlmAvailable(backend),
         _ => false
     };
 
+    private static bool IsLlmAvailable(BackendDefinition backend)
+    {
+        if (string.IsNullOrWhiteSpace(backend.ExecutablePath) || !File.Exists(backend.ExecutablePath))
+            return false;
+        var model = backend.ModelPath?.Trim() ?? string.Empty;
+        if (model.Length == 0)
+            return false;
+        if (backend.Engine == SpeechEngines.Qwen3Tts && string.IsNullOrWhiteSpace(backend.VoiceName))
+            return false;
+        if (SpeechEngines.IsQwenVoiceClone(backend) &&
+            (string.IsNullOrWhiteSpace(backend.Instruct) || !File.Exists(backend.VoiceName)))
+            return false;
+        if (SpeechEngines.IsChatterboxReferenceRequired(backend) &&
+            (string.IsNullOrWhiteSpace(backend.VoiceName) || !File.Exists(backend.VoiceName)))
+            return false;
+        if (backend.Engine == SpeechEngines.Chatterbox &&
+            !string.IsNullOrWhiteSpace(backend.VoiceName) && !File.Exists(backend.VoiceName))
+            return false;
+        if (Directory.Exists(model) || File.Exists(model))
+            return true;
+        if (Path.IsPathRooted(model) || model.Contains('\\'))
+            return false;
+        return true;
+    }
+
     public static ReaderSettings CreateDefaults(string? dataDirectory = null)
     {
-        var root = Path.Combine(dataDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader"), "piper");
+        var baseDirectory = dataDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader");
         return new ReaderSettings
         {
             ActiveBackendId = "windows-default",
-            Backends = DefaultBackends(root)
+            Backends = DefaultBackends(baseDirectory)
         };
     }
 
     private ReaderSettings Upgrade(ReaderSettings loaded)
     {
         var defaults = CreateDefaults(_root);
-        var windows = loaded.Backends.FirstOrDefault(item => item.Id == "windows-default");
-        if (windows is not null)
+        foreach (var backend in defaults.Backends)
         {
-            defaults.Backends[0].VoiceName = windows.VoiceName;
-        }
-
-        var piper = loaded.Backends.FirstOrDefault(item => item.Id == "piper-local");
-        if (piper is not null)
-        {
-            defaults.Backends[1].ExecutablePath = piper.ExecutablePath;
-            defaults.Backends[1].ModelPath = piper.ModelPath;
+            var previous = loaded.Backends.FirstOrDefault(item => item.Id == backend.Id);
+            if (previous is null)
+                continue;
+            backend.VoiceName = previous.VoiceName ?? backend.VoiceName;
+            backend.ExecutablePath = previous.ExecutablePath ?? backend.ExecutablePath;
+            backend.ModelPath = previous.ModelPath ?? backend.ModelPath;
+            backend.Variant = previous.Variant ?? backend.Variant;
+            backend.Language = previous.Language ?? backend.Language;
+            backend.Instruct = previous.Instruct ?? backend.Instruct;
         }
 
         defaults.ActiveBackendId = defaults.Backends.Any(item => item.Id == loaded.ActiveBackendId)
@@ -95,25 +121,49 @@ public sealed class SettingsStore : ISettingsStore
         return defaults;
     }
 
-    private static List<BackendDefinition> DefaultBackends(string root) =>
-        [
-            new BackendDefinition
-            {
-                Id = "windows-default",
-                Name = "Windows default voice",
-                Kind = "Windows Speech processor",
-                BuiltIn = true,
-                Engine = SpeechEngines.Windows
-            },
-            new BackendDefinition
-            {
-                Id = "piper-local",
-                Name = "Piper local neural voice",
-                Kind = "Local Piper ONNX neural TTS",
-                BuiltIn = false,
-                Engine = SpeechEngines.Piper,
-                ExecutablePath = Path.Combine(root, "Scripts", "piper.exe"),
-                ModelPath = Path.Combine(root, "voices", "en_US-lessac-medium.onnx")
-            }
-        ];
+    public static List<BackendDefinition> DefaultBackends(string baseDirectory) =>
+    [
+        new BackendDefinition
+        {
+            Id = "windows-default",
+            Name = "Windows default voice",
+            Kind = "Windows Speech processor",
+            BuiltIn = true,
+            Engine = SpeechEngines.Windows
+        },
+        new BackendDefinition
+        {
+            Id = "piper-local",
+            Name = "Piper local neural voice",
+            Kind = "Local Piper ONNX neural TTS",
+            BuiltIn = false,
+            Engine = SpeechEngines.Piper,
+            ExecutablePath = Path.Combine(baseDirectory, "piper", "Scripts", "piper.exe"),
+            ModelPath = Path.Combine(baseDirectory, "piper", "voices", "en_US-lessac-medium.onnx")
+        },
+        new BackendDefinition
+        {
+            Id = "chatterbox-local",
+            Name = "Chatterbox LLM voice",
+            Kind = "Local LLM TTS (Chatterbox, Python)",
+            BuiltIn = false,
+            Engine = SpeechEngines.Chatterbox,
+            ExecutablePath = Path.Combine(baseDirectory, "chatterbox", "Scripts", "python.exe"),
+            ModelPath = "ResembleAI/chatterbox",
+            Variant = "base"
+        },
+        new BackendDefinition
+        {
+            Id = "qwen3-tts-local",
+            Name = "Qwen3-TTS LLM voice",
+            Kind = "Local LLM TTS (Qwen3-TTS, Python)",
+            BuiltIn = false,
+            Engine = SpeechEngines.Qwen3Tts,
+            ExecutablePath = Path.Combine(baseDirectory, "qwen3-tts", "Scripts", "python.exe"),
+            ModelPath = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+            Variant = "custom-voice",
+            VoiceName = "Ryan",
+            Language = "English"
+        }
+    ];
 }

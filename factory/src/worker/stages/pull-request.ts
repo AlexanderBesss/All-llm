@@ -1,5 +1,5 @@
 import { buildPullRequestTitle } from "../../pull-request-title.js";
-import { makeRunMarker, RUN_STATUSES, STAGES, StageRunStatus, ArtifactKind } from "../../types.js";
+import { RUN_STATUSES, STAGES, StageRunStatus, ArtifactKind } from "../../types.js";
 import type { FactoryRun } from "../../model/database.js";
 import type { JiraIssue } from "../../model/jira.js";
 import type { FactoryWorker } from "../../worker.js";
@@ -73,9 +73,9 @@ export async function processPullRequest(worker: FactoryWorker, run: FactoryRun,
         worker.log("info", "pull-request:ai-review-label", { runId: run.id, number: pr.number });
         await requestAiReview.call(worker.github, pr.number);
       }
-      // Checkpoint the remote PR before Jira reporting. If the worker is
-      // interrupted after GitHub succeeds, the next attempt can resume
-      // reporting without recreating the PR.
+      // Checkpoint the remote PR before the Jira status transition. If the
+      // worker is interrupted after GitHub succeeds, the next attempt can
+      // resume the transition without recreating the PR.
       worker.db.updateRun(run.id, {
         pr_number: pr.number || null,
         pr_url: pr.html_url,
@@ -83,8 +83,6 @@ export async function processPullRequest(worker: FactoryWorker, run: FactoryRun,
       });
       worker.db.recordArtifact(run.id, ArtifactKind.PullRequest, `${worker.config.github.repositoryFullName}:${branchName}`, pr.html_url);
       worker.throwIfStopping();
-      worker.log("info", "pull-request:jira-comment", { runId: run.id, issueKey: run.issue_key });
-      await worker.jira.addComment(run.issue_key, `${makeRunMarker(run.id)}\nPull request created: ${pr.html_url}`);
       await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.review);
     } else {
       worker.throwIfStopping();

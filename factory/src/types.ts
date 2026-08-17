@@ -54,6 +54,7 @@ export enum RunAction {
   RetryScheduled = "retry_scheduled",
   Blocked = "blocked",
   Cancelled = "cancelled",
+  Completed = "completed",
   Busy = "busy",
   Idle = "idle",
   Resumed = "resumed",

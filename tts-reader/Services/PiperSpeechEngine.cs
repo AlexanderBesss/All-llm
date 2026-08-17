@@ -4,10 +4,9 @@ using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public interface IPiperProcessRunner
+public interface ILocalProcessSpeechRunner
 {
-    Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath,
-        double playbackRate, CancellationToken cancellationToken);
+    Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath, double playbackRate, CancellationToken cancellationToken);
 }
 
 public interface IWaveAudioPlayer
@@ -16,34 +15,14 @@ public interface IWaveAudioPlayer
     void Stop();
 }
 
-public sealed class PiperProcessRunner : IPiperProcessRunner
+public sealed class PiperProcessRunner : ILocalProcessSpeechRunner
 {
     public async Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath,
         double playbackRate, CancellationToken cancellationToken)
     {
         Validate(backend);
         var startInfo = CreateStartInfo(backend, text, outputPath, playbackRate);
-
-        using var process = new Process { StartInfo = startInfo };
-        if (!process.Start())
-            throw new InvalidOperationException("Piper could not be started.");
-
-        try
-        {
-            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            var error = await errorTask;
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException($"Piper exited with code {process.ExitCode}: {error.Trim()}");
-            if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
-                throw new InvalidDataException("Piper did not produce a WAV file.");
-        }
-        catch (OperationCanceledException)
-        {
-            if (!process.HasExited)
-                process.Kill(true);
-            throw;
-        }
+        await LocalProcessTts.SynthesizeAsync("Piper", startInfo, outputPath, cancellationToken);
     }
 
     public static ProcessStartInfo CreateStartInfo(BackendDefinition backend, string text, string outputPath,

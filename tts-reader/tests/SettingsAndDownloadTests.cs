@@ -23,7 +23,7 @@ public sealed class SettingsAndDownloadTests : IDisposable
         var loaded = store.Load();
 
         Assert.Equal("piper-local", loaded.ActiveBackendId);
-        Assert.Equal(2, loaded.Backends.Count);
+        Assert.Equal(4, loaded.Backends.Count);
         Assert.Equal("C:\\Piper\\piper.exe", loaded.Backends[1].ExecutablePath);
         Assert.Equal("C:\\Piper\\voice.onnx", loaded.Backends[1].ModelPath);
         Assert.Equal(1.25, loaded.PlaybackRate);
@@ -50,6 +50,104 @@ public sealed class SettingsAndDownloadTests : IDisposable
         Assert.False(store.IsAvailable(backend));
         File.WriteAllText(model + ".json", "{}");
         Assert.True(store.IsAvailable(backend));
+    }
+
+    [Fact]
+    public void CreateDefaults_IncludesLocalLlmBackendsWithHuggingFaceModels()
+    {
+        var settings = SettingsStore.CreateDefaults("C:\\DataRoot");
+
+        var chatterbox = settings.Backends.Single(item => item.Id == "chatterbox-local");
+        Assert.Equal(SpeechEngines.Chatterbox, chatterbox.Engine);
+        Assert.Equal(Path.Combine("C:\\DataRoot", "chatterbox", "Scripts", "python.exe"), chatterbox.ExecutablePath);
+        Assert.Equal("ResembleAI/chatterbox", chatterbox.ModelPath);
+        Assert.Equal("base", chatterbox.Variant);
+
+        var qwen3 = settings.Backends.Single(item => item.Id == "qwen3-tts-local");
+        Assert.Equal(SpeechEngines.Qwen3Tts, qwen3.Engine);
+        Assert.Equal(Path.Combine("C:\\DataRoot", "qwen3-tts", "Scripts", "python.exe"), qwen3.ExecutablePath);
+        Assert.Equal("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", qwen3.ModelPath);
+        Assert.Equal("custom-voice", qwen3.Variant);
+        Assert.Equal("Ryan", qwen3.VoiceName);
+        Assert.Equal("English", qwen3.Language);
+    }
+
+    [Fact]
+    public void LlmAvailability_RequiresPythonExecutableAndModelOrRepoId()
+    {
+        var store = new SettingsStore(Path.Combine(_root, "data"));
+        Directory.CreateDirectory(_root);
+        var executable = Path.Combine(_root, "python.exe");
+        var localModel = Path.Combine(_root, "model");
+
+        var backend = new BackendDefinition
+        {
+            Id = "chatterbox", Name = "Chatterbox", Kind = "LLM", Engine = SpeechEngines.Chatterbox,
+            ExecutablePath = executable, ModelPath = "ResembleAI/chatterbox", Variant = "base"
+        };
+        Assert.False(store.IsAvailable(backend));
+        File.WriteAllText(executable, "python");
+        Assert.True(store.IsAvailable(backend));
+
+        backend.ModelPath = localModel;
+        Assert.False(store.IsAvailable(backend));
+        Directory.CreateDirectory(localModel);
+        Assert.True(store.IsAvailable(backend));
+    }
+
+    [Fact]
+    public void Qwen3Availability_RequiresVoiceName()
+    {
+        var store = new SettingsStore(Path.Combine(_root, "data"));
+        Directory.CreateDirectory(_root);
+        var executable = Path.Combine(_root, "python.exe");
+        File.WriteAllText(executable, "python");
+
+        var backend = new BackendDefinition
+        {
+            Id = "qwen", Name = "Qwen3-TTS", Kind = "LLM", Engine = SpeechEngines.Qwen3Tts,
+            ExecutablePath = executable, ModelPath = "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+            Variant = "custom-voice"
+        };
+        Assert.False(store.IsAvailable(backend));
+        backend.VoiceName = "Ryan";
+        Assert.True(store.IsAvailable(backend));
+    }
+
+    [Fact]
+    public void Qwen3CloneAvailability_RequiresReferenceAudioAndTranscript()
+    {
+        var store = new SettingsStore(Path.Combine(_root, "data"));
+        Directory.CreateDirectory(_root);
+        var executable = Path.Combine(_root, "python.exe");
+        var reference = Path.Combine(_root, "reference.wav");
+        File.WriteAllText(executable, "python");
+
+        var backend = new BackendDefinition
+        {
+            Id = "qwen", Name = "Qwen3-TTS", Kind = "LLM", Engine = SpeechEngines.Qwen3Tts,
+            ExecutablePath = executable, ModelPath = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+            Variant = "voice-clone", VoiceName = reference
+        };
+
+        Assert.False(store.IsAvailable(backend));
+        File.WriteAllText(reference, "wav");
+        Assert.False(store.IsAvailable(backend));
+        backend.Instruct = "Reference transcript.";
+        Assert.True(store.IsAvailable(backend));
+    }
+
+    [Fact]
+    public void IsAvailable_RejectsUnsupportedEngine()
+    {
+        var store = new SettingsStore(Path.Combine(_root, "data"));
+        var backend = new BackendDefinition
+        {
+            Id = "future", Name = "Future", Kind = "Unknown", Engine = "future-engine",
+            ExecutablePath = "C:\\python.exe", ModelPath = "org/model"
+        };
+
+        Assert.False(store.IsAvailable(backend));
     }
 
     [Fact]

@@ -112,6 +112,27 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void MainViewModel_StopCommandStopsActivePlayback()
+    {
+        var speech = new FakeSpeech();
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
+            new FakeExtractor("read me"), new FakeStore(SettingsStore.CreateDefaults()), speech,
+            new FakeInteractions());
+        viewModel.SetRenderedText("read me");
+
+        viewModel.PlayCommand.Execute(null);
+        Assert.True(viewModel.StopCommand.CanExecute(null));
+
+        viewModel.StopCommand.Execute(null);
+
+        Assert.False(viewModel.IsPlaying);
+        Assert.False(viewModel.StopCommand.CanExecute(null));
+        Assert.Equal(1, speech.StopCount);
+        Assert.Contains("stopped", viewModel.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MainViewModel_ReportsUnavailableBackendWithoutStartingPlayback()
     {
         var settings = SettingsStore.CreateDefaults();
@@ -188,6 +209,26 @@ public sealed class ViewModelTests
         Assert.Null(viewModel.ResultSettings);
     }
 
+    [Fact]
+    public void SettingsViewModel_DownloadsUnavailableLlmAndUpdatesProgress()
+    {
+        var settings = SettingsStore.CreateDefaults();
+        var store = new DownloadStore();
+        var downloader = new FakeLlmDownloader();
+        using var viewModel = new SettingsWindowViewModel(store, settings, downloader);
+        var row = viewModel.Backends.Single(item => item.Id == "chatterbox-local");
+
+        Assert.True(row.ShowDownload);
+        viewModel.DownloadCommand.Execute(row);
+
+        Assert.Equal(1, downloader.CallCount);
+        Assert.True(row.IsAvailable);
+        Assert.False(row.ShowDownload);
+        Assert.Equal(100, row.DownloadProgress);
+        Assert.Equal("Ready", row.DownloadStatus);
+        Assert.Contains("ready", viewModel.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class FakeCatalog(DocumentNode root) : IDocumentCatalog
     {
         public DocumentNode Build(string rootPath) => root;
@@ -229,14 +270,39 @@ public sealed class ViewModelTests
         public bool IsAvailable(BackendDefinition backend) => backend.BuiltIn || _available;
     }
 
+    private sealed class DownloadStore : ISettingsStore
+    {
+        public ReaderSettings Load() => SettingsStore.CreateDefaults();
+        public void Save(ReaderSettings settings) { }
+        public bool IsAvailable(BackendDefinition backend) => backend.BuiltIn || backend.ExecutablePath == "installed";
+    }
+
+    private sealed class FakeLlmDownloader : ILlmBackendDownloader
+    {
+        public int CallCount { get; private set; }
+
+        public Task DownloadAsync(
+            BackendDefinition backend,
+            IProgress<LlmDownloadProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            backend.ExecutablePath = "installed";
+            progress.Report(new LlmDownloadProgress(45, "Installing package…"));
+            progress.Report(new LlmDownloadProgress(100, "Download complete."));
+            return Task.CompletedTask;
+        }
+    }
+
     private sealed class FakeSpeech : ISpeechPlaybackService
     {
         public List<(string Text, int Caret, BackendDefinition Backend, double PlaybackRate)> Calls { get; } = [];
+        public int StopCount { get; private set; }
         public event EventHandler<string>? PlaybackEnded;
         public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
         public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate) =>
             Calls.Add((text, caretIndex, backend, playbackRate));
-        public void Stop() { }
+        public void Stop() => StopCount++;
         public void Dispose() { }
         public void Complete(string status) => PlaybackEnded?.Invoke(this, status);
         public void ReportProgress(int characterIndex, int characterCount) =>

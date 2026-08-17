@@ -82,39 +82,63 @@
                      BorderBrush="{StaticResource BorderBrush}">
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Grid>
+                        <Grid MinHeight="56">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center">
                                 <TextBlock Text="{Binding Name}"
                                            Foreground="{StaticResource TextPrimary}"
                                            FontWeight="SemiBold"
-                                           FontSize="13"/>
+                                           FontSize="13"
+                                           TextTrimming="CharacterEllipsis"/>
                                 <TextBlock Text="{Binding Kind}"
                                            Style="{StaticResource CaptionTextStyle}"
                                            Margin="0,2,0,0"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1"
-                                        Orientation="Horizontal"
-                                        VerticalAlignment="Center">
-                                <Border Background="{StaticResource AccentSoft}"
-                                        BorderBrush="{StaticResource Accent}"
-                                        BorderThickness="1"
-                                        CornerRadius="4"
-                                        Padding="7,3"
-                                        Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <TextBlock Text="ACTIVE"
-                                               Foreground="{StaticResource AccentHover}"
-                                               FontSize="10"
-                                               FontWeight="SemiBold"/>
-                                </Border>
-                                <TextBlock Text="{Binding Availability}"
-                                           Style="{StaticResource AvailabilityTextStyle}"
-                                           VerticalAlignment="Center"
-                                           Margin="10,0,0,0"/>
+                                        Margin="12,0"
+                                        VerticalAlignment="Center"
+                                        MinWidth="120">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Background="{StaticResource AccentSoft}"
+                                            BorderBrush="{StaticResource Accent}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="7,3"
+                                            Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <TextBlock Text="ACTIVE"
+                                                   Foreground="{StaticResource AccentHover}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"/>
+                                    </Border>
+                                    <TextBlock Text="{Binding Availability}"
+                                               Style="{StaticResource AvailabilityTextStyle}"
+                                               VerticalAlignment="Center"
+                                               Margin="10,0,0,0"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding DownloadStatus}"
+                                           Style="{StaticResource CaptionTextStyle}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220"/>
+                                <ProgressBar Height="6"
+                                             Width="120"
+                                             Margin="0,4,0,0"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding DownloadProgress}"
+                                             Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                             </StackPanel>
+                            <Button Grid.Column="2"
+                                    Content="Download"
+                                    Padding="10,6"
+                                    ToolTip="Download this speech backend"
+                                    Visibility="{Binding ShowDownload, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                    CommandParameter="{Binding}"/>
                         </Grid>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -132,9 +156,12 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="190"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
@@ -156,38 +183,83 @@
 
                 <TextBlock Grid.Row="1"
                            Style="{StaticResource LabelTextStyle}"
-                           Text="Piper executable"
+                           Text="{Binding ExecutableLabel}"
                            VerticalAlignment="Center"
-                           Margin="0,0,12,8"/>
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowExecutable, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 <TextBox Grid.Row="1"
                          Grid.Column="1"
                          Text="{Binding SelectedExecutablePath, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,0,8"
-                         ToolTip="Path to piper.exe installed by piper-tts."/>
+                         ToolTip="Path to piper.exe, or to the venv python.exe used by this speech engine."
+                         Visibility="{Binding ShowExecutable, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                 <TextBlock Grid.Row="2"
                            Style="{StaticResource LabelTextStyle}"
-                           Text="Piper ONNX model"
+                           Text="{Binding ModelLabel}"
                            VerticalAlignment="Center"
-                           Margin="0,0,12,8"/>
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowModel, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 <TextBox Grid.Row="2"
                          Grid.Column="1"
                          Text="{Binding SelectedModelPath, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,0,8"
-                         ToolTip="Path to a Piper .onnx voice; its .onnx.json file must be beside it."/>
+                         ToolTip="Piper: path to a .onnx voice with its .onnx.json beside it. LLM: Hugging Face repo id or local model folder."
+                         Visibility="{Binding ShowModel, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                 <TextBlock Grid.Row="3"
                            Style="{StaticResource LabelTextStyle}"
-                           Text="Windows voice name"
+                           Text="Engine variant"
                            VerticalAlignment="Center"
-                           Margin="0,0,12,8"/>
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowVariant, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                 <TextBox Grid.Row="3"
+                         Grid.Column="1"
+                         Text="{Binding SelectedVariant, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,0,8"
+                         ToolTip="Chatterbox: base, turbo, nano, or multilingual. Qwen3-TTS: custom-voice, voice-design, or voice-clone."
+                         Visibility="{Binding ShowVariant, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                <TextBlock Grid.Row="4"
+                           Style="{StaticResource LabelTextStyle}"
+                           Text="Language"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowLanguage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                <TextBox Grid.Row="4"
+                         Grid.Column="1"
+                         Text="{Binding SelectedLanguage, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,0,8"
+                         ToolTip="Language used for synthesis, for example English."
+                         Visibility="{Binding ShowLanguage, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                <TextBlock Grid.Row="5"
+                           Style="{StaticResource LabelTextStyle}"
+                           Text="Instruction / reference text"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowInstruct, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                <TextBox Grid.Row="5"
+                         Grid.Column="1"
+                         Text="{Binding SelectedInstruct, UpdateSourceTrigger=PropertyChanged}"
+                         Margin="0,0,0,8"
+                         ToolTip="Voice control instruction or reference transcript for voice cloning."
+                         Visibility="{Binding ShowInstruct, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                <TextBlock Grid.Row="6"
+                           Style="{StaticResource LabelTextStyle}"
+                           Text="{Binding VoiceLabel}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,8"
+                           Visibility="{Binding ShowVoice, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                <TextBox Grid.Row="6"
                          Grid.Column="1"
                          Text="{Binding SelectedVoice, UpdateSourceTrigger=PropertyChanged}"
                          Margin="0,0,0,8"
-                         ToolTip="Leave blank to use the Windows default voice."/>
+                         ToolTip="Windows: leave blank for the default voice. LLM engines may use a speaker name, voice description, or reference .wav path."
+                         Visibility="{Binding ShowVoice, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
-                <StackPanel Grid.Row="4"
+                <StackPanel Grid.Row="7"
                             Grid.ColumnSpan="2"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
