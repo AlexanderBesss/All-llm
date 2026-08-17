@@ -8,6 +8,7 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
 
   assert.match(workflow, /pull_request:\r?\n\s+types: \[labeled\]/);
   assert.match(workflow, /github\.event\.label\.name == ['"]ai-review['"]/);
+  assert.match(workflow, /model: llamacpp\/unsloth\/Qwen3\.8-27B-UD-Q5_K_XL\r?\n\s+variant: medium/);
   assert.doesNotMatch(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
   assert.doesNotMatch(workflow, /First list every changed file/);
   assert.doesNotMatch(workflow, /Implementation areas/);

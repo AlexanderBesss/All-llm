@@ -46,6 +46,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           model: llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL
+          variant: medium
           use_github_token: true
           prompt: |
             Review this pull request for high-relevance, high-impact defects only. Start your response with "## AI Review".
