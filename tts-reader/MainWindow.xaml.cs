@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Threading;
 using TtsReader.Models;
 using TtsReader.Services;
@@ -11,6 +12,7 @@ public partial class MainWindow : Window
 {
     private readonly DocumentCatalog _catalog = new();
     private readonly DocumentTextExtractor _extractor = new();
+    private readonly MarkdownDocumentRenderer _markdownRenderer = new();
     private readonly SettingsStore _settingsStore = new();
     private readonly SpeechPlaybackService _speech = new();
     private ReaderSettings _settings;
@@ -42,7 +44,7 @@ public partial class MainWindow : Window
             var root = _catalog.Build(dialog.FolderName);
             DocumentTree.ItemsSource = new[] { root };
             _suppressCaretRestart = true;
-            DocumentText.Clear();
+            DocumentText.Document = _markdownRenderer.RenderPlainText(string.Empty);
             _suppressCaretRestart = false;
             StatusText.Text = root.Children.Count == 0
                 ? $"No supported .txt, .md, or .pdf files were found in {dialog.FolderName}."
@@ -69,13 +71,17 @@ public partial class MainWindow : Window
         {
             var text = await _extractor.ReadAsync(file.FullPath, _loadCancellation.Token);
             _suppressCaretRestart = true;
-            DocumentText.Text = text;
-            DocumentText.CaretIndex = 0;
+            DocumentText.Document = IsMarkdown(file.FullPath)
+                ? _markdownRenderer.Render(text, file.FullPath)
+                : _markdownRenderer.RenderPlainText(text);
+            DocumentText.CaretPosition = DocumentText.Document.ContentStart;
             DocumentText.ScrollToHome();
             _suppressCaretRestart = false;
             StatusText.Text = string.IsNullOrWhiteSpace(text)
                 ? $"{file.Name} is empty."
-                : $"Loaded {file.Name} ({text.Length:N0} characters).";
+                : IsMarkdown(file.FullPath)
+                    ? $"Rendered {file.Name} ({GetDocumentText().Length:N0} readable characters)."
+                    : $"Loaded {file.Name} ({text.Length:N0} characters).";
             DocumentText.Focus();
         }
         catch (OperationCanceledException)
@@ -84,7 +90,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _suppressCaretRestart = true;
-            DocumentText.Clear();
+            DocumentText.Document = _markdownRenderer.RenderPlainText(string.Empty);
             _suppressCaretRestart = false;
             StatusText.Text = $"Could not load {file.Name}: {ex.Message}";
         }
@@ -94,7 +100,8 @@ public partial class MainWindow : Window
 
     private void StartFromCaret(bool isRestart)
     {
-        if (string.IsNullOrWhiteSpace(DocumentText.Text))
+        var text = GetDocumentText();
+        if (string.IsNullOrWhiteSpace(text))
         {
             StatusText.Text = "Load a non-empty document before starting playback.";
             return;
@@ -114,13 +121,13 @@ public partial class MainWindow : Window
 
         try
         {
-            _speech.Speak(DocumentText.Text, DocumentText.CaretIndex, backend);
+            _speech.Speak(text, GetCaretIndex(), backend);
             _isPlaying = true;
             PlayButton.IsEnabled = false;
             StopButton.IsEnabled = true;
             StatusText.Text = isRestart
-                ? $"Caret moved. Continuing with {backend.Name} from character {DocumentText.CaretIndex:N0}."
-                : $"Playing with {backend.Name} from character {DocumentText.CaretIndex:N0}.";
+                ? $"Caret moved. Continuing with {backend.Name} from character {GetCaretIndex():N0}."
+                : $"Playing with {backend.Name} from character {GetCaretIndex():N0}.";
         }
         catch (Exception ex)
         {
@@ -167,6 +174,18 @@ public partial class MainWindow : Window
             ? "Backend: missing"
             : $"Backend: {backend.Name} ({(_settingsStore.IsAvailable(backend) ? "available" : "unavailable")})";
     }
+
+    private string GetDocumentText() => new TextRange(
+        DocumentText.Document.ContentStart,
+        DocumentText.Document.ContentEnd).Text;
+
+    private int GetCaretIndex() => new TextRange(
+        DocumentText.Document.ContentStart,
+        DocumentText.CaretPosition).Text.Length;
+
+    private static bool IsMarkdown(string path) =>
+        Path.GetExtension(path).Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetExtension(path).Equals(".markdown", StringComparison.OrdinalIgnoreCase);
 
     private void Speech_PlaybackEnded(object? sender, string status)
     {
