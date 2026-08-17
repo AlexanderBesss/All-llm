@@ -45,6 +45,11 @@ export enum EventType {
   RunCancelled = "run_cancelled",
 }
 
+export enum RunCancellationReason {
+  JiraIssueMissing = "jira_issue_missing",
+  JiraIssueDone = "jira_issue_done",
+}
+
 export enum RunAction {
   RetryScheduled = "retry_scheduled",
   Blocked = "blocked",
