@@ -3,7 +3,7 @@ using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public sealed class SpeechPlaybackService : IDisposable
+public sealed class SpeechPlaybackService : ISpeechPlaybackService
 {
     private SpeechSynthesizer? _synthesizer;
     private readonly object _gate = new();

@@ -3,7 +3,7 @@ using UglyToad.PdfPig;
 
 namespace TtsReader.Services;
 
-public sealed class DocumentTextExtractor
+public sealed class DocumentTextExtractor : IDocumentTextExtractor
 {
     public async Task<string> ReadAsync(string path, CancellationToken cancellationToken = default)
     {
