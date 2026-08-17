@@ -9,6 +9,7 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.match(workflow, /pull_request:\r?\n\s+types: \[labeled\]/);
   assert.match(workflow, /github\.event\.label\.name == ['"]ai-review['"]/);
   assert.match(workflow, /model: llamacpp\/unsloth\/Qwen3\.8-27B-UD-Q5_K_XL\r?\n\s+variant: medium/);
+  assert.match(workflow, /timeout-minutes: 20/);
   assert.doesNotMatch(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
   assert.doesNotMatch(workflow, /First list every changed file/);
   assert.doesNotMatch(workflow, /Implementation areas/);
@@ -49,9 +50,14 @@ test("AI review schedules deterministic size-aware review rounds", async () => {
   assert.match(workflow, /249 and 51 share a round/);
   assert.match(workflow, /249 and 52 use separate rounds/);
   assert.match(workflow, /250-line file is always a singleton/);
+  assert.match(workflow, /Count AI review files/);
+  assert.match(workflow, /core\.info\(`AI review processed \$\{fileCount\} changed file\(s\)/);
   assert.match(workflow, /each review round as one batch/);
   assert.match(workflow, /exactly one review subagent for each batch/);
   assert.match(workflow, /all and only the files in that batch/);
+  assert.match(workflow, /MAX_CONCURRENT_REVIEW_SUBAGENTS = 3/);
+  assert.match(workflow, /groups of at most MAX_CONCURRENT_REVIEW_SUBAGENTS/);
+  assert.match(workflow, /no more than three review subagents at once/);
   assert.match(workflow, /never invoke one subagent per file/);
   assert.match(workflow, /After all batch reviews are complete, synthesize/);
   assert.match(workflow, /synthesis must combine batch findings and must not schedule another per-file review/);

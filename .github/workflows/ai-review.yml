@@ -12,7 +12,7 @@ jobs:
   review:
     if: github.event.label.name == 'ai-review' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write
@@ -22,6 +22,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Count AI review files
+        id: inventory
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            core.setOutput("file_count", String(files.length));
+            core.info(`AI review file inventory: ${files.length} changed file(s) queued for processing.`);
 
       - name: Run OpenCode AI Review
         uses: anomalyco/opencode/github@latest
@@ -58,7 +73,8 @@ jobs:
             - After the inventory is exhausted, append any non-empty `currentSmallRound`. The flattened round paths must equal the original inventory paths exactly, so no file may be omitted, duplicated, split, or combined across round boundaries.
             - A file with 250 or more physical lines is always a singleton round. A file with fewer than 250 physical lines may be alone when it starts a round or cannot fit the current round; every small-file round has an inclusive total of 300 lines or less. A total of exactly 300 is allowed, while a total of 301 or more starts a new round.
             - For boundary calibration, ordered lengths 120, 100, 80, 1 produce rounds 300 and 1; 249 and 51 share a round; 249 and 52 use separate rounds; and a 250-line file is always a singleton even when another file would fit.
-            Treat each review round as one batch: invoke exactly one review subagent for each batch, passing all and only the files in that batch to that subagent. Run the batches synchronously in round order and wait for each batch review to finish before starting the next; never invoke one subagent per file, omit a file, duplicate a file, split a file, or combine files from different rounds. After all batch reviews are complete, synthesize their findings into the final pull request review; the synthesis must combine batch findings and must not schedule another per-file review.
+            After building the inventory and rounds, report the number of changed files and review rounds in your progress output so the counts are visible in the workflow logs.
+            Set MAX_CONCURRENT_REVIEW_SUBAGENTS = 3. Treat each review round as one batch: invoke exactly one review subagent for each batch, passing all and only the files in that batch to that subagent. Schedule consecutive batches in groups of at most MAX_CONCURRENT_REVIEW_SUBAGENTS. For each group, use the Task tool to issue up to three batch-review subagent calls in one assistant turn, one call per round; invoke no more than three review subagents at once, then wait for every subagent in the current group to finish before starting the next group; never invoke one subagent per file, omit a file, duplicate a file, split a file, or combine files from different rounds. After all batch reviews are complete, synthesize their findings into the final pull request review; the synthesis must combine batch findings and must not schedule another per-file review.
             Do not include the changed-file inventory or any redundant file list in the response.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
             The file must contain valid JSON with exactly this shape: {"findings":[{"path":"relative/path","line":123,"side":"RIGHT","relevance":"high","confidence":0.93,"severity":"high","body":"Explain the concrete defect, its impact, and the recommended fix."}]}.
@@ -69,6 +85,21 @@ jobs:
             - SKIP: A variable could be renamed for clarity but behavior is unchanged. This is a style preference, so emit no finding.
             - SKIP: A cache might be slower under an unmeasured workload, with no demonstrated regression or fix. This is speculative and below the relevance threshold, so emit no finding.
             If there are no high-relevance findings, write {"findings":[]} instead. Do not write this file in a tracked repository path, do not wrap it in Markdown fences, and keep the final response concise because the detailed findings will be posted as inline review comments.
+
+      - name: Report AI review file count
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          REVIEW_FILE_COUNT: ${{ steps.inventory.outputs.file_count }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fileCount = process.env.REVIEW_FILE_COUNT;
+            if (!fileCount) {
+              core.warning("AI review file count was unavailable.");
+              return;
+            }
+            core.info(`AI review processed ${fileCount} changed file(s) from the pull request inventory.`);
 
       - name: Publish inline AI review comments
         id: publish
