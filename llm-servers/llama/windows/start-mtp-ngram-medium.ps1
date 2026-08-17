@@ -17,7 +17,8 @@
   --ubatch-size 1024 `
   --no-mmap `
   --jinja `
-  --chat-template-kwargs '{"preserve_thinking":true,"reasoning_effort":"medium"}' `
+  --reasoning on `
+  --chat-template-kwargs "{""preserve_thinking"":true,""reasoning_effort"":""medium""}" `
   --temp 1.0 `
   --top-p 0.95 `
   --top-k 20 `
