@@ -3,6 +3,8 @@ name: Build WhisperNote
 on:
   push:
     branches: [main, master]
+    tags:
+      - 'v*'
     paths:
       - whisper-note/**
       - .github/workflows/build.yml
@@ -16,6 +18,9 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -44,6 +49,62 @@ jobs:
             /p:PublishSingleFile=true `
             /p:SelfContained=false
 
+      - name: Package release assets
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $PWD "whisper-note/publish"
+          $publishExecutable = Join-Path $publishDir "WhisperNote.exe"
+          if (-not (Test-Path -LiteralPath $publishExecutable -PathType Leaf)) {
+            throw "Required publish executable is missing: $publishExecutable"
+          }
+
+          $artifactsDir = Join-Path $PWD "artifacts"
+          New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
+
+          $zipPath = Join-Path $artifactsDir "WhisperNote-win-x64.zip"
+          Compress-Archive `
+            -Path (Join-Path $publishDir "*") `
+            -DestinationPath $zipPath `
+            -Force
+
+          if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+            throw "Required release ZIP is missing: $zipPath"
+          }
+
+          $standaloneExecutable = Join-Path $artifactsDir "WhisperNote.exe"
+          Copy-Item -LiteralPath $publishExecutable -Destination $standaloneExecutable -Force
+          if (-not (Test-Path -LiteralPath $standaloneExecutable -PathType Leaf)) {
+            throw "Required standalone executable is missing: $standaloneExecutable"
+          }
+
+          $validationDir = Join-Path $env:RUNNER_TEMP "WhisperNote-release-validation"
+          New-Item -ItemType Directory -Path $validationDir -Force | Out-Null
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $validationDir -Force
+
+          $archivedExecutable = Join-Path $validationDir "WhisperNote.exe"
+          if (-not (Test-Path -LiteralPath $archivedExecutable -PathType Leaf)) {
+            throw "The release ZIP does not contain WhisperNote.exe"
+          }
+
+          $publishedHash = (Get-FileHash -LiteralPath $publishExecutable -Algorithm SHA256).Hash
+          $standaloneHash = (Get-FileHash -LiteralPath $standaloneExecutable -Algorithm SHA256).Hash
+          $archivedHash = (Get-FileHash -LiteralPath $archivedExecutable -Algorithm SHA256).Hash
+          if ($publishedHash -ne $standaloneHash -or $publishedHash -ne $archivedHash) {
+            throw "WhisperNote.exe checksums differ between publish output, standalone asset, and ZIP"
+          }
+
+          Write-Host "Validated WhisperNote.exe SHA256: $publishedHash"
+
+      - name: Upload release assets
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: WhisperNote-release-assets
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -51,3 +112,35 @@ jobs:
           path: whisper-note/publish/
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: WhisperNote-release-assets
+          path: artifacts
+
+      - name: Verify release assets
+        run: |
+          test -f artifacts/WhisperNote-win-x64.zip
+          test -f artifacts/WhisperNote.exe
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            artifacts/WhisperNote-win-x64.zip \
+            artifacts/WhisperNote.exe \
+            --verify-tag \
+            --title "WhisperNote $GITHUB_REF_NAME" \
+            --generate-notes
