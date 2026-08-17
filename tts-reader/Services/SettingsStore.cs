@@ -3,7 +3,7 @@ using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public sealed class SettingsStore
+public sealed class SettingsStore : ISettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public string SettingsPath { get; }

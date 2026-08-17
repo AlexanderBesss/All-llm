@@ -1,178 +1,85 @@
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Documents;
-using System.Windows.Threading;
 using TtsReader.Models;
 using TtsReader.Services;
+using TtsReader.ViewModels;
 
 namespace TtsReader;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IMainViewInteractions
 {
-    private readonly DocumentCatalog _catalog = new();
-    private readonly DocumentTextExtractor _extractor = new();
     private readonly MarkdownDocumentRenderer _markdownRenderer = new();
-    private readonly SettingsStore _settingsStore = new();
-    private readonly SpeechPlaybackService _speech = new();
-    private ReaderSettings _settings;
-    private CancellationTokenSource? _loadCancellation;
-    private bool _isPlaying;
+    private readonly SettingsStore _settingsStore;
     private bool _suppressCaretRestart;
+
+    public MainWindowViewModel ViewModel { get; }
 
     public MainWindow()
     {
         InitializeComponent();
-        _settings = _settingsStore.Load();
-        _speech.PlaybackEnded += Speech_PlaybackEnded;
-        RefreshBackendLabel();
+        _settingsStore = new SettingsStore();
+        ViewModel = new MainWindowViewModel(
+            new DocumentCatalog(), new DocumentTextExtractor(), _settingsStore,
+            new SpeechPlaybackService(), this);
+        DataContext = ViewModel;
+        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        ApplyRenderedDocument(ViewModel.RenderedDocument);
     }
 
-    private void OpenFolder_Click(object sender, RoutedEventArgs e)
+    public string? ChooseFolder()
     {
         var dialog = new OpenFolderDialog
         {
             Title = "Choose a document folder",
             Multiselect = false
         };
-        if (dialog.ShowDialog(this) != true)
-            return;
-
-        StopPlayback("Playback stopped.");
-        try
-        {
-            var root = _catalog.Build(dialog.FolderName);
-            DocumentTree.ItemsSource = new[] { root };
-            _suppressCaretRestart = true;
-            DocumentText.Document = _markdownRenderer.RenderPlainText(string.Empty);
-            _suppressCaretRestart = false;
-            StatusText.Text = root.Children.Count == 0
-                ? $"No supported .txt, .md, or .pdf files were found in {dialog.FolderName}."
-                : $"Browsing {dialog.FolderName}";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Could not open the folder: {ex.Message}";
-        }
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
     }
 
-    private async void DocumentTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    public ReaderSettings? EditSettings(ReaderSettings settings)
     {
-        if (e.NewValue is not DocumentNode { IsFolder: false, FullPath: not null } file)
-            return;
-
-        StopPlayback("Playback stopped.");
-        _loadCancellation?.Cancel();
-        _loadCancellation?.Dispose();
-        _loadCancellation = new CancellationTokenSource();
-        StatusText.Text = $"Loading {file.Name}...";
-
-        try
-        {
-            var text = await _extractor.ReadAsync(file.FullPath, _loadCancellation.Token);
-            _suppressCaretRestart = true;
-            DocumentText.Document = IsMarkdown(file.FullPath)
-                ? _markdownRenderer.Render(text, file.FullPath)
-                : _markdownRenderer.RenderPlainText(text);
-            DocumentText.CaretPosition = DocumentText.Document.ContentStart;
-            DocumentText.ScrollToHome();
-            _suppressCaretRestart = false;
-            StatusText.Text = string.IsNullOrWhiteSpace(text)
-                ? $"{file.Name} is empty."
-                : IsMarkdown(file.FullPath)
-                    ? $"Rendered {file.Name} ({GetDocumentText().Length:N0} readable characters)."
-                    : $"Loaded {file.Name} ({text.Length:N0} characters).";
-            DocumentText.Focus();
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            _suppressCaretRestart = true;
-            DocumentText.Document = _markdownRenderer.RenderPlainText(string.Empty);
-            _suppressCaretRestart = false;
-            StatusText.Text = $"Could not load {file.Name}: {ex.Message}";
-        }
+        var window = new SettingsWindow(_settingsStore, settings) { Owner = this };
+        return window.ShowDialog() == true ? window.ResultSettings : null;
     }
 
-    private void Play_Click(object sender, RoutedEventArgs e) => StartFromCaret(isRestart: false);
-
-    private void StartFromCaret(bool isRestart)
+    private void DocumentTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
-        var text = GetDocumentText();
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            StatusText.Text = "Load a non-empty document before starting playback.";
-            return;
-        }
-
-        var backend = ActiveBackend();
-        if (backend is null)
-        {
-            StatusText.Text = "The active speech backend is missing from settings.";
-            return;
-        }
-        if (!_settingsStore.IsAvailable(backend))
-        {
-            StatusText.Text = $"'{backend.Name}' is unavailable. Open Settings to download it or select another backend.";
-            return;
-        }
-
-        try
-        {
-            _speech.Speak(text, GetCaretIndex(), backend);
-            _isPlaying = true;
-            PlayButton.IsEnabled = false;
-            StopButton.IsEnabled = true;
-            StatusText.Text = isRestart
-                ? $"Caret moved. Continuing with {backend.Name} from character {GetCaretIndex():N0}."
-                : $"Playing with {backend.Name} from character {GetCaretIndex():N0}.";
-        }
-        catch (Exception ex)
-        {
-            StopPlayback($"Playback failed: {ex.Message}");
-        }
+        if (e.NewValue is DocumentNode node)
+            ViewModel.SelectedDocument = node;
     }
 
     private void DocumentText_SelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (_isPlaying && !_suppressCaretRestart)
-            StartFromCaret(isRestart: true);
+        if (!_suppressCaretRestart)
+            ViewModel.UpdateCaret(GetCaretIndex());
     }
 
-    private void Stop_Click(object sender, RoutedEventArgs e) => StopPlayback("Playback stopped.");
-
-    private void StopPlayback(string status)
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        _speech.Stop();
-        _isPlaying = false;
-        PlayButton.IsEnabled = true;
-        StopButton.IsEnabled = false;
-        StatusText.Text = status;
+        if (e.PropertyName == nameof(MainWindowViewModel.RenderedDocument))
+            ApplyRenderedDocument(ViewModel.RenderedDocument);
     }
 
-    private void Settings_Click(object sender, RoutedEventArgs e)
+    private void ApplyRenderedDocument(RenderedDocument rendered)
     {
-        StopPlayback("Playback stopped while settings are open.");
-        var window = new SettingsWindow(_settingsStore, _settings) { Owner = this };
-        if (window.ShowDialog() == true)
+        _suppressCaretRestart = true;
+        try
         {
-            _settings = window.ResultSettings;
-            RefreshBackendLabel();
-            StatusText.Text = "Speech settings saved.";
+            DocumentText.Document = rendered.IsMarkdown
+                ? _markdownRenderer.Render(rendered.Text, rendered.SourcePath)
+                : _markdownRenderer.RenderPlainText(rendered.Text);
+            DocumentText.CaretPosition = DocumentText.Document.ContentStart;
+            DocumentText.ScrollToHome();
+            ViewModel.SetRenderedText(GetDocumentText());
+            if (!string.IsNullOrWhiteSpace(rendered.Text))
+                DocumentText.Focus();
         }
-    }
-
-    private BackendDefinition? ActiveBackend() =>
-        _settings.Backends.FirstOrDefault(b => b.Id == _settings.ActiveBackendId);
-
-    private void RefreshBackendLabel()
-    {
-        var backend = ActiveBackend();
-        BackendLabel.Text = backend is null
-            ? "Backend: missing"
-            : $"Backend: {backend.Name} ({(_settingsStore.IsAvailable(backend) ? "available" : "unavailable")})";
+        finally
+        {
+            _suppressCaretRestart = false;
+        }
     }
 
     private string GetDocumentText() => new TextRange(
@@ -183,26 +90,10 @@ public partial class MainWindow : Window
         DocumentText.Document.ContentStart,
         DocumentText.CaretPosition).Text.Length;
 
-    private static bool IsMarkdown(string path) =>
-        Path.GetExtension(path).Equals(".md", StringComparison.OrdinalIgnoreCase) ||
-        Path.GetExtension(path).Equals(".markdown", StringComparison.OrdinalIgnoreCase);
-
-    private void Speech_PlaybackEnded(object? sender, string status)
-    {
-        Dispatcher.BeginInvoke(() =>
-        {
-            _isPlaying = false;
-            PlayButton.IsEnabled = true;
-            StopButton.IsEnabled = false;
-            StatusText.Text = status;
-        }, DispatcherPriority.Background);
-    }
-
     protected override void OnClosed(EventArgs e)
     {
-        _loadCancellation?.Cancel();
-        _loadCancellation?.Dispose();
-        _speech.Dispose();
+        ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        ViewModel.Dispose();
         base.OnClosed(e);
     }
 }

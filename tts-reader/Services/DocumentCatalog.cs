@@ -2,7 +2,7 @@ using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public sealed class DocumentCatalog
+public sealed class DocumentCatalog : IDocumentCatalog
 {
     public static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {

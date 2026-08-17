@@ -3,7 +3,7 @@ using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public sealed class BackendDownloader(HttpClient? httpClient = null)
+public sealed class BackendDownloader(HttpClient? httpClient = null) : IBackendDownloader
 {
     private readonly HttpClient _httpClient = httpClient ?? new HttpClient();
 

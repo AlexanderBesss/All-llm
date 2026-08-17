@@ -11,8 +11,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Text="Speech backends" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,10"/>
-        <ListBox x:Name="BackendList" Grid.Row="1" Background="{StaticResource PanelBackground}"
-                 Foreground="White" BorderBrush="#454A54" SelectionChanged="BackendList_SelectionChanged">
+        <ListBox Grid.Row="1" ItemsSource="{Binding Backends}" SelectedItem="{Binding SelectedBackend}"
+                 Background="{StaticResource PanelBackground}" Foreground="White" BorderBrush="#454A54">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Grid Margin="8" Width="650">
@@ -22,7 +22,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding Backend.Kind}" Foreground="#B9BEC8"/>
+                            <TextBlock Text="{Binding Kind}" Foreground="#B9BEC8"/>
                         </StackPanel>
                         <TextBlock Grid.Column="1" Text="{Binding Availability}" Foreground="{StaticResource Accent}"
                                    VerticalAlignment="Center" Margin="10,0"/>
@@ -41,21 +41,24 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Text="Download source" VerticalAlignment="Center" Margin="0,0,10,8"/>
-            <TextBox x:Name="SourceText" Grid.Row="0" Grid.Column="1" Padding="7" Margin="0,0,0,8"/>
+            <TextBox Grid.Row="0" Grid.Column="1" Padding="7" Margin="0,0,0,8"
+                     Text="{Binding SelectedSource, UpdateSourceTrigger=PropertyChanged}"/>
             <TextBlock Grid.Row="1" Text="Windows voice name" VerticalAlignment="Center" Margin="0,0,10,8"/>
-            <TextBox x:Name="VoiceText" Grid.Row="1" Grid.Column="1" Padding="7" Margin="0,0,0,8"
+            <TextBox Grid.Row="1" Grid.Column="1" Padding="7" Margin="0,0,0,8"
+                     Text="{Binding SelectedVoice, UpdateSourceTrigger=PropertyChanged}"
                      ToolTip="Leave blank to use the Windows default voice."/>
             <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal">
-                <Button x:Name="ActivateButton" Content="Use selected backend" Click="Activate_Click"/>
-                <Button x:Name="DownloadButton" Content="Download" Click="Download_Click"/>
-                <ProgressBar x:Name="DownloadProgress" Width="180" Height="18" Margin="10,0" Minimum="0" Maximum="100"/>
+                <Button Content="Use selected backend" Command="{Binding ActivateCommand}"/>
+                <Button Content="Download" Command="{Binding DownloadCommand}"/>
+                <ProgressBar Width="180" Height="18" Margin="10,0" Minimum="0" Maximum="100"
+                             Value="{Binding DownloadProgress}"/>
             </StackPanel>
         </Grid>
         <DockPanel Grid.Row="3">
-            <TextBlock x:Name="SettingsStatus" VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" Text="{Binding Status}"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right">
-                <Button Content="Cancel" IsCancel="True"/>
-                <Button Content="Save" IsDefault="True" Click="Save_Click"/>
+                <Button Content="Cancel" Command="{Binding CancelCommand}"/>
+                <Button Content="Save" IsDefault="True" Command="{Binding SaveCommand}"/>
             </StackPanel>
         </DockPanel>
     </Grid>
