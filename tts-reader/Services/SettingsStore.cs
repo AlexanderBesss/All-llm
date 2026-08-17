@@ -6,15 +6,14 @@ namespace TtsReader.Services;
 public sealed class SettingsStore : ISettingsStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private readonly string _root;
     public string SettingsPath { get; }
-    public string PackagesDirectory { get; }
 
     public SettingsStore(string? dataDirectory = null)
     {
-        var root = dataDirectory ?? Path.Combine(
+        _root = dataDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader");
-        SettingsPath = Path.Combine(root, "settings.json");
-        PackagesDirectory = Path.Combine(root, "backends");
+        SettingsPath = Path.Combine(_root, "settings.json");
     }
 
     public ReaderSettings Load()
@@ -25,7 +24,7 @@ public sealed class SettingsStore : ISettingsStore
             {
                 var loaded = JsonSerializer.Deserialize<ReaderSettings>(File.ReadAllText(SettingsPath), JsonOptions);
                 if (loaded is { Backends.Count: > 0 })
-                    return loaded;
+                    return Upgrade(loaded);
             }
         }
         catch (JsonException)
@@ -39,7 +38,7 @@ public sealed class SettingsStore : ISettingsStore
         {
         }
 
-        return CreateDefaults();
+        return CreateDefaults(_root);
     }
 
     public void Save(ReaderSettings settings)
@@ -51,35 +50,70 @@ public sealed class SettingsStore : ISettingsStore
         File.Move(temporaryPath, SettingsPath, true);
     }
 
-    public bool IsAvailable(BackendDefinition backend) =>
-        backend.BuiltIn || (!string.IsNullOrWhiteSpace(backend.PackageFileName) &&
-                            File.Exists(Path.Combine(PackagesDirectory, backend.PackageFileName)));
-
-    public string GetPackagePath(BackendDefinition backend) =>
-        Path.Combine(PackagesDirectory, backend.PackageFileName ?? $"{backend.Id}.package");
-
-    public static ReaderSettings CreateDefaults() => new()
+    public bool IsAvailable(BackendDefinition backend) => backend.Engine switch
     {
-        ActiveBackendId = "windows-default",
-        Backends =
+        SpeechEngines.Windows => backend.BuiltIn,
+        SpeechEngines.Piper => File.Exists(backend.ExecutablePath) &&
+                               File.Exists(backend.ModelPath) &&
+                               File.Exists(backend.ModelPath + ".json"),
+        _ => false
+    };
+
+    public static ReaderSettings CreateDefaults(string? dataDirectory = null)
+    {
+        var root = Path.Combine(dataDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader"), "piper");
+        return new ReaderSettings
+        {
+            ActiveBackendId = "windows-default",
+            Backends = DefaultBackends(root)
+        };
+    }
+
+    private ReaderSettings Upgrade(ReaderSettings loaded)
+    {
+        var defaults = CreateDefaults(_root);
+        var windows = loaded.Backends.FirstOrDefault(item => item.Id == "windows-default");
+        if (windows is not null)
+        {
+            defaults.Backends[0].VoiceName = windows.VoiceName;
+        }
+
+        var piper = loaded.Backends.FirstOrDefault(item => item.Id == "piper-local");
+        if (piper is not null)
+        {
+            defaults.Backends[1].ExecutablePath = piper.ExecutablePath;
+            defaults.Backends[1].ModelPath = piper.ModelPath;
+        }
+
+        defaults.ActiveBackendId = defaults.Backends.Any(item => item.Id == loaded.ActiveBackendId)
+            ? loaded.ActiveBackendId
+            : "windows-default";
+        defaults.PlaybackRate = loaded.PlaybackRate;
+        defaults.LastFolderPath = loaded.LastFolderPath;
+        defaults.LastSelectedFilePath = loaded.LastSelectedFilePath;
+        return defaults;
+    }
+
+    private static List<BackendDefinition> DefaultBackends(string root) =>
         [
             new BackendDefinition
             {
                 Id = "windows-default",
                 Name = "Windows default voice",
                 Kind = "Windows Speech processor",
-                BuiltIn = true
+                BuiltIn = true,
+                Engine = SpeechEngines.Windows
             },
             new BackendDefinition
             {
-                Id = "downloaded-profile",
-                Name = "Downloaded local voice profile",
-                Kind = "Downloadable voice-model profile",
+                Id = "piper-local",
+                Name = "Piper local neural voice",
+                Kind = "Local Piper ONNX neural TTS",
                 BuiltIn = false,
-                PackageFileName = "local-voice.profile",
-                DownloadSource = new Uri(Path.Combine(AppContext.BaseDirectory,
-                    "Profiles", "windows-natural.profile.json")).AbsoluteUri
+                Engine = SpeechEngines.Piper,
+                ExecutablePath = Path.Combine(root, "Scripts", "piper.exe"),
+                ModelPath = Path.Combine(root, "voices", "en_US-lessac-medium.onnx")
             }
-        ]
-    };
+        ];
 }

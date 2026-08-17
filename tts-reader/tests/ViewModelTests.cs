@@ -115,7 +115,7 @@ public sealed class ViewModelTests
     public void MainViewModel_ReportsUnavailableBackendWithoutStartingPlayback()
     {
         var settings = SettingsStore.CreateDefaults();
-        settings.ActiveBackendId = "downloaded-profile";
+        settings.ActiveBackendId = "piper-local";
         var speech = new FakeSpeech();
         using var viewModel = new MainWindowViewModel(
             new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
@@ -148,47 +148,40 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public async Task SettingsViewModel_EditsActivatesDownloadsAndPersists()
+    public void SettingsViewModel_ConfiguresActivatesAndPersistsPiper()
     {
         var settings = SettingsStore.CreateDefaults();
         settings.PlaybackRate = 1.25;
         settings.LastFolderPath = "library";
         settings.LastSelectedFilePath = "library\\story.txt";
-        var store = new FakeStore(settings, available: false);
-        var downloader = new FakeDownloader();
-        using var viewModel = new SettingsWindowViewModel(store, downloader, settings);
-        viewModel.SelectedBackend = viewModel.Backends.Single(row => row.Id == "downloaded-profile");
-        viewModel.SelectedSource = " https://example.test/profile ";
-        viewModel.SelectedVoice = " Test Voice ";
+        var store = new FakeStore(settings);
+        using var viewModel = new SettingsWindowViewModel(store, settings);
+        viewModel.SelectedBackend = viewModel.Backends.Single(row => row.Id == "piper-local");
+        viewModel.SelectedExecutablePath = " C:\\Piper\\piper.exe ";
+        viewModel.SelectedModelPath = " C:\\Piper\\voice.onnx ";
 
         viewModel.ActivateCommand.Execute(null);
-        await viewModel.DownloadSelectedAsync();
         viewModel.SaveCommand.Execute(null);
 
         Assert.True(viewModel.SelectedBackend.IsActive);
         Assert.True(viewModel.SelectedBackend.IsAvailable);
-        Assert.Equal(100, viewModel.DownloadProgress);
         Assert.NotNull(store.Saved);
-        Assert.Equal("downloaded-profile", store.Saved!.ActiveBackendId);
-        var saved = store.Saved.Backends.Single(backend => backend.Id == "downloaded-profile");
-        Assert.Equal("https://example.test/profile", saved.DownloadSource);
-        Assert.Equal("Test Voice", saved.VoiceName);
+        Assert.Equal("piper-local", store.Saved!.ActiveBackendId);
+        var saved = store.Saved.Backends.Single(backend => backend.Id == "piper-local");
+        Assert.Equal("C:\\Piper\\piper.exe", saved.ExecutablePath);
+        Assert.Equal("C:\\Piper\\voice.onnx", saved.ModelPath);
         Assert.Equal(1.25, store.Saved.PlaybackRate);
         Assert.Equal("library", store.Saved.LastFolderPath);
         Assert.Equal("library\\story.txt", store.Saved.LastSelectedFilePath);
     }
 
     [Fact]
-    public async Task SettingsViewModel_ReportsDownloadAndSaveFailures()
+    public void SettingsViewModel_ReportsSaveFailures()
     {
         var settings = SettingsStore.CreateDefaults();
         var store = new FakeStore(settings, available: false) { SaveError = new IOException("disk full") };
-        using var viewModel = new SettingsWindowViewModel(store,
-            new FakeDownloader(new InvalidOperationException("network down")), settings);
-        viewModel.SelectedBackend = viewModel.Backends.Single(row => row.Id == "downloaded-profile");
-
-        await viewModel.DownloadSelectedAsync();
-        Assert.Contains("network down", viewModel.Status);
+        using var viewModel = new SettingsWindowViewModel(store, settings);
+        viewModel.SelectedBackend = viewModel.Backends.Single(row => row.Id == "piper-local");
 
         viewModel.SaveCommand.Execute(null);
         Assert.Contains("disk full", viewModel.Status);
@@ -234,7 +227,6 @@ public sealed class ViewModelTests
             Saved = settings;
         }
         public bool IsAvailable(BackendDefinition backend) => backend.BuiltIn || _available;
-        public string GetPackagePath(BackendDefinition backend) => backend.PackageFileName ?? backend.Id;
     }
 
     private sealed class FakeSpeech : ISpeechPlaybackService
@@ -257,14 +249,4 @@ public sealed class ViewModelTests
         public ReaderSettings? EditSettings(ReaderSettings settings) => null;
     }
 
-    private sealed class FakeDownloader(Exception? error = null) : IBackendDownloader
-    {
-        public Task DownloadAsync(BackendDefinition backend, string destinationPath,
-            IProgress<int>? progress = null, CancellationToken cancellationToken = default)
-        {
-            if (error is not null) throw error;
-            progress?.Report(100);
-            return Task.CompletedTask;
-        }
-    }
 }
