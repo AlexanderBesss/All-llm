@@ -13,7 +13,7 @@ public partial class SettingsWindow : Window
     public SettingsWindow(ISettingsStore store, ReaderSettings settings)
     {
         InitializeComponent();
-        ViewModel = new SettingsWindowViewModel(store, new BackendDownloader(), settings);
+        ViewModel = new SettingsWindowViewModel(store, settings);
         DataContext = ViewModel;
         ViewModel.CloseRequested += ViewModel_CloseRequested;
     }

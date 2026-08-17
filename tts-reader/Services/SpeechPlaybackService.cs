@@ -8,9 +8,19 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
     private SpeechSynthesizer? _synthesizer;
     private readonly object _gate = new();
     private int _activeCaretIndex;
+    private readonly IPiperProcessRunner _piperRunner;
+    private readonly IWaveAudioPlayer _audioPlayer;
+    private CancellationTokenSource? _piperCancellation;
+    private int _playbackGeneration;
 
     public event EventHandler<string>? PlaybackEnded;
     public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
+
+    public SpeechPlaybackService(IPiperProcessRunner? piperRunner = null, IWaveAudioPlayer? audioPlayer = null)
+    {
+        _piperRunner = piperRunner ?? new PiperProcessRunner();
+        _audioPlayer = audioPlayer ?? new WaveAudioPlayer();
+    }
 
     private SpeechSynthesizer EnsureSynthesizer()
     {
@@ -41,8 +51,17 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
     {
         var remaining = GetTextFromCaret(text, caretIndex);
 
+        if (backend.Engine == SpeechEngines.Piper)
+        {
+            StartPiper(remaining, caretIndex, backend, playbackRate);
+            return;
+        }
+        if (backend.Engine != SpeechEngines.Windows)
+            throw new NotSupportedException($"Unknown speech engine '{backend.Engine}'.");
+
         lock (_gate)
         {
+            CancelPiper();
             var synthesizer = EnsureSynthesizer();
             synthesizer.SpeakAsyncCancelAll();
             _activeCaretIndex = caretIndex;
@@ -52,6 +71,96 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
                 : backend.VoiceName);
             synthesizer.SpeakAsync(remaining);
         }
+    }
+
+    private void StartPiper(string remaining, int caretIndex, BackendDefinition backend, double playbackRate)
+    {
+        if (double.IsNaN(playbackRate) || double.IsInfinity(playbackRate) || playbackRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(playbackRate));
+        PiperProcessRunner.Validate(backend);
+
+        CancellationToken token;
+        int generation;
+        lock (_gate)
+        {
+            _synthesizer?.SpeakAsyncCancelAll();
+            CancelPiper();
+            _piperCancellation = new CancellationTokenSource();
+            token = _piperCancellation.Token;
+            generation = ++_playbackGeneration;
+        }
+
+        _ = RunPiperAsync(remaining, caretIndex, backend, playbackRate, generation, token);
+    }
+
+    private async Task RunPiperAsync(string text, int caretIndex, BackendDefinition backend,
+        double playbackRate, int generation, CancellationToken token)
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), "TtsReader", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            foreach (var chunk in SplitIntoChunks(text))
+            {
+                token.ThrowIfCancellationRequested();
+                var outputPath = Path.Combine(tempDirectory, "speech.wav");
+                await _piperRunner.SynthesizeAsync(backend, chunk.Text, outputPath, playbackRate, token);
+                PlaybackProgress?.Invoke(this,
+                    new SpeechProgressEventArgs(caretIndex + chunk.Offset, chunk.Text.Length));
+                await _audioPlayer.PlayAsync(outputPath, token);
+            }
+            if (IsCurrent(generation))
+                PlaybackEnded?.Invoke(this, "Playback finished.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrent(generation))
+                PlaybackEnded?.Invoke(this, $"Playback failed: {exception.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDirectory, true); } catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    public static IReadOnlyList<(string Text, int Offset)> SplitIntoChunks(string text, int maximumLength = 500)
+    {
+        if (maximumLength < 1) throw new ArgumentOutOfRangeException(nameof(maximumLength));
+        var chunks = new List<(string Text, int Offset)>();
+        var offset = 0;
+        while (offset < text.Length)
+        {
+            while (offset < text.Length && char.IsWhiteSpace(text[offset])) offset++;
+            if (offset >= text.Length) break;
+            var length = Math.Min(maximumLength, text.Length - offset);
+            if (offset + length < text.Length)
+            {
+                var boundary = text.LastIndexOfAny(['.', '!', '?', '\n', ' '], offset + length - 1, length);
+                if (boundary >= offset) length = boundary - offset + 1;
+            }
+            var chunk = text.Substring(offset, length).TrimEnd();
+            if (chunk.Length > 0) chunks.Add((chunk, offset));
+            offset += length;
+        }
+        return chunks;
+    }
+
+    private bool IsCurrent(int generation)
+    {
+        lock (_gate) return generation == _playbackGeneration;
+    }
+
+    private void CancelPiper()
+    {
+        _playbackGeneration++;
+        _piperCancellation?.Cancel();
+        _piperCancellation?.Dispose();
+        _piperCancellation = null;
+        _audioPlayer.Stop();
     }
 
     public static int MapPlaybackRate(double playbackRate)
@@ -81,6 +190,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         lock (_gate)
         {
             _synthesizer?.SpeakAsyncCancelAll();
+            CancelPiper();
         }
     }
 

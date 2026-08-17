@@ -12,8 +12,9 @@ public sealed class SettingsAndDownloadTests : IDisposable
     {
         var store = new SettingsStore(_root);
         var settings = SettingsStore.CreateDefaults();
-        settings.ActiveBackendId = "downloaded-profile";
-        settings.Backends[1].DownloadSource = "https://example.test/voice.profile";
+        settings.ActiveBackendId = "piper-local";
+        settings.Backends[1].ExecutablePath = "C:\\Piper\\piper.exe";
+        settings.Backends[1].ModelPath = "C:\\Piper\\voice.onnx";
         settings.PlaybackRate = 1.25;
         settings.LastFolderPath = "C:\\Documents";
         settings.LastSelectedFilePath = "C:\\Documents\\story.md";
@@ -21,50 +22,55 @@ public sealed class SettingsAndDownloadTests : IDisposable
         store.Save(settings);
         var loaded = store.Load();
 
-        Assert.Equal("downloaded-profile", loaded.ActiveBackendId);
+        Assert.Equal("piper-local", loaded.ActiveBackendId);
         Assert.Equal(2, loaded.Backends.Count);
-        Assert.Equal("https://example.test/voice.profile", loaded.Backends[1].DownloadSource);
+        Assert.Equal("C:\\Piper\\piper.exe", loaded.Backends[1].ExecutablePath);
+        Assert.Equal("C:\\Piper\\voice.onnx", loaded.Backends[1].ModelPath);
         Assert.Equal(1.25, loaded.PlaybackRate);
         Assert.Equal(settings.LastFolderPath, loaded.LastFolderPath);
         Assert.Equal(settings.LastSelectedFilePath, loaded.LastSelectedFilePath);
     }
 
     [Fact]
-    public async Task DownloadAsync_UsesPartialFileAndMarksAvailableOnlyAfterSuccess()
+    public void PiperAvailability_RequiresExecutableModelAndModelConfiguration()
     {
-        Directory.CreateDirectory(_root);
-        var source = Path.Combine(_root, "source.profile");
-        await File.WriteAllTextAsync(source, "voice profile content");
-        var store = new SettingsStore(Path.Combine(_root, "data"));
+        var executable = Path.Combine(_root, "piper.exe");
+        var model = Path.Combine(_root, "voice.onnx");
         var backend = new BackendDefinition
         {
-            Id = "test", Name = "Test", Kind = "Profile", PackageFileName = "test.profile",
-            DownloadSource = new Uri(source).AbsoluteUri
+            Id = "test", Name = "Test", Kind = "Piper", Engine = SpeechEngines.Piper,
+            ExecutablePath = executable, ModelPath = model
         };
+        var store = new SettingsStore(Path.Combine(_root, "data"));
         Assert.False(store.IsAvailable(backend));
 
-        await new BackendDownloader().DownloadAsync(backend, store.GetPackagePath(backend));
-
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(executable, "exe");
+        File.WriteAllText(model, "model");
+        Assert.False(store.IsAvailable(backend));
+        File.WriteAllText(model + ".json", "{}");
         Assert.True(store.IsAvailable(backend));
-        Assert.Equal("voice profile content", await File.ReadAllTextAsync(store.GetPackagePath(backend)));
-        Assert.False(File.Exists(store.GetPackagePath(backend) + ".partial"));
     }
 
     [Fact]
-    public async Task DownloadAsync_FailureDoesNotCreateAvailablePackage()
+    public void Load_UpgradesMetadataOnlyProfileToWindowsBackend()
     {
         var store = new SettingsStore(_root);
-        var backend = new BackendDefinition
+        var legacy = new ReaderSettings
         {
-            Id = "test", Name = "Test", Kind = "Profile", PackageFileName = "test.profile",
-            DownloadSource = new Uri(Path.Combine(_root, "missing.profile")).AbsoluteUri
+            ActiveBackendId = "downloaded-profile",
+            Backends =
+            [
+                new BackendDefinition { Id = "windows-default", Name = "Windows", Kind = "Windows", BuiltIn = true },
+                new BackendDefinition { Id = "downloaded-profile", Name = "Profile", Kind = "Profile" }
+            ]
         };
+        store.Save(legacy);
 
-        await Assert.ThrowsAsync<FileNotFoundException>(() =>
-            new BackendDownloader().DownloadAsync(backend, store.GetPackagePath(backend)));
+        var loaded = store.Load();
 
-        Assert.False(store.IsAvailable(backend));
-        Assert.False(File.Exists(store.GetPackagePath(backend) + ".partial"));
+        Assert.Equal("windows-default", loaded.ActiveBackendId);
+        Assert.Contains(loaded.Backends, item => item.Id == "piper-local" && item.Engine == SpeechEngines.Piper);
     }
 
     public void Dispose()
