@@ -2,62 +2,180 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:models="clr-namespace:TtsReader.Models"
-        Title="TTS Reader" Height="760" Width="1180" MinHeight="500" MinWidth="800"
-        Background="{StaticResource WindowBackground}" Foreground="White">
+        Title="TTS Reader"
+        Height="760"
+        Width="1180"
+        MinHeight="520"
+        MinWidth="800"
+        Background="{StaticResource WindowBackground}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
     <Window.Resources>
         <HierarchicalDataTemplate DataType="{x:Type models:DocumentNode}" ItemsSource="{Binding Children}">
-            <TextBlock Text="{Binding Name}" Foreground="#E8E8E8" ToolTip="{Binding FullPath}"/>
+            <TextBlock Text="{Binding Name}"
+                       Foreground="{StaticResource TextPrimary}"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding FullPath}"/>
         </HierarchicalDataTemplate>
     </Window.Resources>
 
-    <Grid>
+    <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{StaticResource PanelBackground}" Padding="8">
-            <DockPanel>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button Content="Open folder..." Command="{Binding OpenFolderCommand}"/>
-                    <Button Content="▶ Play from caret" Command="{Binding PlayCommand}"/>
-                    <Button Content="■ Stop" Command="{Binding StopCommand}"/>
-                    <TextBlock Text="Speed:" VerticalAlignment="Center" Margin="10,0,2,0"/>
-                    <ComboBox Width="72" VerticalContentAlignment="Center"
-                              ItemsSource="{Binding PlaybackSpeeds}"
-                              DisplayMemberPath="Label" SelectedValuePath="Multiplier"
-                              SelectedValue="{Binding PlaybackRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                              ToolTip="Speech speed"/>
-                    <Button Content="Settings..." Command="{Binding OpenSettingsCommand}"/>
+        <Border Grid.Row="0"
+                Style="{StaticResource SurfaceCardStyle}"
+                Padding="14,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.Column="0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource EyebrowTextStyle}" Text="TTS READER"/>
+                    <TextBlock Style="{StaticResource TitleTextStyle}" Text="Read your documents aloud"/>
                 </StackPanel>
-                <TextBlock x:Name="BackendLabel" DockPanel.Dock="Right" VerticalAlignment="Center"
-                           Foreground="{StaticResource Accent}" Margin="12,0" TextAlignment="Right"
-                           Text="{Binding BackendStatus}"/>
-            </DockPanel>
+
+                <Border Grid.Row="0"
+                        Grid.Column="1"
+                        Background="{StaticResource AccentSoft}"
+                        BorderBrush="{StaticResource BorderStrong}"
+                        BorderThickness="1"
+                        CornerRadius="7"
+                        MaxWidth="310"
+                        Padding="12,8"
+                        Margin="16,0,0,0">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource EyebrowTextStyle}" Text="ACTIVE BACKEND"/>
+                        <TextBlock x:Name="BackendLabel"
+                                   Foreground="{StaticResource AccentHover}"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding BackendStatus}"/>
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <Button Content="Open folder"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding OpenFolderCommand}"
+                                Margin="0,0,8,0"
+                                ToolTip="Choose a folder containing supported documents"/>
+                        <Button Content="Play from caret"
+                                Command="{Binding PlayCommand}"
+                                Margin="0,0,8,0"
+                                ToolTip="Start reading from the current caret"/>
+                        <Button Content="Stop"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Command="{Binding StopCommand}"
+                                ToolTip="Stop speech playback"/>
+                        <Border Background="{StaticResource InputBackground}"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="10,3"
+                                Margin="12,0,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource LabelTextStyle}"
+                                           Text="Speed"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <ComboBox Width="82"
+                                          ItemsSource="{Binding PlaybackSpeeds}"
+                                          DisplayMemberPath="Label"
+                                          SelectedValuePath="Multiplier"
+                                          SelectedValue="{Binding PlaybackRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          ToolTip="Speech speed"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Button Grid.Column="1"
+                            Content="Speech settings"
+                            Command="{Binding OpenSettingsCommand}"
+                            Margin="12,0,0,0"
+                            ToolTip="Configure the active speech backend"/>
+                </Grid>
+            </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="1" Margin="0,14,0,14">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" MinWidth="180"/>
-                <ColumnDefinition Width="5"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="270" MinWidth="210"/>
+                <ColumnDefinition Width="9"/>
+                <ColumnDefinition Width="*" MinWidth="340"/>
             </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="{StaticResource PanelBackground}" Padding="8">
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Documents" FontWeight="SemiBold" Margin="3,2,3,8"/>
-                    <TreeView x:Name="DocumentTree" ItemsSource="{Binding Documents}"
-                              Background="Transparent" BorderThickness="0"
+
+            <Border Grid.Column="0"
+                    Style="{StaticResource SurfaceCardStyle}"
+                    Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Style="{StaticResource EyebrowTextStyle}" Text="LIBRARY"/>
+                    <StackPanel Grid.Row="1" Margin="0,2,0,0">
+                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Documents"/>
+                        <TextBlock Style="{StaticResource CaptionTextStyle}"
+                                   Margin="0,3,0,0"
+                                   Text="Choose a file to render it in the reading surface."/>
+                    </StackPanel>
+                    <TreeView x:Name="DocumentTree"
+                              Grid.Row="2"
+                              Margin="0,12,0,0"
+                              ItemsSource="{Binding Documents}"
+                              Background="Transparent"
+                              BorderThickness="0"
+                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                               SelectedItemChanged="DocumentTree_SelectedItemChanged"/>
-                </DockPanel>
+                </Grid>
             </Border>
-            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="#363A42"/>
-            <RichTextBox x:Name="DocumentText" Grid.Column="2" IsReadOnly="True"
-                         AcceptsTab="True" VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto" FontFamily="Segoe UI" FontSize="16"
-                         Padding="0" BorderThickness="0" Background="Transparent"
-                         CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
-                         SelectionTextBrush="#15171B" SelectionOpacity="0.8"
+
+            <GridSplitter Grid.Column="1"
+                          Width="5"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="{StaticResource BorderBrush}"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="False"
+                          ToolTip="Drag to resize the document list"/>
+
+            <RichTextBox x:Name="DocumentText"
+                         Grid.Column="2"
+                         IsReadOnly="True"
+                         AcceptsTab="True"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Auto"
+                         FontFamily="Segoe UI"
+                         FontSize="16"
+                         Padding="0"
+                         Background="{StaticResource ReaderBackground}"
+                         BorderBrush="{StaticResource BorderBrush}"
+                         BorderThickness="1"
+                         CaretBrush="{StaticResource Accent}"
+                         SelectionBrush="{StaticResource SelectionBackground}"
+                         SelectionTextBrush="{StaticResource TextPrimary}"
+                         SelectionOpacity="0.9"
                          PreviewMouseLeftButtonDown="DocumentText_PreviewMouseLeftButtonDown"
                          PreviewMouseMove="DocumentText_PreviewMouseMove"
                          PreviewMouseLeftButtonUp="DocumentText_PreviewMouseLeftButtonUp"
@@ -65,8 +183,42 @@
                          AutomationProperties.Name="Rendered document"/>
         </Grid>
 
-        <Border Grid.Row="2" Background="{StaticResource PanelBackground}" Padding="10,7">
-            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+        <Border Grid.Row="2"
+                Style="{StaticResource SurfaceCardStyle}"
+                Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse Grid.Column="0"
+                         Width="8"
+                         Height="8"
+                         Fill="{StaticResource Accent}"
+                         VerticalAlignment="Top"
+                         Margin="0,5,9,0"/>
+                <TextBlock Grid.Column="1"
+                           Foreground="{StaticResource TextSecondary}"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Text="{Binding Status}"/>
+                <ProgressBar Grid.Column="2"
+                             Width="100"
+                             Margin="12,0,0,0"
+                             VerticalAlignment="Center"
+                             IsIndeterminate="True"
+                             Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                <Button Grid.Column="3"
+                        Content="Cancel loading"
+                        Style="{StaticResource DangerButtonStyle}"
+                        Command="{Binding CancelLoadingCommand}"
+                        Margin="12,0,0,0"
+                        Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}"
+                        ToolTip="Cancel the current document load"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>
