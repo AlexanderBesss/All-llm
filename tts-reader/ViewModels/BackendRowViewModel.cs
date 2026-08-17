@@ -15,14 +15,26 @@ public sealed class BackendRowViewModel : ViewModel
     public string Availability => IsAvailable ? "Available locally" : "Unavailable";
     public string DisplayName => IsActive ? $"✓ {Name} (active)" : Name;
 
-    public string Source
+    public string ExecutablePath
     {
-        get => Backend.DownloadSource ?? string.Empty;
+        get => Backend.ExecutablePath ?? string.Empty;
         set
         {
             var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-            if (Backend.DownloadSource == normalized) return;
-            Backend.DownloadSource = normalized;
+            if (Backend.ExecutablePath == normalized) return;
+            Backend.ExecutablePath = normalized;
+            OnPropertyChanged();
+        }
+    }
+
+    public string ModelPath
+    {
+        get => Backend.ModelPath ?? string.Empty;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            if (Backend.ModelPath == normalized) return;
+            Backend.ModelPath = normalized;
             OnPropertyChanged();
         }
     }

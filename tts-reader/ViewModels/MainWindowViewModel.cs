@@ -302,7 +302,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         }
         if (!_settingsStore.IsAvailable(backend))
         {
-            Status = $"'{backend.Name}' is unavailable. Open Settings to download it or select another backend.";
+            Status = $"'{backend.Name}' is unavailable. Open Settings to configure it or select another backend.";
             return;
         }
 

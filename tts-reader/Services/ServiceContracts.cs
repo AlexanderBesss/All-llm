@@ -17,13 +17,6 @@ public interface ISettingsStore
     ReaderSettings Load();
     void Save(ReaderSettings settings);
     bool IsAvailable(BackendDefinition backend);
-    string GetPackagePath(BackendDefinition backend);
-}
-
-public interface IBackendDownloader
-{
-    Task DownloadAsync(BackendDefinition backend, string destinationPath,
-        IProgress<int>? progress = null, CancellationToken cancellationToken = default);
 }
 
 public interface ISpeechPlaybackService : IDisposable

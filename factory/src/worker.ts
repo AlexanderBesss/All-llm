@@ -1,6 +1,14 @@
 import crypto from "node:crypto";
 import { abortError, isAbortError } from "./git.js";
-import { formatFactoryLog, makeRunId, RUN_STATUSES, STAGES, EventType, RunAction } from "./types.js";
+import {
+  formatFactoryLog,
+  makeRunId,
+  RUN_STATUSES,
+  STAGES,
+  EventType,
+  RunAction,
+  RunCancellationReason,
+} from "./types.js";
 import type { FactoryRun } from "./model/database.js";
 import type { FactoryConfig } from "./model/config.js";
 import type { CodexAgent } from "./model/codex.js";
@@ -72,11 +80,13 @@ export class FactoryWorker {
   }
 
   runResult(action: string, run: FactoryRun | null, issueKey?: string): FactoryRunResult {
-    const effectiveAction = run?.status === RUN_STATUSES.RETRY_WAIT
-      ? RunAction.RetryScheduled
-      : run?.status === RUN_STATUSES.BLOCKED
-        ? RunAction.Blocked
-        : action;
+    const effectiveAction = run?.status === RUN_STATUSES.CANCELLED
+      ? RunAction.Cancelled
+      : run?.status === RUN_STATUSES.RETRY_WAIT
+        ? RunAction.RetryScheduled
+        : run?.status === RUN_STATUSES.BLOCKED
+          ? RunAction.Blocked
+          : action;
     return {
       action: effectiveAction,
       runId: run?.id,
@@ -84,6 +94,7 @@ export class FactoryWorker {
       status: run?.status,
       stage: run?.stage,
       ...(run?.next_attempt_at ? { nextAttemptAt: run.next_attempt_at } : {}),
+      ...(run?.status === RUN_STATUSES.CANCELLED && run.last_error ? { reason: run.last_error } : {}),
     };
   }
 
@@ -127,7 +138,15 @@ export class FactoryWorker {
         const issue = await this.verifyResumableIssue(resumable);
         if (!issue) {
           await beforeAdvance?.(false);
-          return { action: RunAction.Cancelled, runId: resumable.id, issueKey: resumable.issue_key, reason: "Jira issue no longer exists." };
+          const cancelled = this.db.getRun(resumable.id);
+          return {
+            action: RunAction.Cancelled,
+            runId: resumable.id,
+            issueKey: resumable.issue_key,
+            status: cancelled?.status,
+            stage: cancelled?.stage,
+            reason: cancelled?.last_error || "Jira issue no longer exists.",
+          };
         }
         if (!this.db.acquireLease(
           resumable.id,
@@ -152,6 +171,11 @@ export class FactoryWorker {
             return { action: RunAction.Idle };
           }
           try {
+            const currentIssue = await this.checkRunStatus(leased);
+            if (!currentIssue) {
+              await beforeAdvance?.(false);
+              return this.runResult(RunAction.Cancelled, this.db.getRun(leased.id), leased.issue_key);
+            }
             await this.transitionIfNeeded(leased.issue_key, this.config.jira.statuses.implementation);
           } catch (error) {
             this.db.updateRun(leased.id, { lease_owner: null, lease_until: null });
@@ -332,6 +356,8 @@ export class FactoryWorker {
     for (let step = 0; step < 4; step += 1) {
       this.throwIfStopping();
       if (!current || current.status === RUN_STATUSES.CANCELLED || current.stage === STAGES.REVIEW || current.stage === STAGES.BLOCKED) return current;
+      const issue = await this.checkRunStatus(current);
+      if (!issue) return this.db.getRun(current.id);
       this.log("info", "run:stage", {
         runId: current.id,
         issueKey: current.issue_key,
@@ -347,39 +373,70 @@ export class FactoryWorker {
     return current;
   }
 
-  async verifyResumableIssue(run) {
+  async cancelRun(run: FactoryRun, reason: RunCancellationReason, message: string, details: Record<string, unknown> = {}) {
+    this.db.updateRun(run.id, {
+      status: RUN_STATUSES.CANCELLED,
+      last_error: message,
+      lease_owner: null,
+      lease_until: null,
+      next_attempt_at: null,
+    });
+    this.db.recordEvent(run.id, EventType.RunCancelled, {
+      reason,
+      issueKey: run.issue_key,
+      message,
+      ...details,
+    });
+    this.log("warn", reason === RunCancellationReason.JiraIssueDone ? "run:cancelled-done-jira" : "run:cancelled-missing-jira", {
+      runId: run.id,
+      issueKey: run.issue_key,
+      stage: run.stage,
+      reason: message,
+      ...(reason === RunCancellationReason.JiraIssueDone ? { cancellationReason: reason } : {}),
+      ...details,
+    });
+    return this.db.getRun(run.id);
+  }
+
+  async checkRunStatus(run: FactoryRun) {
     this.throwIfStopping();
     try {
       const issue = await this.jira.getIssue(run.issue_key);
+      const observedStatus = String(issue.fields?.status?.name || "").trim();
+      const configuredDoneStatus = String(this.config.jira.statuses.done || "").trim();
+      this.log("info", "run:jira-status-checked", {
+        runId: run.id,
+        issueKey: run.issue_key,
+        status: observedStatus,
+        doneStatus: configuredDoneStatus,
+      });
+      if (configuredDoneStatus && observedStatus.toLowerCase() === configuredDoneStatus.toLowerCase()) {
+        const message = `Jira issue ${run.issue_key} is in configured Done status "${configuredDoneStatus}"; cancelling factory run ${run.id}.`;
+        await this.cancelRun(run, RunCancellationReason.JiraIssueDone, message, {
+          doneStatus: configuredDoneStatus,
+          observedStatus,
+        });
+        return null;
+      }
+      return issue;
+    } catch (error) {
+      if (!isJiraIssueMissing(error)) throw error;
+      const message = `Jira issue ${run.issue_key} no longer exists; cancelling persisted factory run ${run.id}.`;
+      await this.cancelRun(run, RunCancellationReason.JiraIssueMissing, message);
+      return null;
+    }
+  }
+
+  async verifyResumableIssue(run) {
+    const issue = await this.checkRunStatus(run);
+    if (issue) {
       this.log("info", "run:resume-issue-found", {
         runId: run.id,
         issueKey: run.issue_key,
         status: issue.fields?.status?.name || "",
       });
-      return issue;
-    } catch (error) {
-      if (!isJiraIssueMissing(error)) throw error;
-      const message = `Jira issue ${run.issue_key} no longer exists; cancelling persisted factory run ${run.id}.`;
-      this.db.updateRun(run.id, {
-        status: RUN_STATUSES.CANCELLED,
-        last_error: message,
-        lease_owner: null,
-        lease_until: null,
-        next_attempt_at: null,
-      });
-      this.db.recordEvent(run.id, EventType.RunCancelled, {
-        reason: "jira_issue_missing",
-        issueKey: run.issue_key,
-        message,
-      });
-      this.log("warn", "run:cancelled-missing-jira", {
-        runId: run.id,
-        issueKey: run.issue_key,
-        stage: run.stage,
-        reason: message,
-      });
-      return null;
     }
+    return issue;
   }
 
   async processRun(run, { dryRun = false } = {}) {
