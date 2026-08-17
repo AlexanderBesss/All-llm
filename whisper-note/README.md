@@ -35,6 +35,7 @@ Remote providers have two independent modes in Settings:
 - **RemoteExecution** sends PCM audio over HTTP to the configured WhisperNote server endpoint.
 
 On the server instance, enable **Accept remote execution**, choose an HTTP listen endpoint, and keep that
-instance in **Local LLM** mode. The default listener is loopback-only. A LAN address may require a Windows
-URL ACL and firewall rule, and should only be exposed on a trusted network. The protocol intentionally does
+instance in **Local LLM** mode. The default listener is `http://0.0.0.0:8090`, which binds all interfaces;
+configure the client with the server's reachable LAN hostname or address rather than `0.0.0.0`. A LAN
+binding may require a Windows URL ACL and firewall rule, and should only be exposed on a trusted network. The protocol intentionally does
 not add authentication or TLS; cloud orchestration, streaming, and request queuing are not supported.

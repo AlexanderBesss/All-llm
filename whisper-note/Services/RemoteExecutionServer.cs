@@ -37,7 +37,7 @@ public sealed class RemoteExecutionServer : IDisposable
         var prefix = listenEndpoint.TrimEnd('/') + "/";
         _basePath = new Uri(prefix, UriKind.Absolute).AbsolutePath.TrimEnd('/');
         var listener = new HttpListener();
-        listener.Prefixes.Add(prefix);
+        listener.Prefixes.Add(CreateHttpListenerPrefix(prefix));
         try
         {
             listener.Start();
@@ -55,6 +55,16 @@ public sealed class RemoteExecutionServer : IDisposable
         SetStatus($"Serving {listenEndpoint}");
         _acceptTask = AcceptLoopAsync(listener, _cts.Token);
         return Task.CompletedTask;
+    }
+
+    static string CreateHttpListenerPrefix(string prefix)
+    {
+        if (!Uri.TryCreate(prefix, UriKind.Absolute, out var uri) || uri.Host != "0.0.0.0")
+            return prefix;
+
+        // HttpListener uses '+' for an all-interface binding; 0.0.0.0 is the
+        // user-facing endpoint format but is rejected as a listener prefix.
+        return new UriBuilder(uri) { Host = "+" }.Uri.AbsoluteUri;
     }
 
     async Task AcceptLoopAsync(HttpListener listener, CancellationToken ct)

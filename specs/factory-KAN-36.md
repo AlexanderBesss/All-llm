@@ -78,7 +78,7 @@ WhisperNote currently supports local llama.cpp transcription and remote provider
 
 - Existing non-local providers remain Direct API providers. The new instance-level `RemoteProviderMode` defaults to `DirectApi`, so configurations written before this feature retain their endpoint, failover, credential, and selection behavior.
 - Remote execution uses an app-specific HTTP JSON contract (`GET /health`, `POST /api/transcriptions`) carrying PCM bytes and channel count. The server runs the bytes through the same local transcription path, prompt/parser, thinking setting, model startup, and optional VRAM offload used by local UI recordings.
-- The server role is opt-in, loopback-only by default, handles one request at a time, rejects concurrent work, and requires that instance to be in Local LLM mode. A configured LAN HTTP prefix can require an OS URL ACL and firewall rule. Authentication/TLS changes remain out of scope, so the UI and documentation explicitly limit use to a trusted network.
+- The server role is opt-in, binds `http://0.0.0.0:8090` by default so it can accept trusted-network connections, handles one request at a time, rejects concurrent work, and requires that instance to be in Local LLM mode. A configured LAN HTTP prefix can require an OS URL ACL and firewall rule. Authentication/TLS changes remain out of scope, so the UI and documentation explicitly limit use to a trusted network.
 - The remote-execution client endpoint and Direct API endpoint list are stored and validated separately. Remote execution never consumes Direct API credentials or failover endpoints.
 - The main header reports Local LLM, Direct API, or Remote execution, the active provider/client connection state, and the server listener state independently.
 

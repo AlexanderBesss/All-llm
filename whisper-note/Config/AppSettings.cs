@@ -13,6 +13,7 @@ public class AppSettings
     const int DefaultHotkeyVkCode = 0xA3;
     public const string DefaultCloudLlmUrl = "http://192.168.0.96:8082";
     public const string DefaultRemoteExecutionUrl = "http://localhost:8090";
+    public const string DefaultRemoteListenEndpoint = "http://0.0.0.0:8090";
 
     public int ActiveProviderIndex { get; set; }
     public List<ProviderConfig> Providers { get; set; } = new();
@@ -24,7 +25,7 @@ public class AppSettings
     public RemoteProviderMode RemoteProviderMode { get; set; } = RemoteProviderMode.DirectApi;
     public string RemoteServerEndpoint { get; set; } = DefaultRemoteExecutionUrl;
     public bool RemoteServerEnabled { get; set; }
-    public string RemoteListenEndpoint { get; set; } = DefaultRemoteExecutionUrl;
+    public string RemoteListenEndpoint { get; set; } = DefaultRemoteListenEndpoint;
 
     static string ConfigPath() => AppPaths.SettingsPath;
 
@@ -112,7 +113,7 @@ public class AppSettings
         }
 
         if (!TryNormalizeHttpListenEndpoint(RemoteListenEndpoint, out var remoteListenEndpoint))
-            remoteListenEndpoint = DefaultRemoteExecutionUrl;
+            remoteListenEndpoint = DefaultRemoteListenEndpoint;
         if (RemoteListenEndpoint != remoteListenEndpoint)
         {
             RemoteListenEndpoint = remoteListenEndpoint;

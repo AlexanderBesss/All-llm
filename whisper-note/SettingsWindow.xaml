@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WhisperNote Settings"
-        Width="440" Height="520"
+        Width="440" Height="680"
         MinWidth="420" MaxWidth="460"
-        MinHeight="440" MaxHeight="580"
+        MinHeight="440" MaxHeight="740"
         Topmost="True"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -186,8 +186,8 @@
                             <TextBlock Text="Listen endpoint" FontSize="12" Foreground="#CFCFCF"/>
                             <TextBox Text="{Binding RemoteListenEndpoint, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                      IsEnabled="{Binding RemoteServerEnabled}" Margin="0,6,0,0"
-                                     ToolTip="HTTP prefix to listen on; LAN bindings may require a Windows URL ACL and firewall rule"/>
-                            <TextBlock Text="Keep the server instance in Local LLM mode. Authentication and TLS are unchanged."
+                                     ToolTip="HTTP prefix to listen on; use 0.0.0.0 to bind all interfaces. LAN bindings may require a Windows URL ACL and firewall rule"/>
+                            <TextBlock Text="The default binds all interfaces. Keep the server instance in Local LLM mode and use only a trusted network; authentication and TLS are unchanged."
                                        FontSize="10" Foreground="#777" TextWrapping="Wrap" Margin="0,7,0,0"/>
                         </StackPanel>
                     </Border>

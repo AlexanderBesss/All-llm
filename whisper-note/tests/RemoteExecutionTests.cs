@@ -31,6 +31,16 @@ public class RemoteExecutionTests
     }
 
     [Fact]
+    public void RemoteExecutionClientAndListenerHaveSeparateDefaults()
+    {
+        var settings = new AppSettings();
+
+        Assert.Equal("http://localhost:8090", settings.RemoteServerEndpoint);
+        Assert.Equal("http://0.0.0.0:8090", settings.RemoteListenEndpoint);
+        Assert.True(AppSettings.TryNormalizeHttpListenEndpoint(settings.RemoteListenEndpoint, out _));
+    }
+
+    [Fact]
     public void RemoteExecutionEndpointStaysSeparateFromDirectApiFailover()
     {
         var settings = Settings();
