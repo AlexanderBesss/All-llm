@@ -801,12 +801,12 @@ test("review-fix loop resolves addressed threads and replies to disputed feedbac
     threadId: "thread-incorrect",
     body: "❌ That change conflicts with the documented requirement.",
   }]);
-  assert.deepEqual(pr.labels, ["ai-review"]);
+  assert.deepEqual(pr.labels, ["ai-fix", "ai-review"]);
   assert.ok(logs.some((entry) => entry.includes("review-fix:requeued-ai-review")));
   fixtureData.db.close();
 });
 
-test("review-fix loop only sends unresolved AI findings without follow-ups to the agent", async () => {
+test("review-fix loop sends unresolved review threads without follow-ups, including human comments", async () => {
   const fixtureData = await fixture();
   fixtureData.config.repoPath = path.resolve(".");
   const pr = await fixtureData.github.createPullRequest({
@@ -842,10 +842,13 @@ test("review-fix loop only sends unresolved AI findings without follow-ups to th
       task = input.task;
       return {
         output: JSON.stringify({
-          summary: "Handled the eligible review finding",
+          summary: "Handled the eligible review findings",
           committed: true,
           pushed: true,
-          threads: [{ threadId: "thread-eligible", disposition: "addressed", reply: "" }],
+          threads: [
+            { threadId: "thread-eligible", disposition: "addressed", reply: "" },
+            { threadId: "thread-human", disposition: "addressed", reply: "" },
+          ],
           tests: [],
           blockers: [],
         }),
@@ -856,15 +859,66 @@ test("review-fix loop only sends unresolved AI findings without follow-ups to th
 
   const result = await worker.fixPullRequestReviews();
 
-  assert.deepEqual(result, { pullRequests: 1, addressed: 1, disputed: 0, failed: 0 });
+  assert.deepEqual(result, { pullRequests: 1, addressed: 2, disputed: 0, failed: 0 });
   assert.equal(agentCalls, 1);
   assert.match(task, /thread-eligible/);
-  assert.doesNotMatch(task, /thread-resolved|thread-not-relevant|thread-do-not-fix|thread-human/);
+  assert.match(task, /thread-human/);
+  assert.doesNotMatch(task, /thread-resolved|thread-not-relevant|thread-do-not-fix/);
   assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-resolved")?.isResolved, true);
   assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-not-relevant")?.isResolved, false);
   assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-do-not-fix")?.isResolved, false);
-  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-human")?.isResolved, false);
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.find((thread) => thread.id === "thread-human")?.isResolved, true);
   assert.deepEqual(fixtureData.github.reviewReplies, []);
+  assert.deepEqual(pr.labels, ["ai-fix", "ai-review"]);
+  fixtureData.db.close();
+});
+
+test("review-fix loop replies to an out-of-scope human comment", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.repoPath = path.resolve(".");
+  const pr = await fixtureData.github.createPullRequest({
+    title: "[FACT-1] Add factory coverage (Task)",
+    taskNumber: "FACT-1",
+    taskName: "Add factory coverage",
+    taskType: "Task",
+    body: "Details",
+    head: "factory/FACT-1",
+    base: "main",
+  });
+  pr.labels = ["ai-fix"];
+  fixtureData.github.reviewThreads.set(pr.number, [
+    { id: "thread-human-out-of-scope", isResolved: false, comments: [{ id: "comment-human-out-of-scope", author: "reviewer", body: "Please update the unrelated deployment dashboard." }] },
+  ]);
+  const worker = makeWorker(fixtureData, {
+    async run() {
+      return {
+        output: JSON.stringify({
+          summary: "Rejected unrelated review feedback",
+          committed: false,
+          pushed: false,
+          threads: [{
+            threadId: "thread-human-out-of-scope",
+            disposition: "disputed",
+            reply: "❌ This human comment is outside the AI Review repair scope for this pull request.",
+          }],
+          tests: [],
+          blockers: [],
+        }),
+        events: [],
+      };
+    },
+  });
+
+  const result = await worker.fixPullRequestReviews();
+
+  assert.deepEqual(result, { pullRequests: 1, addressed: 0, disputed: 1, failed: 0 });
+  assert.equal(fixtureData.github.reviewThreads.get(pr.number)?.[0].isResolved, false);
+  assert.deepEqual(fixtureData.github.reviewReplies, [{
+    prNumber: pr.number,
+    threadId: "thread-human-out-of-scope",
+    body: "❌ This human comment is outside the AI Review repair scope for this pull request.",
+  }]);
+  assert.deepEqual(pr.labels, ["ai-fix"]);
   fixtureData.db.close();
 });
 
@@ -907,7 +961,7 @@ test("review-fix loop does not resolve addressed threads without a newly publish
   fixtureData.db.close();
 });
 
-test("review-fix loop leaves an ai-fix pull request alone when no eligible threads remain", async () => {
+test("review-fix loop leaves an ai-fix pull request alone when no unresolved threads remain", async () => {
   const fixtureData = await fixture();
   fixtureData.config.repoPath = path.resolve(".");
   const pr = await fixtureData.github.createPullRequest({

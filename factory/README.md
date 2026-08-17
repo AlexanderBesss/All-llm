@@ -45,9 +45,9 @@ Before a pull request is created, the supervisor runs every configured `validati
 
 Titles must be `[JIRA-KEY] exact Jira task name (Task|feature|bug fix)`. The name comes from the Jira summary; type is normalized to one of the three supported values. Missing components or an invalid existing open-PR title reject the pull request.
 
-New pull requests receive `review`, then `ai-review`. The repository AI Review workflow runs only on the `ai-review` label event, filters to high-relevance/high-impact findings, publishes inline comments, and removes the trigger label; ordinary PR creation, updates, and commits do not spend review tokens. A human applies `ai-fix` after reviewing findings.
+New pull requests receive `review`, then `ai-review`. The repository AI Review workflow runs only on the `ai-review` label event, filters to high-relevance/high-impact findings, publishes inline comments, and removes only the trigger label; ordinary PR creation, updates, and commits do not spend review tokens. A human applies `ai-fix` after reviewing findings. The `ai-review` and `ai-fix` labels are independent and may coexist.
 
-The review-fix loop scans open `ai-fix` pull requests and sends unresolved AI threads with no follow-up to one implementation-agent pass per PR. It ignores resolved threads, non-AI threads, and threads with human replies. After a verified commit and push, the supervisor resolves addressed threads and re-applies `ai-review`. Incorrect, irrelevant, contradictory, or unsafe feedback receives a concise negative reply and remains unresolved for human review. No eligible thread leaves the PR and label unchanged and starts no new review cycle.
+The review-fix loop scans open `ai-fix` pull requests and sends unresolved review threads with no follow-up to one implementation-agent pass per PR, whether the original comment came from AI or a human. After a verified commit and push, the supervisor resolves addressed threads and re-applies `ai-review` without removing `ai-fix`. Incorrect, irrelevant, contradictory, unsafe, or out-of-scope feedback receives a concise negative reply explaining the reason and remains unresolved for human review. Threads that already have replies are skipped to avoid repeated automated responses.
 
 ## Runtime and configuration
 

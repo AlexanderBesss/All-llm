@@ -81,7 +81,7 @@ test("GitHub CLI adapter lists ai-fix pull requests and reads unresolved review 
   assert.equal(calls[2].args[1], "graphql");
 });
 
-test("GitHub CLI adapter requeues an AI review by replacing the review-loop labels", async () => {
+test("GitHub CLI adapter requeues an AI review without removing ai-fix", async () => {
   const calls: Array<{ command: string; args: string[]; options?: ProcessOptions }> = [];
   const runner: ProcessRunner = async (command, args, options) => {
     calls.push({ command, args, options });
@@ -93,7 +93,7 @@ test("GitHub CLI adapter requeues an AI review by replacing the review-loop labe
 
   assert.deepEqual(calls[0].args, [
     "pr", "edit", "7", "--repo", "example/factory",
-    "--add-label", "ai-review", "--remove-label", "ai-fix",
+    "--add-label", "ai-review",
   ]);
 });
 

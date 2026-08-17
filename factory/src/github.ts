@@ -206,7 +206,6 @@ export class GitHubCliAdapter {
       "pr", "edit", String(prNumber),
       "--repo", this.repository,
       "--add-label", "ai-review",
-      "--remove-label", "ai-fix",
     ]);
   }
 
@@ -303,7 +302,6 @@ export class InMemoryGitHubAdapter {
   async requestAiReview(prNumber: number): Promise<void> {
     const pr = this.pullRequests.find((candidate) => candidate.number === prNumber);
     if (!pr) throw new Error(`PR #${prNumber} not found`);
-    pr.labels = (pr.labels || []).filter((label) => label !== "ai-fix");
     if (!pr.labels.includes("ai-review")) pr.labels.push("ai-review");
   }
 

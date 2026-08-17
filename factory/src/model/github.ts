@@ -40,7 +40,7 @@ export interface GitHubAdapter {
   enabled(): boolean;
   createPullRequest(input: PullRequestInput): Promise<PullRequest>;
   getPullRequest(prNumber: number): Promise<PullRequest | null>;
-  /** Replaces the review-loop labels so adding ai-review emits a new labeled event. */
+  /** Adds/requeues ai-review without changing the independent ai-fix label. */
   requestAiReview?(prNumber: number): Promise<void>;
   listOpenPullRequestsByLabel?(label: string): Promise<PullRequest[]>;
   getUnresolvedReviewThreads?(prNumber: number): Promise<PullRequestReviewThread[]>;

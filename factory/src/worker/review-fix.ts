@@ -5,16 +5,13 @@ import type { PullRequest, PullRequestReviewThread } from "../model/github.js";
 import { assertSchema, factorySchemaPath } from "../schema-validation.js";
 import type { FactoryWorker } from "../worker.js";
 
-const AI_REVIEW_MARKER = "<!-- ai-review -->";
 const NEGATIVE_REVIEW_MARKER = "❌";
 
-function isAiReviewFinding(thread: PullRequestReviewThread): boolean {
-  const firstComment = thread.comments[0];
-  return Boolean(firstComment && firstComment.body.trimStart().startsWith(AI_REVIEW_MARKER));
-}
-
-function eligibleReviewThreads(threads: PullRequestReviewThread[]): PullRequestReviewThread[] {
-  return threads.filter((thread) => !thread.isResolved && isAiReviewFinding(thread) && thread.comments.length === 1);
+function processableReviewThreads(threads: PullRequestReviewThread[]): PullRequestReviewThread[] {
+  // A single-comment unresolved thread is still actionable when it was written
+  // by a human. Replies are excluded so a disputed thread is not answered again
+  // on every polling pass.
+  return threads.filter((thread) => !thread.isResolved && thread.comments.length === 1);
 }
 
 function assertReviewResult(value: unknown, threads: PullRequestReviewThread[]): ReviewFixResult {
@@ -43,9 +40,9 @@ async function processPullRequest(worker: FactoryWorker, pullRequest: PullReques
   const getThreads = worker.github.getUnresolvedReviewThreads;
   if (!getThreads) throw new Error("GitHub adapter does not support review threads.");
   const availableThreads = await getThreads.call(worker.github, pullRequest.number);
-  const threads = eligibleReviewThreads(availableThreads);
+  const threads = processableReviewThreads(availableThreads);
   if (!threads.length) {
-    worker.log("info", "review-fix:no-eligible-threads", {
+    worker.log("info", "review-fix:no-processable-threads", {
       prNumber: pullRequest.number,
       availableThreads: availableThreads.length,
     });
