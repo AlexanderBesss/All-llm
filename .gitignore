@@ -3,11 +3,11 @@
 /llm-servers/llama/windows/*.log
 /llm-servers/beellama/bin/
 /llm-servers/beellama/*.log
-/whisper-note/bin/
-/whisper-note/obj/
-/whisper-note/publish/
-/whisper-note/tests/bin/
-/whisper-note/tests/obj/
+bin/
+obj/
+publish/
+tests/bin/
+tests/obj/
 /tts-reader/bin/
 /tts-reader/obj/
 /tts-reader/tests/bin/
