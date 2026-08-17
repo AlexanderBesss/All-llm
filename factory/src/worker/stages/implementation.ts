@@ -1,11 +1,11 @@
 import path from "node:path";
 import { ensureSpecFile } from "../../spec.js";
-import { makeRunMarker, nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart, StageRunStatus, ArtifactKind } from "../../types.js";
+import { nowIso, RUN_STATUSES, STAGES, sanitizeBranchPart, StageRunStatus, ArtifactKind } from "../../types.js";
 import type { FactoryRun } from "../../model/database.js";
 import type { JiraIssue } from "../../model/jira.js";
 import type { FactoryWorker } from "../../worker.js";
 import type { CodexEvent } from "../../model/codex.js";
-import { hashInput, normalizePlan, planDescription } from "../format.js";
+import { hashInput, normalizePlan } from "../format.js";
 import { runRepositoryValidation } from "../validation.js";
 
 const AGENT_HEARTBEAT_MS = 30_000;
@@ -179,13 +179,6 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       issue_json: JSON.stringify(issue),
       lease_until: new Date(Date.now() + worker.config.leaseMs).toISOString(),
     });
-    worker.log("info", "implementation:parent-description", { runId: run.id, issueKey: run.issue_key });
-    await worker.jira.updateDescription(run.issue_key, planDescription(
-      issue.fields?.description,
-      plan,
-      makeRunMarker(run.id),
-      spec.relativePath,
-    ));
     worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, {
       ...result.result,
       commitSha,

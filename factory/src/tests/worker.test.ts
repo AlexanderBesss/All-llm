@@ -62,13 +62,11 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   assert.match(pullRequestBody, /## References\n- Jira issue: `FACT-1`\n- Factory specification: `specs\/factory-FACT-1\.md`/);
   assert.equal(fixtureData.jira.issues.size, 1);
   const description = String((await fixtureData.jira.getIssue("FACT-1")).fields.description || "");
-  assert.match(description, /^> Implement the requested change\./);
-  assert.ok(description.indexOf("[factory-run:") > description.indexOf("> Implement the requested change."));
-  assert.ok(description.indexOf("## Implementation plan") > description.indexOf("[factory-run:"));
+  assert.equal(description, "Implement the requested change.");
+  assert.equal(fixtureData.jira.comments.length, 0);
   assert.equal(implementationInput.specPath, "specs/factory-FACT-1.md");
   assert.match(await readFile(path.join(implementationInput.cwd, implementationInput.specPath), "utf8"), /# Specification: \[FACT-1\]/);
   assert.equal(fixtureData.db.findArtifact(ArtifactKind.Spec, "factory/FACT-1").artifact_value, "specs/factory-FACT-1.md");
-  assert.match(description, /specs\/factory-FACT-1\.md/);
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-start")));
   assert.ok(logs.some((entry) => entry.includes("implementation:spec-ready")));
   assert.ok(logs.some((entry) => entry.includes("implementation:agent-complete")));
@@ -505,53 +503,25 @@ test("retries the same parent run without creating child work", async () => {
   fixtureData.db.close();
 });
 
-test("persists the returned plan before parent description reporting", async () => {
-  const fixtureData = await fixture({ maxAttempts: 2 });
-  let failDescription = true;
-  let previousPlan = null;
-  const originalUpdate = fixtureData.jira.updateDescription.bind(fixtureData.jira);
-  fixtureData.jira.updateDescription = async (...args) => {
-    if (failDescription) {
-      failDescription = false;
-      throw new Error("temporary Jira description outage");
-    }
-    return originalUpdate(...args);
-  };
-  const agent = {
-    async execute(input) {
-      previousPlan = input.previousPlan;
-      return { result: executionFor(), raw: {} };
-    },
-  };
-  const worker = makeWorker(fixtureData, agent);
-  const first = await worker.runOnce();
-  assert.equal(first.action, "retry_scheduled");
-  assert.ok(fixtureData.db.getRun(first.runId).plan_json);
-  await worker.runOnce();
-  assert.equal(previousPlan.summary, "Factory coverage");
-  assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
-  assert.match(String((await fixtureData.jira.getIssue("FACT-1")).fields.description || ""), /^> Implement the requested change\./);
-  fixtureData.db.close();
-});
-
-test("quotes every line of an ADF original description before implementation details", async () => {
-  const fixtureData = await fixture({
-    description: {
-      type: "doc",
-      version: 1,
-      content: [
-        { type: "paragraph", content: [{ type: "text", text: "Keep the first requirement." }] },
-        { type: "paragraph", content: [{ type: "text", text: "Keep the second requirement." }] },
-      ],
-    },
-  });
+test("does not update Jira description or add a comment during the implementation handoff", async () => {
+  const fixtureData = await fixture();
+  let descriptionUpdates = 0;
+  let comments = 0;
   const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+  worker.jira.updateDescription = async () => {
+    descriptionUpdates += 1;
+  };
+  worker.jira.addComment = async () => {
+    comments += 1;
+  };
 
   await worker.runOnce();
 
-  const description = String((await fixtureData.jira.getIssue("FACT-1")).fields.description || "");
-  assert.match(description, /^> Keep the first requirement\.\n> Keep the second requirement\./);
-  assert.ok(description.indexOf("## Implementation plan") > description.indexOf("> Keep the second requirement."));
+  assert.equal(descriptionUpdates, 0);
+  assert.equal(comments, 0);
+  assert.equal(fixtureData.jira.comments.length, 0);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.description, "Implement the requested change.");
+  assert.equal(fixtureData.db.listRuns(1)[0].status, RUN_STATUSES.AWAITING_REVIEW);
   fixtureData.db.close();
 });
 
@@ -743,7 +713,7 @@ test("a restarted worker reclaims an interrupted PR-stage lease before timeout",
   fixtureData.db.close();
 });
 
-test("resumes Jira reporting from a checkpointed pull request", async () => {
+test("resumes the Jira review transition from a checkpointed pull request", async () => {
   const fixtureData = await fixture({ maxAttempts: 2 });
   const claimed = fixtureData.db.claimRun({
     id: "FACT-1-pr-checkpoint",
@@ -775,9 +745,35 @@ test("resumes Jira reporting from a checkpointed pull request", async () => {
   const result = await worker.runOnce();
 
   assert.equal(result.action, RunAction.Resumed);
-  assert.equal(fixtureData.jira.comments.length, 1);
-  assert.equal(fixtureData.jira.comments[0].body, "[factory-run:FACT-1-pr-checkpoint]\nPull request created: https://github.test/pr/7");
+  assert.equal(fixtureData.jira.comments.length, 0);
   assert.equal(fixtureData.db.getRun(claimed.run.id).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("closes a resumed run when its checkpointed pull request was already merged", async () => {
+  const fixtureData = await fixture({ maxAttempts: 2 });
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, { async execute() {
+    agentCalls += 1;
+    return { result: executionFor(), raw: {} };
+  } });
+  const first = await worker.runOnce();
+  const run = fixtureData.db.getRun(first.runId);
+  await fixtureData.github.mergePullRequest(run.pr_number);
+  fixtureData.db.updateRun(run.id, {
+    status: RUN_STATUSES.ACTIVE,
+    stage: STAGES.PULL_REQUEST,
+    lease_owner: null,
+    lease_until: null,
+  });
+
+  const result = await worker.runOnce();
+
+  assert.equal(result.action, RunAction.Completed);
+  assert.equal(agentCalls, 1);
+  assert.equal(fixtureData.db.getRun(run.id).status, RUN_STATUSES.COMPLETED);
+  assert.equal(fixtureData.db.getRun(run.id).stage, STAGES.REVIEW);
+  assert.equal((await fixtureData.jira.getIssue("FACT-1")).fields.status?.name, "Done");
   fixtureData.db.close();
 });
 

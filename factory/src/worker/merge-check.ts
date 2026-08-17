@@ -1,5 +1,4 @@
 import { isAbortError } from "../git.js";
-import { RUN_STATUSES } from "../types.js";
 import type { FactoryRun } from "../model/database.js";
 import type { FactoryWorker } from "../worker.js";
 import { runBounded } from "./concurrency.js";
@@ -62,17 +61,8 @@ async function processPullRequest(worker: FactoryWorker, run: FactoryRun): Promi
       });
       return false;
     }
-    worker.log("info", "merge-check:merged", {
-      runId: run.id,
-      issueKey: run.issue_key,
-      prNumber: pr.number,
-      prUrl: pr.html_url,
-      mergedAt: pr.mergedAt,
-    });
     try {
-      // The adapter reconciles an ambiguous mutation with one authoritative
-      // read, so the normal path does not pay for a redundant status lookup.
-      await worker.transitionIfNeeded(run.issue_key, worker.config.jira.statuses.done, { skipStatusCheck: true });
+      await worker.completeMergedPullRequest(run, pr);
     } catch (error) {
       if (isAbortError(error) || worker.signal?.aborted) throw error;
       worker.log("error", "merge-check:transition-failed", {
@@ -91,15 +81,6 @@ async function processPullRequest(worker: FactoryWorker, run: FactoryRun): Promi
       });
       return false;
     }
-    worker.log("info", "merge-check:task-closed", {
-      runId: run.id,
-      issueKey: run.issue_key,
-      prNumber: pr.number,
-    });
-    worker.db.updateRun(run.id, {
-      status: RUN_STATUSES.COMPLETED,
-      last_error: null,
-    });
     return true;
   } catch (error) {
     if (isAbortError(error) || worker.signal?.aborted) throw error;

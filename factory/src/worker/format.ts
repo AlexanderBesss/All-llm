@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { adfToText } from "../jira.js";
 import { AgentProvider } from "../model/config.js";
 import { makeRunMarker } from "../types.js";
 import type { CodexSettings, FactoryConfig } from "../model/config.js";
@@ -70,34 +69,6 @@ export function normalizePlan(plan: unknown): ImplementationPlan {
     files: Array.isArray(candidate.files) ? candidate.files.map(String) : [],
     tests: Array.isArray(candidate.tests) ? candidate.tests.map(String) : [],
   };
-}
-
-function quotedDescription(description: unknown): string {
-  return adfToText(description)
-    .split(/\r?\n/)
-    .map((line) => `> ${line}`)
-    .join("\n");
-}
-
-export function planDescription(originalDescription: unknown, plan: ImplementationPlan, marker: string, specPath = ""): string {
-  return [
-    quotedDescription(originalDescription),
-    "",
-    marker,
-    "",
-    ...(specPath ? ["## Specification", `- \`${specPath}\` (committed on the factory branch)`, ""] : []),
-    "## Implementation plan",
-    plan.summary,
-    "",
-    "## Acceptance criteria",
-    ...plan.acceptanceCriteria.map((item) => `- ${item}`),
-    "",
-    "## Affected files",
-    ...(plan.files.length ? plan.files.map((item) => `- ${item}`) : ["- To be confirmed during implementation"]),
-    "",
-    "## Tests",
-    ...(plan.tests.length ? plan.tests.map((item) => `- ${item}`) : ["- Appropriate repository validation"]),
-  ].join("\n");
 }
 
 export function pullRequestDescription({ runId, issueKey, plan, specPath = "", model, reasoningEffort }: {
