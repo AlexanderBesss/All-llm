@@ -25,6 +25,9 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private int _caretIndex;
     private int _playbackIndex = -1;
     private int _playbackCharacterCount;
+    private readonly object _progressGate = new();
+    private SpeechProgressEventArgs? _pendingProgress;
+    private bool _progressDispatchScheduled;
     private CancellationTokenSource? _loadCancellation;
     private bool _disposed;
 
@@ -324,6 +327,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private void StopPlayback(string status)
     {
+        ClearPendingProgress();
         try
         {
             _speech.Stop();
@@ -369,19 +373,67 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private void SpeechPlaybackEnded(object? sender, string status) => RunOnContext(() =>
     {
+        ClearPendingProgress();
         IsPlaying = false;
         PlaybackIndex = -1;
         PlaybackCharacterCount = 0;
         Status = status;
     });
 
-    private void SpeechPlaybackProgress(object? sender, SpeechProgressEventArgs args) => RunOnContext(() =>
+    private void SpeechPlaybackProgress(object? sender, SpeechProgressEventArgs args)
     {
+        // Windows speech can report progress much faster than the document
+        // view can repaint. Keep only the newest event and update the UI at a
+        // bounded rate so speech and the Stop button remain responsive.
+        if (_synchronizationContext is null || SynchronizationContext.Current == _synchronizationContext)
+        {
+            ApplySpeechPlaybackProgress(args);
+            return;
+        }
+
+        lock (_progressGate)
+        {
+            _pendingProgress = args;
+            if (_progressDispatchScheduled)
+                return;
+            _progressDispatchScheduled = true;
+        }
+
+        _ = DispatchPendingProgressAsync();
+    }
+
+    private async Task DispatchPendingProgressAsync()
+    {
+        await Task.Delay(50).ConfigureAwait(false);
+
+        SpeechProgressEventArgs? progress;
+        lock (_progressGate)
+        {
+            progress = _pendingProgress;
+            _pendingProgress = null;
+            _progressDispatchScheduled = false;
+        }
+
+        if (progress is not null)
+            RunOnContext(() => ApplySpeechPlaybackProgress(progress));
+    }
+
+    private void ApplySpeechPlaybackProgress(SpeechProgressEventArgs args)
+    {
+        if (!IsPlaying)
+            return;
+
         var bounded = Math.Clamp(args.CharacterIndex, 0, _renderedText.Length);
         PlaybackCharacterCount = Math.Max(1, args.CharacterCount);
         PlaybackIndex = bounded;
         CaretIndex = bounded;
-    });
+    }
+
+    private void ClearPendingProgress()
+    {
+        lock (_progressGate)
+            _pendingProgress = null;
+    }
 
     private void RunOnContext(Action action)
     {

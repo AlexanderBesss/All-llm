@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using TtsReader.Models;
 using TtsReader.Services;
@@ -18,6 +19,8 @@ public partial class MainWindow : Window, IMainViewInteractions
     private bool _suppressCaretRestart;
     private Point _textMouseDownPoint;
     private bool _textClickCandidate;
+    private int _documentTextLength;
+    private int _documentSymbolCount;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -98,8 +101,7 @@ public partial class MainWindow : Window, IMainViewInteractions
             ApplyRenderedDocument(ViewModel.RenderedDocument);
         else if (e.PropertyName == nameof(MainWindowViewModel.SelectedDocument))
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SelectRestoredDocument));
-        else if (e.PropertyName == nameof(MainWindowViewModel.PlaybackIndex) ||
-                 e.PropertyName == nameof(MainWindowViewModel.PlaybackCharacterCount))
+        else if (e.PropertyName == nameof(MainWindowViewModel.PlaybackIndex))
             ApplyPlaybackMarker();
     }
 
@@ -113,7 +115,11 @@ public partial class MainWindow : Window, IMainViewInteractions
                 : _markdownRenderer.RenderPlainText(rendered.Text);
             DocumentText.CaretPosition = DocumentText.Document.ContentStart;
             DocumentText.ScrollToHome();
-            ViewModel.SetRenderedText(GetDocumentText());
+            var documentText = GetDocumentText();
+            _documentTextLength = documentText.Length;
+            _documentSymbolCount = DocumentText.Document.ContentStart.GetOffsetToPosition(
+                DocumentText.Document.ContentEnd);
+            ViewModel.SetRenderedText(documentText);
             if (!string.IsNullOrWhiteSpace(rendered.Text))
                 DocumentText.Focus();
         }
@@ -133,6 +139,9 @@ public partial class MainWindow : Window, IMainViewInteractions
 
     private void ApplyPlaybackMarker()
     {
+        var scrollViewer = FindScrollViewer(DocumentText);
+        var horizontalOffset = scrollViewer?.HorizontalOffset;
+        var verticalOffset = scrollViewer?.VerticalOffset;
         _suppressCaretRestart = true;
         try
         {
@@ -152,8 +161,14 @@ public partial class MainWindow : Window, IMainViewInteractions
                 DocumentText.Selection.Select(start, start);
             }
 
-            if (ViewModel.PlaybackIndex >= 0)
-                DocumentText.Focus();
+            // Moving the caret/selection can make WPF bring the current speech
+            // position into view. Restore the user's viewport after updating
+            // the marker so playback never hijacks scrolling.
+            if (scrollViewer is not null && horizontalOffset is not null && verticalOffset is not null)
+            {
+                scrollViewer.ScrollToHorizontalOffset(horizontalOffset.Value);
+                scrollViewer.ScrollToVerticalOffset(verticalOffset.Value);
+            }
         }
         finally
         {
@@ -163,9 +178,49 @@ public partial class MainWindow : Window, IMainViewInteractions
 
     private TextPointer GetTextPointerAtOffset(int offset)
     {
-        var bounded = Math.Clamp(offset, 0, GetDocumentText().Length);
-        return DocumentText.Document.ContentStart.GetPositionAtOffset(
-                   bounded, LogicalDirection.Forward) ?? DocumentText.Document.ContentEnd;
+        var contentStart = DocumentText.Document.ContentStart;
+        var contentEnd = DocumentText.Document.ContentEnd;
+        var bounded = Math.Clamp(offset, 0, _documentTextLength);
+
+        // TextPointer offsets use WPF's symbol space, which includes element
+        // boundaries for paragraphs, runs, tables, etc. The caret and speech
+        // progress use TextRange text offsets, so map through the actual text
+        // produced by each candidate position instead of treating the two
+        // offset spaces as interchangeable.
+        var symbolCount = _documentSymbolCount > 0
+            ? _documentSymbolCount
+            : contentStart.GetOffsetToPosition(contentEnd);
+        var low = 0;
+        var high = symbolCount;
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+            var candidate = contentStart.GetPositionAtOffset(middle, LogicalDirection.Forward)
+                ?? contentEnd;
+            var textOffset = new TextRange(contentStart, candidate).Text.Length;
+            if (textOffset < bounded)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        return contentStart.GetPositionAtOffset(low, LogicalDirection.Forward) ?? contentEnd;
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is ScrollViewer scrollViewer)
+                return scrollViewer;
+
+            var descendant = FindScrollViewer(child);
+            if (descendant is not null)
+                return descendant;
+        }
+
+        return null;
     }
 
     private void SelectRestoredDocument()

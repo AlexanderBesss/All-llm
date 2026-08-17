@@ -112,6 +112,27 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void MainViewModel_StopCommandStopsActivePlayback()
+    {
+        var speech = new FakeSpeech();
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
+            new FakeExtractor("read me"), new FakeStore(SettingsStore.CreateDefaults()), speech,
+            new FakeInteractions());
+        viewModel.SetRenderedText("read me");
+
+        viewModel.PlayCommand.Execute(null);
+        Assert.True(viewModel.StopCommand.CanExecute(null));
+
+        viewModel.StopCommand.Execute(null);
+
+        Assert.False(viewModel.IsPlaying);
+        Assert.False(viewModel.StopCommand.CanExecute(null));
+        Assert.Equal(1, speech.StopCount);
+        Assert.Contains("stopped", viewModel.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MainViewModel_ReportsUnavailableBackendWithoutStartingPlayback()
     {
         var settings = SettingsStore.CreateDefaults();
@@ -232,11 +253,12 @@ public sealed class ViewModelTests
     private sealed class FakeSpeech : ISpeechPlaybackService
     {
         public List<(string Text, int Caret, BackendDefinition Backend, double PlaybackRate)> Calls { get; } = [];
+        public int StopCount { get; private set; }
         public event EventHandler<string>? PlaybackEnded;
         public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
         public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate) =>
             Calls.Add((text, caretIndex, backend, playbackRate));
-        public void Stop() { }
+        public void Stop() => StopCount++;
         public void Dispose() { }
         public void Complete(string status) => PlaybackEnded?.Invoke(this, status);
         public void ReportProgress(int characterIndex, int characterCount) =>
