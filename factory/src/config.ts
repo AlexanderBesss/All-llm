@@ -39,6 +39,11 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
       timeoutMs: Number(process.env.FACTORY_VALIDATION_TIMEOUT_MS || 15 * 60_000),
       commands: [
         {
+          name: "factory-dependencies",
+          command: "npm",
+          args: ["ci", "--prefix", "factory"],
+        },
+        {
           name: "factory-tests",
           command: "npm",
           args: ["--prefix", "factory", "test"],

@@ -21,6 +21,11 @@
     "timeoutMs": 900000,
     "commands": [
       {
+        "name": "factory-dependencies",
+        "command": "npm",
+        "args": ["ci", "--prefix", "factory"]
+      },
+      {
         "name": "factory-tests",
         "command": "npm",
         "args": ["--prefix", "factory", "test"]

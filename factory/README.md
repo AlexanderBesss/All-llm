@@ -39,7 +39,7 @@ Before live implementation starts, the factory creates a Markdown specification 
 
 The spec preserves the Jira request as untrusted data and records the problem, goals, non-goals, functional requirements, testable acceptance criteria, constraints, risks, validation plan, and decision log. The unattended agent reads it, documents useful implementation decisions and assumptions, and commits and pushes it with the change. Retries preserve existing notes; ambiguity never pauses for user input. Dry runs do not mutate worktrees.
 
-Before a pull request is created, the supervisor runs every configured `validation.commands` entry inside the implementation worktree. These checks are independent of the agent's reported test results; failures block PR creation and are recorded in the stage diagnostics. The checked-in configuration runs the factory test suite, `dotnet build`, and the WhisperNote xUnit tests.
+Before a pull request is created, the supervisor runs every configured `validation.commands` entry inside the implementation worktree. These checks are independent of the agent's reported test results; failures block PR creation and are recorded in the stage diagnostics. The checked-in configuration first installs the factory's locked dependencies, then runs the factory test suite, `dotnet build`, and the WhisperNote xUnit tests.
 
 ### Pull requests and AI review
 
