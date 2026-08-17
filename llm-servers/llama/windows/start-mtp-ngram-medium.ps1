@@ -1,3 +1,5 @@
+$env:LLAMA_ARG_CHAT_TEMPLATE_KWARGS = '{"reasoning_effort":"medium"}'
+
 & (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
   -m "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
   --port 8080 `
@@ -15,10 +17,9 @@
   --flash-attn on `
   --batch-size 2048 `
   --ubatch-size 1024 `
-  --no-mmap `
+  --load-mode none `
   --jinja `
   --reasoning on `
-  --chat-template-kwargs "{""preserve_thinking"":true,""reasoning_effort"":""medium""}" `
   --temp 1.0 `
   --top-p 0.95 `
   --top-k 20 `
