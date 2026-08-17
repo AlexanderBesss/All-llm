@@ -22,6 +22,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private bool _isLoading;
     private bool _isPlaying;
     private int _caretIndex;
+    private int _playbackIndex = -1;
+    private int _playbackCharacterCount;
     private CancellationTokenSource? _loadCancellation;
     private bool _disposed;
 
@@ -69,6 +71,12 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     }
 
     public int CaretIndex { get => _caretIndex; private set => SetProperty(ref _caretIndex, value); }
+    public int PlaybackIndex { get => _playbackIndex; private set => SetProperty(ref _playbackIndex, value); }
+    public int PlaybackCharacterCount
+    {
+        get => _playbackCharacterCount;
+        private set => SetProperty(ref _playbackCharacterCount, value);
+    }
     public ReaderSettings Settings => CloneSettings(_settings);
 
     public RelayCommand OpenFolderCommand { get; }
@@ -105,10 +113,22 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         CancelLoadingCommand = new RelayCommand(_ => CancelLoading(), _ => IsLoading);
 
         _speech.PlaybackEnded += SpeechPlaybackEnded;
+        _speech.PlaybackProgress += SpeechPlaybackProgress;
         RefreshBackendStatus();
     }
 
     public void OpenFolder(string folderPath)
+        => OpenFolderCore(folderPath, null, restoringSession: false);
+
+    public void RestoreLastSession()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.LastFolderPath))
+            return;
+
+        OpenFolderCore(_settings.LastFolderPath, _settings.LastSelectedFilePath, restoringSession: true);
+    }
+
+    private void OpenFolderCore(string folderPath, string? selectedFilePath, bool restoringSession)
     {
         StopPlayback("Playback stopped.");
         DetachAndCancelLoad();
@@ -120,9 +140,27 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
             SelectedDocument = null;
             RenderedDocument = new RenderedDocument(string.Empty, null, false);
             SetRenderedText(string.Empty);
+
+            _settings.LastFolderPath = folderPath;
+            if (!restoringSession)
+                _settings.LastSelectedFilePath = null;
+            var saveError = TrySaveSettings();
+
             Status = root.Children.Count == 0
                 ? $"No supported .txt, .md, .markdown, or .pdf files were found in {folderPath}."
                 : $"Browsing {folderPath}";
+
+            if (saveError is not null)
+                Status += $" Session could not be saved: {saveError}";
+
+            if (restoringSession && !string.IsNullOrWhiteSpace(selectedFilePath))
+            {
+                var selected = FindDocument(root, selectedFilePath);
+                if (selected is not null)
+                    SelectedDocument = selected;
+                else
+                    Status += $" Saved file was not found: {selectedFilePath}";
+            }
         }
         catch (Exception exception)
         {
@@ -136,6 +174,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
             return;
 
         StopPlayback("Playback stopped.");
+        _settings.LastSelectedFilePath = file.FullPath;
+        TrySaveSettings();
         CancelCurrentLoad(setStatus: false);
         var cancellation = new CancellationTokenSource();
         _loadCancellation = cancellation;
@@ -243,6 +283,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         {
             _speech.Speak(_renderedText, CaretIndex, backend);
             IsPlaying = true;
+            PlaybackCharacterCount = 1;
+            PlaybackIndex = CaretIndex;
             Status = isRestart
                 ? $"Caret moved. Continuing with {backend.Name} from character {CaretIndex:N0}."
                 : $"Playing with {backend.Name} from character {CaretIndex:N0}.";
@@ -264,6 +306,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
             status = $"Could not stop playback cleanly: {exception.Message}";
         }
         IsPlaying = false;
+        PlaybackIndex = -1;
+        PlaybackCharacterCount = 0;
         Status = status;
     }
 
@@ -299,7 +343,17 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private void SpeechPlaybackEnded(object? sender, string status) => RunOnContext(() =>
     {
         IsPlaying = false;
+        PlaybackIndex = -1;
+        PlaybackCharacterCount = 0;
         Status = status;
+    });
+
+    private void SpeechPlaybackProgress(object? sender, SpeechProgressEventArgs args) => RunOnContext(() =>
+    {
+        var bounded = Math.Clamp(args.CharacterIndex, 0, _renderedText.Length);
+        PlaybackCharacterCount = Math.Max(1, args.CharacterCount);
+        PlaybackIndex = bounded;
+        CaretIndex = bounded;
     });
 
     private void RunOnContext(Action action)
@@ -334,14 +388,45 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private static ReaderSettings CloneSettings(ReaderSettings settings) => new()
     {
         ActiveBackendId = settings.ActiveBackendId,
-        Backends = settings.Backends.Select(backend => backend.Clone()).ToList()
+        Backends = settings.Backends.Select(backend => backend.Clone()).ToList(),
+        LastFolderPath = settings.LastFolderPath,
+        LastSelectedFilePath = settings.LastSelectedFilePath
     };
+
+    private string? TrySaveSettings()
+    {
+        try
+        {
+            _settingsStore.Save(_settings);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    private static DocumentNode? FindDocument(DocumentNode root, string fullPath)
+    {
+        if (!root.IsFolder && string.Equals(root.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+            return root;
+
+        foreach (var child in root.Children)
+        {
+            var match = FindDocument(child, fullPath);
+            if (match is not null)
+                return match;
+        }
+
+        return null;
+    }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         _speech.PlaybackEnded -= SpeechPlaybackEnded;
+        _speech.PlaybackProgress -= SpeechPlaybackProgress;
         DetachAndCancelLoad();
         _speech.Dispose();
     }

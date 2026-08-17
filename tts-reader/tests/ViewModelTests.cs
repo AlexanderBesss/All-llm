@@ -36,6 +36,63 @@ public sealed class ViewModelTests
     }
 
     [Fact]
+    public void MainViewModel_RemembersFolderAndSelectedFile()
+    {
+        var file = new DocumentNode { Name = "story.txt", FullPath = "library\\story.txt", IsFolder = false };
+        var root = new DocumentNode { Name = "library", FullPath = "library", IsFolder = true };
+        root.Children.Add(file);
+        var store = new FakeStore(SettingsStore.CreateDefaults());
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(root), new FakeExtractor("text"), store, new FakeSpeech(),
+            new FakeInteractions());
+
+        viewModel.OpenFolder("library");
+        viewModel.SelectedDocument = file;
+
+        Assert.NotNull(store.Saved);
+        Assert.Equal("library", store.Saved!.LastFolderPath);
+        Assert.Equal(file.FullPath, store.Saved.LastSelectedFilePath);
+    }
+
+    [Fact]
+    public void MainViewModel_RestoresLastFolderAndSelectedFile()
+    {
+        var file = new DocumentNode { Name = "story.txt", FullPath = "library\\story.txt", IsFolder = false };
+        var root = new DocumentNode { Name = "library", FullPath = "library", IsFolder = true };
+        root.Children.Add(file);
+        var settings = SettingsStore.CreateDefaults();
+        settings.LastFolderPath = "library";
+        settings.LastSelectedFilePath = file.FullPath;
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(root), new FakeExtractor("text"), new FakeStore(settings), new FakeSpeech(),
+            new FakeInteractions());
+
+        viewModel.RestoreLastSession();
+
+        Assert.Same(file, viewModel.SelectedDocument);
+        Assert.Equal("library", viewModel.Settings.LastFolderPath);
+        Assert.Equal(file.FullPath, viewModel.Settings.LastSelectedFilePath);
+    }
+
+    [Fact]
+    public void MainViewModel_TracksSpeechProgressAsCaretPosition()
+    {
+        var speech = new FakeSpeech();
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
+            new FakeExtractor("text"), new FakeStore(SettingsStore.CreateDefaults()), speech,
+            new FakeInteractions());
+        viewModel.SetRenderedText("read me");
+
+        viewModel.PlayCommand.Execute(null);
+        speech.ReportProgress(4, 2);
+
+        Assert.Equal(4, viewModel.PlaybackIndex);
+        Assert.Equal(2, viewModel.PlaybackCharacterCount);
+        Assert.Equal(4, viewModel.CaretIndex);
+    }
+
+    [Fact]
     public void MainViewModel_ReportsUnavailableBackendWithoutStartingPlayback()
     {
         var settings = SettingsStore.CreateDefaults();
@@ -159,10 +216,13 @@ public sealed class ViewModelTests
     {
         public List<(string Text, int Caret, BackendDefinition Backend)> Calls { get; } = [];
         public event EventHandler<string>? PlaybackEnded;
+        public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
         public void Speak(string text, int caretIndex, BackendDefinition backend) => Calls.Add((text, caretIndex, backend));
         public void Stop() { }
         public void Dispose() { }
         public void Complete(string status) => PlaybackEnded?.Invoke(this, status);
+        public void ReportProgress(int characterIndex, int characterCount) =>
+            PlaybackProgress?.Invoke(this, new SpeechProgressEventArgs(characterIndex, characterCount));
     }
 
     private sealed class FakeInteractions : IMainViewInteractions

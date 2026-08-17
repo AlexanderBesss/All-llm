@@ -50,6 +50,8 @@
                          AcceptsTab="True" VerticalScrollBarVisibility="Auto"
                          HorizontalScrollBarVisibility="Auto" FontFamily="Segoe UI" FontSize="16"
                          Padding="0" BorderThickness="0" Background="Transparent"
+                         CaretBrush="{StaticResource Accent}" SelectionBrush="{StaticResource Accent}"
+                         SelectionTextBrush="#15171B" SelectionOpacity="0.8"
                          SelectionChanged="DocumentText_SelectionChanged"
                          AutomationProperties.Name="Rendered document"/>
         </Grid>

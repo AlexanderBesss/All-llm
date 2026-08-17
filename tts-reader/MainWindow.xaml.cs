@@ -1,7 +1,9 @@
 using Microsoft.Win32;
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Threading;
 using TtsReader.Models;
 using TtsReader.Services;
 using TtsReader.ViewModels;
@@ -26,6 +28,7 @@ public partial class MainWindow : Window, IMainViewInteractions
         DataContext = ViewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         ApplyRenderedDocument(ViewModel.RenderedDocument);
+        ViewModel.RestoreLastSession();
     }
 
     public string? ChooseFolder()
@@ -60,6 +63,11 @@ public partial class MainWindow : Window, IMainViewInteractions
     {
         if (e.PropertyName == nameof(MainWindowViewModel.RenderedDocument))
             ApplyRenderedDocument(ViewModel.RenderedDocument);
+        else if (e.PropertyName == nameof(MainWindowViewModel.SelectedDocument))
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SelectRestoredDocument));
+        else if (e.PropertyName == nameof(MainWindowViewModel.PlaybackIndex) ||
+                 e.PropertyName == nameof(MainWindowViewModel.PlaybackCharacterCount))
+            ApplyPlaybackMarker();
     }
 
     private void ApplyRenderedDocument(RenderedDocument rendered)
@@ -89,6 +97,81 @@ public partial class MainWindow : Window, IMainViewInteractions
     private int GetCaretIndex() => new TextRange(
         DocumentText.Document.ContentStart,
         DocumentText.CaretPosition).Text.Length;
+
+    private void ApplyPlaybackMarker()
+    {
+        _suppressCaretRestart = true;
+        try
+        {
+            var index = ViewModel.PlaybackIndex >= 0
+                ? ViewModel.PlaybackIndex
+                : ViewModel.CaretIndex;
+            var start = GetTextPointerAtOffset(index);
+            DocumentText.CaretPosition = start;
+
+            if (ViewModel.PlaybackIndex >= 0)
+            {
+                var end = GetTextPointerAtOffset(index + Math.Max(1, ViewModel.PlaybackCharacterCount));
+                DocumentText.Selection.Select(start, end);
+            }
+            else
+            {
+                DocumentText.Selection.Select(start, start);
+            }
+
+            if (ViewModel.PlaybackIndex >= 0)
+                DocumentText.Focus();
+        }
+        finally
+        {
+            _suppressCaretRestart = false;
+        }
+    }
+
+    private TextPointer GetTextPointerAtOffset(int offset)
+    {
+        var bounded = Math.Clamp(offset, 0, GetDocumentText().Length);
+        return DocumentText.Document.ContentStart.GetPositionAtOffset(
+                   bounded, LogicalDirection.Forward) ?? DocumentText.Document.ContentEnd;
+    }
+
+    private void SelectRestoredDocument()
+    {
+        if (ViewModel.SelectedDocument is null)
+            return;
+
+        DocumentTree.UpdateLayout();
+        if (SelectTreeItem(DocumentTree, ViewModel.SelectedDocument))
+            return;
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SelectRestoredDocument));
+    }
+
+    private static bool SelectTreeItem(ItemsControl parent, DocumentNode target)
+    {
+        foreach (var item in parent.Items)
+        {
+            if (parent.ItemContainerGenerator.ContainerFromItem(item) is not TreeViewItem container)
+                continue;
+
+            if (ReferenceEquals(item, target))
+            {
+                container.IsSelected = true;
+                container.BringIntoView();
+                return true;
+            }
+
+            if (item is DocumentNode { IsFolder: true })
+            {
+                container.IsExpanded = true;
+                container.UpdateLayout();
+                if (SelectTreeItem(container, target))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 
     protected override void OnClosed(EventArgs e)
     {

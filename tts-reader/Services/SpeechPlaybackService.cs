@@ -7,8 +7,10 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
 {
     private SpeechSynthesizer? _synthesizer;
     private readonly object _gate = new();
+    private int _activeCaretIndex;
 
     public event EventHandler<string>? PlaybackEnded;
+    public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
 
     private SpeechSynthesizer EnsureSynthesizer()
     {
@@ -16,6 +18,15 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
             return _synthesizer;
         _synthesizer = new SpeechSynthesizer();
         _synthesizer.SetOutputToDefaultAudioDevice();
+        _synthesizer.SpeakProgress += (_, args) =>
+        {
+            int characterIndex;
+            lock (_gate)
+                characterIndex = _activeCaretIndex + args.CharacterPosition;
+
+            PlaybackProgress?.Invoke(this,
+                new SpeechProgressEventArgs(characterIndex, args.CharacterCount));
+        };
         _synthesizer.SpeakCompleted += (_, args) =>
         {
             if (!args.Cancelled && args.Error is null)
@@ -34,6 +45,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         {
             var synthesizer = EnsureSynthesizer();
             synthesizer.SpeakAsyncCancelAll();
+            _activeCaretIndex = caretIndex;
             synthesizer.SelectVoice(string.IsNullOrWhiteSpace(backend.VoiceName)
                 ? synthesizer.Voice.Name
                 : backend.VoiceName);

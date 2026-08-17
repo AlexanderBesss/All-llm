@@ -29,6 +29,13 @@ public interface IBackendDownloader
 public interface ISpeechPlaybackService : IDisposable
 {
     event EventHandler<string>? PlaybackEnded;
+    event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
     void Speak(string text, int caretIndex, BackendDefinition backend);
     void Stop();
+}
+
+public sealed class SpeechProgressEventArgs(int characterIndex, int characterCount) : EventArgs
+{
+    public int CharacterIndex { get; } = characterIndex;
+    public int CharacterCount { get; } = characterCount;
 }
