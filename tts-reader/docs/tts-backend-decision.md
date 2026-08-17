@@ -14,6 +14,10 @@ Piper is selected because it is the smallest dependable fit for a Windows/.NET d
 
 The application keeps `System.Speech` as the default. Piper becomes available only when its executable, `.onnx` model, and adjacent `.onnx.json` are present. Settings expose the executable/model paths and persist them. Piper is launched without a shell, document text is passed as bounded command arguments, output is played locally, and cancellation terminates active synthesis/playback. The implementation deliberately does not start an HTTP service or download anything during reading.
 
+## Addendum: optional LLM backends (2026-08-17)
+
+User feedback requested the more expressive options. Chatterbox and Qwen3-TTS were added as opt-in backends alongside Piper rather than replacing it: they remain disabled until the user creates a venv and points Settings at its `python.exe` plus a model (Hugging Face repo id or local folder). Each upstream package exposes a Python API without a text-to-WAV CLI, so TTS Reader writes a small bridge script and runs it via the venv interpreter as a separate local process with bounded text arguments, the same lifecycle, cancellation, and temporary-WAV behavior as Piper. First run downloads weights from Hugging Face; afterwards the engines run offline. GPU (CUDA `bfloat16`) is recommended but CPU (`float32`) is supported via device auto-detection.
+
 ## Known tradeoffs
 
 - Starting the CLI for each approximately 500-character chunk adds model-load latency but avoids a persistent local server and keeps setup/debugging simple.

@@ -53,9 +53,9 @@ public sealed class SpeechPlaybackServiceTests
             File.WriteAllText(executable, "test");
             File.WriteAllText(model, "test");
             File.WriteAllText(model + ".json", "{}");
-            var runner = new FakePiperRunner();
+            var runner = new FakeLocalProcessRunner();
             var player = new FakeWavePlayer();
-            using var service = new SpeechPlaybackService(runner, player);
+            using var service = new SpeechPlaybackService(piperRunner: runner, audioPlayer: player);
             var ended = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             service.PlaybackEnded += (_, status) => ended.TrySetResult(status);
             var backend = new BackendDefinition
@@ -80,6 +80,112 @@ public sealed class SpeechPlaybackServiceTests
     }
 
     [Fact]
+    public async Task Speak_WithChatterboxBackend_UsesLlmRunnerAndReportsCompletion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"tts-reader-llm-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var executable = Path.Combine(root, "python.exe");
+            File.WriteAllText(executable, "test");
+            var llm = new FakeLocalProcessRunner();
+            var player = new FakeWavePlayer();
+            using var service = new SpeechPlaybackService(llmRunner: llm, audioPlayer: player);
+            var ended = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            service.PlaybackEnded += (_, status) => ended.TrySetResult(status);
+            var backend = new BackendDefinition
+            {
+                Id = "chatterbox", Name = "Chatterbox", Kind = "LLM", Engine = SpeechEngines.Chatterbox,
+                ExecutablePath = executable, ModelPath = "ResembleAI/chatterbox", Variant = "base"
+            };
+
+            service.Speak("skip hello from chatterbox.", 5, backend, 1.0);
+            var status = await ended.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Equal("Playback finished.", status);
+            Assert.Single(llm.Calls);
+            Assert.Equal("hello from chatterbox.", llm.Calls[0].Text);
+            Assert.Equal(1, player.PlayCount);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void LlmCommand_BuildsBridgeArgumentsForChatterbox()
+    {
+        var backend = new BackendDefinition
+        {
+            Id = "chatterbox", Name = "Chatterbox", Kind = "LLM", Engine = SpeechEngines.Chatterbox,
+            ExecutablePath = "C:\\TtsReader\\chatterbox\\Scripts\\python.exe",
+            ModelPath = "ResembleAI/chatterbox", Variant = "base",
+            Language = "English", VoiceName = "C:\\refs\\speaker.wav"
+        };
+
+        var info = LlmTtsProcessRunner.CreateStartInfo(
+            backend, "text with spaces", "C:\\Out\\speech.wav", 1.2, "C:\\Scripts\\chatterbox_bridge.py");
+
+        Assert.False(info.UseShellExecute);
+        Assert.Equal(backend.ExecutablePath, info.FileName);
+        Assert.Equal(
+            ["C:\\Scripts\\chatterbox_bridge.py", "--model", "ResembleAI/chatterbox",
+                "--output", "C:\\Out\\speech.wav", "--rate", "1.2", "--variant", "base",
+                "--language", "English", "--ref-audio", "C:\\refs\\speaker.wav", "--", "text with spaces"],
+            info.ArgumentList);
+    }
+
+    [Fact]
+    public void LlmCommand_BuildsBridgeArgumentsForQwen3Clone()
+    {
+        var backend = new BackendDefinition
+        {
+            Id = "qwen", Name = "Qwen3-TTS", Kind = "LLM", Engine = SpeechEngines.Qwen3Tts,
+            ExecutablePath = "C:\\TtsReader\\qwen3-tts\\Scripts\\python.exe",
+            ModelPath = "Qwen/Qwen3-TTS-12Hz-0.6B-Voice",
+            Variant = "voice-clone", VoiceName = "C:\\refs\\sample.wav",
+            Instruct = "Reference transcript.", Language = "English"
+        };
+
+        var info = LlmTtsProcessRunner.CreateStartInfo(
+            backend, "hello", "C:\\Out\\speech.wav", 1.0, "C:\\Scripts\\qwen3_tts_bridge.py");
+
+        Assert.Equal(
+            ["C:\\Scripts\\qwen3_tts_bridge.py", "--model", "Qwen/Qwen3-TTS-12Hz-0.6B-Voice",
+                "--output", "C:\\Out\\speech.wav", "--rate", "1", "--ref-audio", "C:\\refs\\sample.wav",
+                "--ref-text", "Reference transcript.", "--language", "English", "--", "hello"],
+            info.ArgumentList);
+    }
+
+    [Fact]
+    public void ChatterboxBridge_UsesUpstreamLoadersAndLanguageArgument()
+    {
+        var bridge = TtsBridgeScripts.ChatterboxBridge;
+
+        Assert.Contains("from chatterbox.mtl_tts import ChatterboxMultilingualTTS", bridge);
+        Assert.Contains("from chatterbox.tts_turbo import ChatterboxTurboTTS", bridge);
+        Assert.Contains("ChatterboxTurboTTS.from_local", bridge);
+        Assert.Contains("from chatterbox.tts import ChatterboxTTS", bridge);
+        Assert.Contains("language_id", bridge);
+        Assert.DoesNotContain("default_speaker.wav", bridge);
+    }
+
+    [Fact]
+    public void QwenBridge_UsesKeywordArgumentsAndRequiresCloneTranscript()
+    {
+        var bridge = TtsBridgeScripts.Qwen3TtsBridge;
+
+        Assert.Contains("if not args.ref_text:", bridge);
+        Assert.Contains("text=text", bridge);
+        Assert.Contains("language=args.language or \"Auto\"", bridge);
+        Assert.Contains("ref_audio=args.ref_audio", bridge);
+        Assert.Contains("ref_text=args.ref_text", bridge);
+        Assert.Contains("speaker=args.speaker", bridge);
+        Assert.Contains("instruct=args.instruct", bridge);
+    }
+
+    [Fact]
     public void PiperCommand_UsesArgumentListWithoutShellAndMapsSpeedToLengthScale()
     {
         var backend = new BackendDefinition
@@ -97,7 +203,7 @@ public sealed class SpeechPlaybackServiceTests
                 "--length-scale", "0.8", "--", "text & more"], info.ArgumentList);
     }
 
-    private sealed class FakePiperRunner : IPiperProcessRunner
+    private sealed class FakeLocalProcessRunner : ILocalProcessSpeechRunner
     {
         public List<(string Text, double Rate)> Calls { get; } = [];
         public Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath,

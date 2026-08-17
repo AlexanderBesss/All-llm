@@ -209,6 +209,26 @@ public sealed class ViewModelTests
         Assert.Null(viewModel.ResultSettings);
     }
 
+    [Fact]
+    public void SettingsViewModel_DownloadsUnavailableLlmAndUpdatesProgress()
+    {
+        var settings = SettingsStore.CreateDefaults();
+        var store = new DownloadStore();
+        var downloader = new FakeLlmDownloader();
+        using var viewModel = new SettingsWindowViewModel(store, settings, downloader);
+        var row = viewModel.Backends.Single(item => item.Id == "chatterbox-local");
+
+        Assert.True(row.ShowDownload);
+        viewModel.DownloadCommand.Execute(row);
+
+        Assert.Equal(1, downloader.CallCount);
+        Assert.True(row.IsAvailable);
+        Assert.False(row.ShowDownload);
+        Assert.Equal(100, row.DownloadProgress);
+        Assert.Equal("Ready", row.DownloadStatus);
+        Assert.Contains("ready", viewModel.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class FakeCatalog(DocumentNode root) : IDocumentCatalog
     {
         public DocumentNode Build(string rootPath) => root;
@@ -248,6 +268,30 @@ public sealed class ViewModelTests
             Saved = settings;
         }
         public bool IsAvailable(BackendDefinition backend) => backend.BuiltIn || _available;
+    }
+
+    private sealed class DownloadStore : ISettingsStore
+    {
+        public ReaderSettings Load() => SettingsStore.CreateDefaults();
+        public void Save(ReaderSettings settings) { }
+        public bool IsAvailable(BackendDefinition backend) => backend.BuiltIn || backend.ExecutablePath == "installed";
+    }
+
+    private sealed class FakeLlmDownloader : ILlmBackendDownloader
+    {
+        public int CallCount { get; private set; }
+
+        public Task DownloadAsync(
+            BackendDefinition backend,
+            IProgress<LlmDownloadProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            backend.ExecutablePath = "installed";
+            progress.Report(new LlmDownloadProgress(45, "Installing package…"));
+            progress.Report(new LlmDownloadProgress(100, "Download complete."));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeSpeech : ISpeechPlaybackService

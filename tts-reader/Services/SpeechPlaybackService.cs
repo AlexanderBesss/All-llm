@@ -8,17 +8,22 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
     private SpeechSynthesizer? _synthesizer;
     private readonly object _gate = new();
     private int _activeCaretIndex;
-    private readonly IPiperProcessRunner _piperRunner;
+    private readonly ILocalProcessSpeechRunner _piperRunner;
+    private readonly ILocalProcessSpeechRunner _llmRunner;
     private readonly IWaveAudioPlayer _audioPlayer;
-    private CancellationTokenSource? _piperCancellation;
+    private CancellationTokenSource? _processCancellation;
     private int _playbackGeneration;
 
     public event EventHandler<string>? PlaybackEnded;
     public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
 
-    public SpeechPlaybackService(IPiperProcessRunner? piperRunner = null, IWaveAudioPlayer? audioPlayer = null)
+    public SpeechPlaybackService(
+        ILocalProcessSpeechRunner? piperRunner = null,
+        ILocalProcessSpeechRunner? llmRunner = null,
+        IWaveAudioPlayer? audioPlayer = null)
     {
         _piperRunner = piperRunner ?? new PiperProcessRunner();
+        _llmRunner = llmRunner ?? new LlmTtsProcessRunner();
         _audioPlayer = audioPlayer ?? new WaveAudioPlayer();
     }
 
@@ -51,9 +56,9 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
     {
         var remaining = GetTextFromCaret(text, caretIndex);
 
-        if (backend.Engine == SpeechEngines.Piper)
+        if (SpeechEngines.IsLocalProcessEngine(backend.Engine))
         {
-            StartPiper(remaining, caretIndex, backend, playbackRate);
+            StartLocalProcess(remaining, caretIndex, backend, playbackRate);
             return;
         }
         if (backend.Engine != SpeechEngines.Windows)
@@ -61,7 +66,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
 
         lock (_gate)
         {
-            CancelPiper();
+            CancelProcess();
             var synthesizer = EnsureSynthesizer();
             synthesizer.SpeakAsyncCancelAll();
             _activeCaretIndex = caretIndex;
@@ -73,29 +78,33 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         }
     }
 
-    private void StartPiper(string remaining, int caretIndex, BackendDefinition backend, double playbackRate)
+    private void StartLocalProcess(string remaining, int caretIndex, BackendDefinition backend, double playbackRate)
     {
         if (double.IsNaN(playbackRate) || double.IsInfinity(playbackRate) || playbackRate <= 0)
             throw new ArgumentOutOfRangeException(nameof(playbackRate));
-        PiperProcessRunner.Validate(backend);
+        if (backend.Engine == SpeechEngines.Piper)
+            PiperProcessRunner.Validate(backend);
+        else
+            LlmTtsProcessRunner.Validate(backend);
 
         CancellationToken token;
         int generation;
         lock (_gate)
         {
             _synthesizer?.SpeakAsyncCancelAll();
-            CancelPiper();
-            _piperCancellation = new CancellationTokenSource();
-            token = _piperCancellation.Token;
+            CancelProcess();
+            _processCancellation = new CancellationTokenSource();
+            token = _processCancellation.Token;
             generation = ++_playbackGeneration;
         }
 
-        _ = RunPiperAsync(remaining, caretIndex, backend, playbackRate, generation, token);
+        _ = RunLocalProcessAsync(remaining, caretIndex, backend, playbackRate, generation, token);
     }
 
-    private async Task RunPiperAsync(string text, int caretIndex, BackendDefinition backend,
+    private async Task RunLocalProcessAsync(string text, int caretIndex, BackendDefinition backend,
         double playbackRate, int generation, CancellationToken token)
     {
+        var runner = backend.Engine == SpeechEngines.Piper ? _piperRunner : _llmRunner;
         var tempDirectory = Path.Combine(Path.GetTempPath(), "TtsReader", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
         try
@@ -104,7 +113,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
             {
                 token.ThrowIfCancellationRequested();
                 var outputPath = Path.Combine(tempDirectory, "speech.wav");
-                await _piperRunner.SynthesizeAsync(backend, chunk.Text, outputPath, playbackRate, token);
+                await runner.SynthesizeAsync(backend, chunk.Text, outputPath, playbackRate, token);
                 PlaybackProgress?.Invoke(this,
                     new SpeechProgressEventArgs(caretIndex + chunk.Offset, chunk.Text.Length));
                 await _audioPlayer.PlayAsync(outputPath, token);
@@ -154,12 +163,12 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         lock (_gate) return generation == _playbackGeneration;
     }
 
-    private void CancelPiper()
+    private void CancelProcess()
     {
         _playbackGeneration++;
-        _piperCancellation?.Cancel();
-        _piperCancellation?.Dispose();
-        _piperCancellation = null;
+        _processCancellation?.Cancel();
+        _processCancellation?.Dispose();
+        _processCancellation = null;
         _audioPlayer.Stop();
     }
 
@@ -190,7 +199,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         lock (_gate)
         {
             _synthesizer?.SpeakAsyncCancelAll();
-            CancelPiper();
+            CancelProcess();
         }
     }
 
