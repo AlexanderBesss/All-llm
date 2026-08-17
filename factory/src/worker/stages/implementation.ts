@@ -6,6 +6,7 @@ import type { JiraIssue } from "../../model/jira.js";
 import type { FactoryWorker } from "../../worker.js";
 import type { CodexEvent } from "../../model/codex.js";
 import { hashInput, normalizePlan, planDescription } from "../format.js";
+import { runRepositoryValidation } from "../validation.js";
 
 const AGENT_HEARTBEAT_MS = 30_000;
 
@@ -140,6 +141,7 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
     }
     worker.throwIfStopping();
     let plan = normalizePlan(result.result?.plan);
+    const agentDurationMs = Date.now() - agentStartedAt;
     worker.log("info", "implementation:agent-complete", {
       runId: run.id,
       committed: result.result?.committed === true,
@@ -153,7 +155,24 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
     const commitSha = await worker.git.assertBranchPublished(worktree, branchName);
     worker.log("info", "implementation:head", { runId: run.id, commitSha });
     await worker.git.assertFileCommitted(worktree, spec.relativePath);
-    plan = { ...plan, files: await worker.git.changedFiles(worktree) };
+    const validation = await runRepositoryValidation({
+      settings: worker.config.validation,
+      cwd: worktree,
+      signal: worker.signal,
+      log: (level, event, details) => worker.log(level, event, { runId: run.id, ...details }),
+    });
+    plan = {
+      ...plan,
+      files: await worker.git.changedFiles(worktree),
+      tests: [
+        ...plan.tests,
+        ...validation.map((check) => `${check.command} — ${check.status}`),
+      ],
+    };
+    const telemetry = {
+      durationMs: agentDurationMs,
+      ...(tokenUsage || {}),
+    };
     worker.log("info", "implementation:plan-persisting", { runId: run.id });
     worker.db.updateRun(run.id, {
       plan_json: JSON.stringify(plan),
@@ -167,7 +186,12 @@ export async function processImplementation(worker: FactoryWorker, run: FactoryR
       makeRunMarker(run.id),
       spec.relativePath,
     ));
-    worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, { ...result.result, commitSha }, StageRunStatus.Completed);
+    worker.db.finishStage(run.id, STAGES.IMPLEMENTATION, attempt, {
+      ...result.result,
+      commitSha,
+      validation,
+      telemetry,
+    }, StageRunStatus.Completed);
     worker.db.updateRun(run.id, {
       stage: STAGES.PULL_REQUEST,
       status: RUN_STATUSES.ACTIVE,

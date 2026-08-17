@@ -29,10 +29,31 @@ export function defaultConfig(repoPath = process.cwd()): FactoryConfig {
     reviewFixIntervalMs: 5 * 60_000,
     leaseMs: 15 * 60_000,
     maxAttempts: Number(process.env.FACTORY_MAX_ATTEMPTS || 1),
+    maxContinuations: Number(process.env.FACTORY_MAX_CONTINUATIONS || 1),
     continueFailedTasks: process.env.FACTORY_CONTINUE_FAILED_TASKS !== "false",
     retryBackoffMs: 30_000,
     factory: {
       branchPrefix: "factory",
+    },
+    validation: {
+      timeoutMs: Number(process.env.FACTORY_VALIDATION_TIMEOUT_MS || 15 * 60_000),
+      commands: [
+        {
+          name: "factory-tests",
+          command: "npm",
+          args: ["--prefix", "factory", "test"],
+        },
+        {
+          name: "dotnet-build",
+          command: "dotnet",
+          args: ["build", "whisper-note/WhisperNote.csproj", "--configuration", "Release"],
+        },
+        {
+          name: "dotnet-tests",
+          command: "dotnet",
+          args: ["test", "whisper-note/tests/WhisperNote.Tests.csproj", "--configuration", "Release"],
+        },
+      ],
     },
     jira: {
       adapter: jiraAdapter,
@@ -218,6 +239,9 @@ export function validateConfig(config: FactoryConfig, {
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts <= 0) {
     errors.push("maxAttempts must be a positive integer");
   }
+  if (!Number.isInteger(config.maxContinuations) || config.maxContinuations < 0) {
+    errors.push("maxContinuations must be a non-negative integer");
+  }
   if (!Number.isInteger(config.reviewFixIntervalMs) || config.reviewFixIntervalMs <= 0) {
     errors.push("reviewFixIntervalMs must be a positive integer");
   }
@@ -235,6 +259,20 @@ export function validateConfig(config: FactoryConfig, {
   }
   if (typeof config.continueFailedTasks !== "boolean") {
     errors.push("continueFailedTasks must be a boolean");
+  }
+  if (!Number.isInteger(config.validation?.timeoutMs) || config.validation.timeoutMs <= 0) {
+    errors.push("validation.timeoutMs must be a positive integer");
+  }
+  if (!Array.isArray(config.validation?.commands)) {
+    errors.push("validation.commands must be an array");
+  } else {
+    config.validation.commands.forEach((command, index) => {
+      if (!command?.name?.trim()) errors.push(`validation.commands[${index}].name is required`);
+      if (!command?.command?.trim()) errors.push(`validation.commands[${index}].command is required`);
+      if (!Array.isArray(command?.args) || command.args.some((arg) => typeof arg !== "string")) {
+        errors.push(`validation.commands[${index}].args must be an array of strings`);
+      }
+    });
   }
   if (!config.git?.baseBranch) errors.push("git.baseBranch is required");
   if (!Number.isInteger(config.codex?.contextWindowTokens) || config.codex.contextWindowTokens <= 0) {

@@ -4,6 +4,7 @@ export enum CliCommand {
   Help = "help",
   Doctor = "doctor",
   Status = "status",
+  Metrics = "metrics",
   Install = "install",
   RunOnce = "run-once",
   Start = "start",

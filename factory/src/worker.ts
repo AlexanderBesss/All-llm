@@ -112,6 +112,7 @@ export class FactoryWorker {
         || (this.config.continueFailedTasks === true
           && run.status === RUN_STATUSES.BLOCKED
           && run.stage === STAGES.BLOCKED
+          && run.continuations < this.config.maxContinuations
           && resumableStage(this.db.getLastFailedStage(run.id)))));
     if (resumable) {
       this.inFlightRunIds.add(resumable.id);
@@ -159,6 +160,7 @@ export class FactoryWorker {
           leased = this.db.updateRun(leased.id, {
             status: RUN_STATUSES.ACTIVE,
             stage: failedStage,
+            continuations: leased.continuations + 1,
             next_attempt_at: null,
             last_error: null,
           });
@@ -166,6 +168,8 @@ export class FactoryWorker {
             runId: leased.id,
             issueKey: leased.issue_key,
             stage: failedStage,
+            continuation: leased.continuations,
+            maxContinuations: this.config.maxContinuations,
             jiraStatus: this.config.jira.statuses.implementation,
           });
         }

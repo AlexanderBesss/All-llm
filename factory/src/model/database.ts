@@ -7,6 +7,7 @@ export interface FactoryRun {
   status: string;
   stage: string;
   attempts: number;
+  continuations: number;
   next_attempt_at: string | null;
   lease_owner: string | null;
   lease_until: string | null;
@@ -26,6 +27,7 @@ export interface RunPatch {
   status?: string | null;
   stage?: string | null;
   attempts?: number | null;
+  continuations?: number | null;
   next_attempt_at?: string | null;
   lease_owner?: string | null;
   lease_until?: string | null;
@@ -65,4 +67,33 @@ export interface StateDatabaseLike {
   findArtifact(kind: string, artifactKey: string): { artifact_value: string } | null;
   recordEvent(runId: string, eventType: string, payload: unknown): void;
   getAwaitingReviewRuns(limit?: number): FactoryRun[];
+  getMetrics(): FactoryMetrics;
+}
+
+export interface StageMetrics {
+  attempts: number;
+  completed: number;
+  failed: number;
+  averageDurationMs: number | null;
+}
+
+export interface FactoryMetrics {
+  generatedAt: string;
+  runs: {
+    total: number;
+    byStatus: Record<string, number>;
+    pullRequests: number;
+    averageCompletedCycleMs: number | null;
+  };
+  stages: Record<string, StageMetrics>;
+  validation: {
+    checks: number;
+    passed: number;
+    failed: number;
+  };
+  tokenUsage: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    generatedTokens: number;
+  };
 }

@@ -39,6 +39,8 @@ Before live implementation starts, the factory creates a Markdown specification 
 
 The spec preserves the Jira request as untrusted data and records the problem, goals, non-goals, functional requirements, testable acceptance criteria, constraints, risks, validation plan, and decision log. The unattended agent reads it, documents useful implementation decisions and assumptions, and commits and pushes it with the change. Retries preserve existing notes; ambiguity never pauses for user input. Dry runs do not mutate worktrees.
 
+Before a pull request is created, the supervisor runs every configured `validation.commands` entry inside the implementation worktree. These checks are independent of the agent's reported test results; failures block PR creation and are recorded in the stage diagnostics. The checked-in configuration runs the factory test suite, `dotnet build`, and the WhisperNote xUnit tests.
+
 ### Pull requests and AI review
 
 Titles must be `[JIRA-KEY] exact Jira task name (Task|feature|bug fix)`. The name comes from the Jira summary; type is normalized to one of the three supported values. Missing components or an invalid existing open-PR title reject the pull request.
@@ -105,7 +107,7 @@ Before processing, startup requires a clean repository, checks out the configure
 
 ### Environment overrides
 
-- Factory: `FACTORY_CONFIG`, `FACTORY_AGENT_PROVIDER`, `FACTORY_JIRA_ADAPTER`, `FACTORY_MAX_ATTEMPTS`.
+- Factory: `FACTORY_CONFIG`, `FACTORY_AGENT_PROVIDER`, `FACTORY_JIRA_ADAPTER`, `FACTORY_MAX_ATTEMPTS`, `FACTORY_MAX_CONTINUATIONS`, `FACTORY_VALIDATION_TIMEOUT_MS`.
 - Jira: `JIRA_PROJECT_KEY`, `FACTORY_JIRA_MCP_TIMEOUT_MS`, `FACTORY_JIRA_MCP_MODEL` (OpenCode), `FACTORY_JIRA_MCP_REASONING_EFFORT`; REST only: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`.
 - Git/GitHub: `GITHUB_REPOSITORY`, `FACTORY_BASE_BRANCH`, and optional `FACTORY_GITHUB_PROVIDER`, `FACTORY_GH_COMMAND`.
 - Codex: `CODEX_MODEL`, `CODEX_REASONING_EFFORT`, `CODEX_FEATURE_MODEL`, `CODEX_FEATURE_REASONING_EFFORT`, `CODEX_SERVICE_TIER`, `CODEX_HIGH_CAPACITY_SERVICE_TIER`, `CODEX_SANDBOX`, `CODEX_APPROVAL_POLICY`, `CODEX_CONTEXT_WINDOW_TOKENS`, `CODEX_AUTO_COMPACT_TOKEN_LIMIT`, `CODEX_COMMAND`.
@@ -128,6 +130,7 @@ npm start
 | `npm test` | Build and run the factory tests. |
 | `npm run doctor` | Check Node, Git, clean repository/base/remote, writable SQLite state, agent/MCP, GitHub authentication/access, and Jira configuration. |
 | `npm run status` / `npm run status:json` | Show durable run state. |
+| `npm run metrics` / `npm run metrics:json` | Show durable outcome, validation, stage-duration, and token-usage metrics. |
 | `npm run run-once` / `npm run dry-run` | Perform one poll; `retry_scheduled` does not wait for its retry. Dry-run avoids worktree mutations. |
 | `npm run start:planning` | Run only Planning -> To Do refinement. |
 | `npm run start:jira-tasks` | Run only Ready-ticket implementation. |
@@ -150,8 +153,8 @@ Logs use ISO-8601 UTC, for example `[2026-08-11T16:00:42.689Z] [task] task:start
 - Runs use stable IDs, branch names, Jira markers, and durable SQLite records. Claims and leases prevent duplicate active work when processes share `stateDir`.
 - Startup releases leases owned by dead factory processes; live owners remain protected. Expired leases are reclaimable.
 - Before resuming, the factory confirms the Jira parent still exists; deleted parents are cancelled before agent, Git, or PR work starts.
-- Retries reuse the branch/worktree and existing spec. One attempt is allowed by default; `maxAttempts`/`FACTORY_MAX_ATTEMPTS` raises the bound. Exhaustion comments diagnostics, moves Jira to the configured `Error`, and leaves the SQLite run blocked. Jira must expose that exact Error status and the configured review status (`In Review` by default).
-- `continueFailedTasks` defaults to `true`: a later poll uses `stage_runs` to resume the failed implementation or PR stage, moves Jira back to the implementation status, and returns it to `Error` if continuation fails. Set it to `false` for terminal blocks.
+- Retries reuse the branch/worktree and existing spec. One attempt is allowed by default; `maxAttempts`/`FACTORY_MAX_ATTEMPTS` raises the per-stage bound. Exhaustion comments diagnostics, moves Jira to the configured `Error`, and leaves the SQLite run blocked. Jira must expose that exact Error status and the configured review status (`In Review` by default).
+- `continueFailedTasks` defaults to `true`, but automatic recovery is separately bounded by `maxContinuations`/`FACTORY_MAX_CONTINUATIONS` (one continuation by default). A later poll can resume the failed implementation or PR stage only while that budget remains. Set `continueFailedTasks` to `false` or `maxContinuations` to `0` for terminal blocks.
 - `Ctrl+C` gracefully aborts active agent, Git, GitHub CLI, Jira HTTP, and retry waits; descendants settle before SQLite closes. Windows uses `taskkill /T /F` before terminating Git Bash/command-shim parents so OpenCode descendants cannot survive shutdown.
 - The selected agent changes source through local Git in its worktree; GitHub CLI creates and inspects hosted PR objects. After implementation and its reported tests, but before Jira reporting or PR creation, the supervisor requires the expected branch, a clean worktree, a committed spec, and local HEAD exactly matching the remote branch SHA. Implementation areas come from the actual Git diff.
 - The PR URL is checkpointed before Jira comment/status reporting, so restart resumes reporting without recreating the PR. Any implementation failure follows bounded retry/Error handling without waiting for user input.

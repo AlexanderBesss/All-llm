@@ -51,9 +51,11 @@ export async function fixture({ maxAttempts = 1, description = "Implement the re
     mergeCheckIntervalMs: 300_000,
     mergeCheckConcurrency: 2,
     maxAttempts,
+    maxContinuations: 1,
     continueFailedTasks,
     retryBackoffMs: 0,
     factory: { branchPrefix: "factory" },
+    validation: { timeoutMs: 60_000, commands: [] },
     jira: {
       projectKey: "FACT",
       statuses: { planning: "Planning", todo: "To Do", ready: "Ready", implementation: "In Progress", review: "In Review", done: "Done", error: "Error" },

@@ -29,6 +29,12 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore whisper-note/WhisperNote.csproj
 
+      - name: Build
+        run: dotnet build whisper-note/WhisperNote.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test whisper-note/tests/WhisperNote.Tests.csproj -c Release --no-restore
+
       - name: Publish Release
         run: |
           dotnet publish whisper-note/WhisperNote.csproj `

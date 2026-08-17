@@ -83,6 +83,75 @@ test("processes one parent ticket with one agent and one aggregate PR", async ()
   fixtureData.db.close();
 });
 
+test("runs supervisor validation before creating the pull request", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.validation.commands = [{
+    name: "independent-check",
+    command: process.execPath,
+    args: ["-e", "process.stdout.write('independent validation passed')"],
+  }];
+  const logs = [];
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } }, { logs });
+
+  const result = await worker.runOnce();
+
+  assert.equal(result.action, RunAction.Claimed);
+  assert.equal(fixtureData.github.pullRequests.length, 1);
+  assert.ok(logs.some((entry) => entry.includes("validation:passed") && entry.includes("independent-check")));
+  fixtureData.db.close();
+});
+
+test("blocks a run when supervisor validation fails before pull-request creation", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.validation.commands = [{
+    name: "independent-check",
+    command: process.execPath,
+    args: ["-e", "process.stderr.write('independent validation failed'); process.exit(7)"],
+  }];
+  const worker = makeWorker(fixtureData, { async execute() { return { result: executionFor(), raw: {} }; } });
+
+  const result = await worker.runOnce();
+  const run = fixtureData.db.getRun(result.runId);
+
+  assert.equal(result.action, RunAction.Blocked);
+  assert.equal(fixtureData.github.pullRequests.length, 0);
+  assert.match(run.last_error, /Independent validation 'independent-check' failed/);
+  fixtureData.db.close();
+});
+
+test("durable metrics summarize outcomes, validation, and agent token usage", async () => {
+  const fixtureData = await fixture();
+  fixtureData.config.validation.commands = [{
+    name: "independent-check",
+    command: process.execPath,
+    args: ["-e", "process.exit(0)"],
+  }];
+  const worker = makeWorker(fixtureData, {
+    async execute(input) {
+      input.onProgress?.({ type: "turn.completed", usage: { input_tokens: 12, cached_input_tokens: 5, output_tokens: 7 } });
+      return { result: executionFor(), raw: {} };
+    },
+  });
+
+  await worker.runOnce();
+  const metrics = fixtureData.db.getMetrics();
+
+  assert.equal(metrics.runs.total, 1);
+  assert.equal(metrics.runs.byStatus.awaiting_review, 1);
+  assert.equal(metrics.runs.pullRequests, 1);
+  assert.equal(metrics.stages.implementation.attempts, 1);
+  assert.equal(metrics.stages.implementation.completed, 1);
+  assert.equal(metrics.validation.checks, 1);
+  assert.equal(metrics.validation.passed, 1);
+  assert.equal(metrics.tokenUsage.inputTokens, 12);
+  assert.equal(metrics.tokenUsage.cachedInputTokens, 5);
+  assert.equal(metrics.tokenUsage.generatedTokens, 7);
+  const readOnlyDb = await openStateDatabase(fixtureData.config.stateDir, { readOnly: true });
+  assert.equal(readOnlyDb.getMetrics().runs.total, 1);
+  readOnlyDb.close();
+  fixtureData.db.close();
+});
+
 test("pull-request description presents intent and review context in a predictable order", () => {
   const body = pullRequestDescription({
     runId: "FACT-1-run",
@@ -296,6 +365,30 @@ test("continues blocked implementation tasks from their failed stage when enable
     ["In Progress", "Error", "In Progress", "In Review"],
   );
   assert.equal(fixtureData.db.getRun(first.runId).status, RUN_STATUSES.AWAITING_REVIEW);
+  fixtureData.db.close();
+});
+
+test("stops automatic blocked-task continuation at its configured bound", async () => {
+  const fixtureData = await fixture({ continueFailedTasks: true });
+  let agentCalls = 0;
+  const worker = makeWorker(fixtureData, {
+    async execute() {
+      agentCalls += 1;
+      throw new Error("persistent implementation failure");
+    },
+  });
+
+  const first = await worker.runOnce();
+  const second = await worker.runOnce();
+  const third = await worker.runOnce();
+  const run = fixtureData.db.getRun(first.runId);
+
+  assert.equal(first.action, RunAction.Blocked);
+  assert.equal(second.action, RunAction.Blocked);
+  assert.equal(third.action, RunAction.Idle);
+  assert.equal(agentCalls, 2);
+  assert.equal(run.continuations, 1);
+  assert.equal(run.status, RUN_STATUSES.BLOCKED);
   fixtureData.db.close();
 });
 

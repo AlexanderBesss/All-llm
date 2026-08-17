@@ -90,12 +90,27 @@ async function makeWorker(config: FactoryConfig, signal?: AbortSignal, {
 }
 
 async function commandStatus(config: FactoryConfig, asJson = false) {
-  const db = await openStateDatabase(config.stateDir);
+  const db = await openStateDatabase(config.stateDir, { readOnly: true });
   const rows = db.listRuns(50);
   db.close();
   if (asJson) console.log(JSON.stringify(rows, null, 2));
   else if (!rows.length) console.log("No factory runs recorded.");
   else console.table(rows.map((row) => ({ id: row.id, issue: row.issue_key, status: row.status, stage: row.stage, pr: row.pr_url || "", error: row.last_error || "" })));
+}
+
+async function commandMetrics(config: FactoryConfig, asJson = false) {
+  const db = await openStateDatabase(config.stateDir, { readOnly: true });
+  const metrics = db.getMetrics();
+  db.close();
+  if (asJson) {
+    console.log(JSON.stringify(metrics, null, 2));
+    return;
+  }
+  console.log(`Metrics generated at ${metrics.generatedAt}`);
+  console.table([metrics.runs]);
+  console.table(Object.entries(metrics.stages).map(([stage, value]) => ({ stage, ...value })));
+  console.table([metrics.validation]);
+  console.table([metrics.tokenUsage]);
 }
 
 async function commandInstall(config: FactoryConfig) {
@@ -107,7 +122,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const config = await loadConfig(args.config, defaultRepoPath());
   if (args.command === CliCommand.Help) {
-    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-planning|start-jira-tasks|start-pull-request-check|start-review-fix|status|install> [--config path] [--dry-run] [--json]");
+    console.log("Usage: node factory/dist/cli.js <doctor|run-once|start|start-planning|start-jira-tasks|start-pull-request-check|start-review-fix|status|metrics|install> [--config path] [--dry-run] [--json]");
     return 0;
   }
   if (args.command === CliCommand.Doctor) {
@@ -118,6 +133,10 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   }
   if (args.command === CliCommand.Status) {
     await commandStatus(config, args.json);
+    return 0;
+  }
+  if (args.command === CliCommand.Metrics) {
+    await commandMetrics(config, args.json);
     return 0;
   }
   if (args.command === CliCommand.Install) {

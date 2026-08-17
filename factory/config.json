@@ -11,10 +11,31 @@
   "reviewFixIntervalMs": 300000,
   "leaseMs": 900000,
   "maxAttempts": 1,
+  "maxContinuations": 1,
   "continueFailedTasks": true,
   "retryBackoffMs": 30000,
   "factory": {
     "branchPrefix": "factory"
+  },
+  "validation": {
+    "timeoutMs": 900000,
+    "commands": [
+      {
+        "name": "factory-tests",
+        "command": "npm",
+        "args": ["--prefix", "factory", "test"]
+      },
+      {
+        "name": "dotnet-build",
+        "command": "dotnet",
+        "args": ["build", "whisper-note/WhisperNote.csproj", "--configuration", "Release"]
+      },
+      {
+        "name": "dotnet-tests",
+        "command": "dotnet",
+        "args": ["test", "whisper-note/tests/WhisperNote.Tests.csproj", "--configuration", "Release"]
+      }
+    ]
   },
   "jira": {
     "mcpTimeoutMs": 240000,

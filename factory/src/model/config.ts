@@ -33,6 +33,17 @@ export interface FactorySettings {
   branchPrefix: string;
 }
 
+export interface ValidationCommand {
+  name: string;
+  command: string;
+  args: string[];
+}
+
+export interface ValidationSettings {
+  timeoutMs: number;
+  commands: ValidationCommand[];
+}
+
 export interface JiraConfig {
   adapter?: JiraAdapterKind;
   baseUrl?: string;
@@ -114,9 +125,11 @@ export interface FactoryConfig {
   reviewFixIntervalMs: number;
   leaseMs: number;
   maxAttempts: number;
+  maxContinuations: number;
   continueFailedTasks: boolean;
   retryBackoffMs: number;
   factory: FactorySettings;
+  validation: ValidationSettings;
   jira: JiraConfig;
   github: GitHubConfig;
   git: GitConfig;

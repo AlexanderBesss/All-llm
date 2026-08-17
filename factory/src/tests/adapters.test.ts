@@ -15,12 +15,14 @@ test("factory defaults to one attempt and no subtask configuration", () => {
   try {
     const config = defaultConfig(".");
     assert.equal(config.maxAttempts, 1);
+    assert.equal(config.maxContinuations, 1);
     assert.equal(config.continueFailedTasks, true);
     assert.equal("preferredMaxSubtasks" in config.factory, false);
     process.env.FACTORY_MAX_ATTEMPTS = "4";
     assert.equal(defaultConfig(".").maxAttempts, 4);
     assert.deepEqual(validateConfig({ ...config, maxAttempts: 4 }, { live: false }), []);
     assert.ok(validateConfig({ ...config, maxAttempts: 0 }, { live: false }).includes("maxAttempts must be a positive integer"));
+    assert.ok(validateConfig({ ...config, maxContinuations: -1 }, { live: false }).includes("maxContinuations must be a non-negative integer"));
     assert.ok(validateConfig({ ...config, planningConcurrency: 0 }, { live: false }).includes("planningConcurrency must be a positive integer"));
     assert.ok(validateConfig({ ...config, implementationConcurrency: 0 }, { live: false }).includes("implementationConcurrency must be a positive integer"));
     assert.ok(validateConfig({ ...config, mergeCheckConcurrency: 0 }, { live: false }).includes("mergeCheckConcurrency must be a positive integer"));

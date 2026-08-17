@@ -138,8 +138,8 @@ test("OpenCode doctor settings come from the selected model in opencode.json", a
   config.provider = AgentProvider.OpenCode;
   const details = await readOpenCodeDoctorSettings(config);
   assert.equal(details.model, "llamacpp/unsloth/Qwen3.8-27B-UD-Q5_K_XL");
-  assert.equal(details.contextWindowTokens, 100000);
-  assert.equal(details.outputTokens, 8192);
+  assert.equal(details.contextWindowTokens, 96000);
+  assert.equal(details.outputTokens, 32768);
   assert.equal(details.compactionAuto, true);
   assert.equal(details.compactionPrune, true);
   assert.equal(details.compactionReservedTokens, 10000);

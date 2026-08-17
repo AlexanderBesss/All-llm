@@ -17,6 +17,8 @@
     "doctor": "npm run build && node dist/cli.js doctor",
     "status": "npm run build && node dist/cli.js status",
     "status:json": "npm run build && node dist/cli.js status --json",
+    "metrics": "npm run build && node dist/cli.js metrics",
+    "metrics:json": "npm run build && node dist/cli.js metrics --json",
     "install-task": "npm run build && node dist/cli.js install",
     "test": "npm run build && node --test dist/tests/*.test.js"
   },

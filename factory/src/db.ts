@@ -1,12 +1,21 @@
 import { mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { nowIso, EventType } from "./types.js";
-import type { FactoryRun, RunPatch } from "./model/database.js";
+import type { FactoryMetrics, FactoryRun, RunPatch } from "./model/database.js";
 
-export async function openStateDatabase(stateDir) {
-  await mkdir(stateDir, { recursive: true });
-  const db = new DatabaseSync(path.join(stateDir, "factory.db"));
+export async function openStateDatabase(stateDir, { readOnly = false }: { readOnly?: boolean } = {}) {
+  const databasePath = path.join(stateDir, "factory.db");
+  if (!readOnly) await mkdir(stateDir, { recursive: true });
+  if (readOnly && !existsSync(databasePath)) {
+    throw new Error(`Factory state database does not exist: ${databasePath}`);
+  }
+  const db = new DatabaseSync(databasePath, { readOnly, timeout: 5000 });
+  if (readOnly) {
+    db.exec("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;");
+    return new StateDatabase(db);
+  }
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
@@ -17,6 +26,7 @@ export async function openStateDatabase(stateDir) {
       status TEXT NOT NULL,
       stage TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
+      continuations INTEGER NOT NULL DEFAULT 0,
       next_attempt_at TEXT,
       lease_owner TEXT,
       lease_until TEXT,
@@ -64,6 +74,11 @@ export async function openStateDatabase(stateDir) {
       created_at TEXT NOT NULL
     );
   `);
+  try {
+    db.exec("ALTER TABLE runs ADD COLUMN continuations INTEGER NOT NULL DEFAULT 0");
+  } catch (error) {
+    if (!String(error?.message || error).toLowerCase().includes("duplicate column name")) throw error;
+  }
   return new StateDatabase(db);
 }
 
@@ -131,7 +146,7 @@ export class StateDatabase {
 
   updateRun(id: string, patch: RunPatch): FactoryRun | null {
     const allowed = new Set([
-      "status", "stage", "attempts", "next_attempt_at", "lease_owner", "lease_until",
+      "status", "stage", "attempts", "continuations", "next_attempt_at", "lease_owner", "lease_until",
       "issue_json", "plan_json", "branch_name", "worktree_path", "commit_sha",
       "pr_number", "pr_url", "last_error",
     ]);
@@ -229,5 +244,132 @@ export class StateDatabase {
       WHERE status = 'awaiting_review' AND pr_number IS NOT NULL
       ORDER BY created_at ASC LIMIT ?
     `).all(limit) as unknown as FactoryRun[];
+  }
+
+  getMetrics(): FactoryMetrics {
+    const runRows = this.db.prepare(`
+      SELECT status, pr_number, created_at, updated_at
+      FROM runs
+    `).all() as unknown as Array<{
+      status: string;
+      pr_number: number | null;
+      created_at: string;
+      updated_at: string;
+    }>;
+    const byStatus: Record<string, number> = {};
+    const completedCycleDurations: number[] = [];
+    for (const run of runRows) {
+      byStatus[run.status] = (byStatus[run.status] || 0) + 1;
+      if (run.status === "completed") {
+        const duration = durationMs(run.created_at, run.updated_at);
+        if (duration !== null) completedCycleDurations.push(duration);
+      }
+    }
+
+    const stageRows = this.db.prepare(`
+      SELECT stage, status, started_at, completed_at, output_json
+      FROM stage_runs
+    `).all() as unknown as Array<{
+      stage: string;
+      status: string;
+      started_at: string;
+      completed_at: string | null;
+      output_json: string | null;
+    }>;
+    const stages: Record<string, {
+      attempts: number;
+      completed: number;
+      failed: number;
+      durations: number[];
+    }> = {};
+    let validationChecks = 0;
+    let validationPassed = 0;
+    let validationFailed = 0;
+    let inputTokens = 0;
+    let cachedInputTokens = 0;
+    let generatedTokens = 0;
+
+    for (const stage of stageRows) {
+      const summary = stages[stage.stage] || { attempts: 0, completed: 0, failed: 0, durations: [] };
+      summary.attempts += 1;
+      if (stage.status === "completed") summary.completed += 1;
+      if (stage.status === "failed") summary.failed += 1;
+      if (stage.status === "completed" && stage.completed_at) {
+        const duration = durationMs(stage.started_at, stage.completed_at);
+        if (duration !== null) summary.durations.push(duration);
+      }
+      const output = parseJsonRecord(stage.output_json);
+      const telemetry = output?.telemetry;
+      if (telemetry && typeof telemetry === "object") {
+        const usage = telemetry as Record<string, unknown>;
+        inputTokens += finiteNonNegativeNumber(usage.inputTokens);
+        cachedInputTokens += finiteNonNegativeNumber(usage.cachedInputTokens);
+        generatedTokens += finiteNonNegativeNumber(usage.generatedTokens);
+      }
+      if (Array.isArray(output?.validation)) {
+        for (const check of output.validation) {
+          if (!check || typeof check !== "object") continue;
+          const record = check as Record<string, unknown>;
+          validationChecks += 1;
+          if (record.status === "passed") validationPassed += 1;
+          if (record.status === "failed") validationFailed += 1;
+        }
+      }
+      stages[stage.stage] = summary;
+    }
+
+    const normalizedStages = Object.fromEntries(Object.entries(stages).map(([stage, summary]) => [stage, {
+      attempts: summary.attempts,
+      completed: summary.completed,
+      failed: summary.failed,
+      averageDurationMs: average(summary.durations),
+    }]));
+    return {
+      generatedAt: nowIso(),
+      runs: {
+        total: runRows.length,
+        byStatus,
+        pullRequests: runRows.filter((run) => run.pr_number !== null).length,
+        averageCompletedCycleMs: average(completedCycleDurations),
+      },
+      stages: normalizedStages,
+      validation: {
+        checks: validationChecks,
+        passed: validationPassed,
+        failed: validationFailed,
+      },
+      tokenUsage: {
+        inputTokens,
+        cachedInputTokens,
+        generatedTokens,
+      },
+    };
+  }
+}
+
+function durationMs(start: string | null | undefined, end: string | null | undefined): number | null {
+  if (!start || !end) return null;
+  const duration = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(duration) && duration >= 0 ? duration : null;
+}
+
+function average(values: number[]): number | null {
+  return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : null;
+}
+
+function finiteNonNegativeNumber(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function parseJsonRecord(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
   }
 }
