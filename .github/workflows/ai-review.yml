@@ -36,13 +36,15 @@ jobs:
               per_page: 100,
             });
             core.setOutput("file_count", String(files.length));
-            core.info(`AI review file inventory: ${files.length} changed file(s) queued for processing.`);
+            core.info(`AI review progress: 0/${files.length} files processed; review starting.`);
 
       - name: Run OpenCode AI Review
+        id: opencode
         uses: anomalyco/opencode/github@latest
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          OPENCODE_LOG_LEVEL: WARN
           OPENCODE_CONFIG_CONTENT: |
             {
               "permission": {
@@ -73,7 +75,7 @@ jobs:
             - After the inventory is exhausted, append any non-empty `currentSmallRound`. The flattened round paths must equal the original inventory paths exactly, so no file may be omitted, duplicated, split, or combined across round boundaries.
             - A file with 250 or more physical lines is always a singleton round. A file with fewer than 250 physical lines may be alone when it starts a round or cannot fit the current round; every small-file round has an inclusive total of 300 lines or less. A total of exactly 300 is allowed, while a total of 301 or more starts a new round.
             - For boundary calibration, ordered lengths 120, 100, 80, 1 produce rounds 300 and 1; 249 and 51 share a round; 249 and 52 use separate rounds; and a 250-line file is always a singleton even when another file would fit.
-            After building the inventory and rounds, report the number of changed files and review rounds in your progress output so the counts are visible in the workflow logs.
+            Keep progress output concise. After building the inventory and rounds, report `AI review progress: 0/<file-count> files processed; <round-count> review rounds queued.`. Immediately before each review-round batch, report `AI review progress: <processed>/<file-count> files processing (round <round>/<round-count>).`; after that batch finishes, report `AI review progress: <processed>/<file-count> files processed (round <round>/<round-count> complete).`. Use the cumulative number of files in completed rounds for `<processed>`, and emit no file inventory, command trace, permission evaluation, or other verbose progress output.
             Set MAX_CONCURRENT_REVIEW_SUBAGENTS = 3. Treat each review round as one batch: invoke exactly one review subagent for each batch, passing all and only the files in that batch to that subagent. Schedule consecutive batches in groups of at most MAX_CONCURRENT_REVIEW_SUBAGENTS. For each group, use the Task tool to issue up to three batch-review subagent calls in one assistant turn, one call per round; invoke no more than three review subagents at once, then wait for every subagent in the current group to finish before starting the next group; never invoke one subagent per file, omit a file, duplicate a file, split a file, or combine files from different rounds. After all batch reviews are complete, synthesize their findings into the final pull request review; the synthesis must combine batch findings and must not schedule another per-file review.
             Do not include the changed-file inventory or any redundant file list in the response.
             Write the actionable findings for inline code comments with the write tool to the exact path `.git/ai-review-findings.json` in the repository checkout. This path is intentional temporary runner metadata; do not use `/tmp`, shell variables, or any path outside the checkout.
@@ -91,6 +93,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           REVIEW_FILE_COUNT: ${{ steps.inventory.outputs.file_count }}
+          REVIEW_STATUS: ${{ steps.opencode.outcome }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -99,7 +102,11 @@ jobs:
               core.warning("AI review file count was unavailable.");
               return;
             }
-            core.info(`AI review processed ${fileCount} changed file(s) from the pull request inventory.`);
+            if (process.env.REVIEW_STATUS === "success") {
+              core.info(`AI review progress: ${fileCount}/${fileCount} files processed.`);
+            } else {
+              core.warning(`AI review progress: ${fileCount} files queued; review ${process.env.REVIEW_STATUS || "did not complete"}.`);
+            }
 
       - name: Publish inline AI review comments
         id: publish
