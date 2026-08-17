@@ -11,6 +11,8 @@ public sealed class DocumentCatalogTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_root, "chapter", "notes"));
         File.WriteAllText(Path.Combine(_root, "readme.md"), "root");
+        File.WriteAllText(Path.Combine(_root, "UPPER.MD"), "upper");
+        File.WriteAllText(Path.Combine(_root, "notes.MarkDown"), "mixed");
         File.WriteAllText(Path.Combine(_root, "skip.docx"), "ignored");
         File.WriteAllText(Path.Combine(_root, "chapter", "one.txt"), "one");
         File.WriteAllText(Path.Combine(_root, "chapter", "notes", "paper.pdf"), "%PDF");
@@ -19,6 +21,8 @@ public sealed class DocumentCatalogTests : IDisposable
 
         Assert.Equal(_root, root.Name);
         Assert.Contains(root.Children, item => !item.IsFolder && item.Name == "readme.md");
+        Assert.Contains(root.Children, item => item.Name == "UPPER.MD");
+        Assert.Contains(root.Children, item => item.Name == "notes.MarkDown");
         Assert.DoesNotContain(root.Children, item => item.Name == "skip.docx");
         var chapter = Assert.Single(root.Children, item => item.IsFolder);
         Assert.Equal("chapter", chapter.Name);

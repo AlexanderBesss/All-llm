@@ -29,6 +29,18 @@ public sealed class DocumentTextExtractorTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAsync_PreservesMarkdownBlankLinesUnicodeAndFinalContent()
+    {
+        var path = Path.Combine(_root, "complete.MARKDOWN");
+        const string expected = "# Привіт\n\nFirst paragraph.\n\n\n最後の行 ✓\n";
+        await File.WriteAllTextAsync(path, expected);
+
+        var actual = await new DocumentTextExtractor().ReadAsync(path);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
     public async Task ReadAsync_ExtractsPdfPagesInOrder()
     {
         var builder = new PdfDocumentBuilder();
@@ -75,31 +87,128 @@ public sealed class DocumentTextExtractorTests : IDisposable
     }
 
     [Fact]
+    public void MarkdownRenderer_RendersRepresentativeBlocksInSourceOrder()
+    {
+        const string markdown = """
+            Title
+            =====
+
+            Paragraph with **bold**, _emphasis_, [a link](https://example.test), and `inline code`.
+
+            > Quoted text
+
+            3. First ordered
+            4. Second ordered
+
+            - Unordered
+
+            ```csharp
+            Console.WriteLine("hello");
+            ```
+
+            ---
+
+            | Name | Value |
+            | :--- | ---: |
+            | CPU | 42% |
+            """;
+
+        var document = new MarkdownDocumentRenderer().Render(markdown);
+        var rendered = ReadDocument(document);
+
+        AssertTextInOrder(rendered, "Title", "Paragraph with bold", "Quoted text", "First ordered",
+            "Second ordered", "Unordered", "Console.WriteLine", "Name", "CPU", "42%");
+        Assert.DoesNotContain("=====", rendered);
+        Assert.DoesNotContain("**", rendered);
+        Assert.DoesNotContain("```", rendered);
+        Assert.DoesNotContain("| :--- |", rendered);
+        Assert.Contains(document.Blocks, block => block is Section);
+        Assert.Contains(document.Blocks, block => block is System.Windows.Documents.List);
+        Assert.Contains(document.Blocks, block => block is Table);
+    }
+
+    [Theory]
+    [InlineData("Before *unmatched\n\nAfter", "Before *unmatched", "After")]
+    [InlineData("Before\n\n```text\nunclosed fence\nat end", "unclosed fence", "at end")]
+    [InlineData("Before ![broken](<> invalid) After", "Before", "broken", "After")]
+    public void MarkdownRenderer_MalformedInputKeepsReadableContent(string markdown, params string[] expected)
+    {
+        var rendered = ReadDocument(new MarkdownDocumentRenderer().Render(markdown, "bad\0path.md"));
+
+        AssertTextInOrder(rendered, expected);
+    }
+
+    [Fact]
+    public void MarkdownRenderer_ExternalAndMissingImagesUseReadableAltText()
+    {
+        const string markdown = "![Remote diagram](https://example.test/image.png) then ![Missing local](missing.png)";
+
+        var rendered = ReadDocument(new MarkdownDocumentRenderer().Render(markdown, Path.Combine(_root, "readme.md")));
+
+        Assert.Contains("[Image: Remote diagram]", rendered);
+        Assert.Contains("[Image: Missing local]", rendered);
+    }
+
+    [Fact]
+    public void MarkdownRenderer_LocalImageRendersAndKeepsAltTextForCaretAndSpeech()
+    {
+        var imagePath = Path.Combine(_root, "pixel.png");
+        File.WriteAllBytes(imagePath, Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="));
+
+        FlowDocument? document = null;
+        RunOnSta(() => document = new MarkdownDocumentRenderer().Render(
+            "Before ![Local pixel](pixel.png) after", Path.Combine(_root, "readme.md")));
+
+        Assert.NotNull(document);
+        var rendered = ReadDocument(document!);
+        Assert.Contains("Before", rendered);
+        Assert.Contains("[Image: Local pixel]", rendered);
+        Assert.Contains("after", rendered);
+        Assert.Contains(document!.Blocks.OfType<Paragraph>().SelectMany(paragraph => paragraph.Inlines),
+            inline => inline is InlineUIContainer);
+    }
+
+    [Fact]
     public void MarkdownRenderer_RendersMermaidFlowchartAsVisualBlock()
     {
         const string markdown = "```mermaid\nflowchart LR\nA[Start] --> B[Finish]\n```";
         FlowDocument? document = null;
-        Exception? renderError = null;
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                document = new MarkdownDocumentRenderer().Render(markdown);
-            }
-            catch (Exception ex)
-            {
-                renderError = ex;
-            }
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
+        var renderError = RunOnSta(() => document = new MarkdownDocumentRenderer().Render(markdown));
 
         Assert.Null(renderError);
         Assert.NotNull(document);
         Assert.Contains(document.Blocks, block => block is BlockUIContainer);
         var rendered = new TextRange(document.ContentStart, document.ContentEnd).Text;
         Assert.Contains("Diagram: Start, Finish", rendered);
+    }
+
+    private static string ReadDocument(FlowDocument document) =>
+        new TextRange(document.ContentStart, document.ContentEnd).Text;
+
+    private static void AssertTextInOrder(string actual, params string[] expected)
+    {
+        var previous = -1;
+        foreach (var value in expected)
+        {
+            var current = actual.IndexOf(value, StringComparison.Ordinal);
+            Assert.True(current > previous, $"Expected '{value}' after character {previous} in: {actual}");
+            previous = current;
+        }
+    }
+
+    private static Exception? RunOnSta(Action action)
+    {
+        Exception? error = null;
+        var thread = new Thread(() =>
+        {
+            try { action(); }
+            catch (Exception exception) { error = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        return error;
     }
 
     public void Dispose()

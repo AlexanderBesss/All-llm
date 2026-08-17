@@ -29,6 +29,8 @@ public sealed class ViewModelTests
         Assert.False(viewModel.IsLoading);
         Assert.True(viewModel.IsPlaying);
         Assert.Equal(2, speech.Calls.Count);
+        Assert.Equal("Story\nRead this", speech.Calls[0].Text);
+        Assert.DoesNotContain("#", speech.Calls[0].Text);
         Assert.Equal(6, speech.Calls[1].Caret);
         Assert.Contains("Caret moved", viewModel.Status);
     }
