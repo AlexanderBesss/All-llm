@@ -5,11 +5,11 @@
   --gpu-layers all `
   --kv-unified `
   --spec-type draft-mtp,ngram-mod `
-  --spec-ngram-mod-n-max 3 `
+  --spec-ngram-mod-n-max 2 `
   --gpu-layers-draft all `
-  --parallel 3 `
+  --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 140000 `
+  --ctx-size 120000 `
   --cache-type-k q4_0 `
   --cache-type-v q4_0 `
   --flash-attn on `
