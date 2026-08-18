@@ -31,42 +31,26 @@ test("AI review is label-gated and publishes only high-relevance findings", asyn
   assert.doesNotMatch(workflow, /labels: \["ai-fix"\]/);
 });
 
-test("AI review schedules deterministic size-aware review rounds", async () => {
+test("AI review reviews the complete change set in one context", async () => {
   const workflow = await readFile(path.resolve("..", ".github", "workflows", "ai-review.yml"), "utf8");
 
   assert.match(workflow, /complete changed-file inventory.*existing changed-file order/s);
   assert.match(workflow, /complete contents at the pull-request revision/);
-  assert.match(workflow, /total physical lines, including blank lines/);
-  assert.match(workflow, /never only diff, hunk, or changed-line counts/);
-  assert.match(workflow, /LARGE_FILE_LINES = 250/);
-  assert.match(workflow, /MAX_ROUND_LINES = 1500/);
-  assert.doesNotMatch(workflow, /MAX_ROUND_LINES = 300/);
-  assert.match(workflow, /rounds = \[\].*currentSmallRound = \[\].*currentLines = 0/s);
-  assert.match(workflow, /file\.lines >= LARGE_FILE_LINES/);
-  assert.match(workflow, /currentLines \+ file\.lines > MAX_ROUND_LINES/);
-  assert.match(workflow, /flattened round paths must equal the original inventory paths exactly/);
-  assert.match(workflow, /250 or more physical lines.*singleton round/s);
-  assert.match(workflow, /fewer than 250 physical lines.*1,500 lines or less/s);
-  assert.match(workflow, /1,501 or more/);
-  assert.match(workflow, /six ordered 249-line files followed by a 6-line file.*1,500 lines/s);
-  assert.match(workflow, /replacing the 6-line file with a 7-line file.*attempted total 1,501.*1,494-line round.*7-line file starts the next round/s);
-  assert.match(workflow, /249-line file remains eligible for grouping.*250-line file is always a singleton/s);
   assert.match(workflow, /Count AI review files/);
   assert.match(workflow, /AI review progress: 0\/\$\{files\.length\} files processed/);
   assert.match(workflow, /AI review progress: \$\{fileCount\}\/\$\{fileCount\} files processed/);
   assert.match(workflow, /REVIEW_STATUS: \$\{\{ steps\.opencode\.outcome \}\}/);
-  assert.match(workflow, /AI review progress: <processed>\/\<file-count> files processing/);
+  assert.match(workflow, /Review the entire changed-file inventory as one coherent unit in this same context/);
+  assert.match(workflow, /Inspect all and only the changed files together/);
+  assert.match(workflow, /do not split the review into per-file, size-limited, or parallel subagent contexts/);
+  assert.match(workflow, /Do not use the Task tool or invoke review subagents/);
+  assert.match(workflow, /one review context queued/);
+  assert.match(workflow, /single review context complete/);
   assert.match(workflow, /permission evaluation/);
-  assert.match(workflow, /each review round as one batch/);
-  assert.match(workflow, /exactly one review subagent for each batch/);
-  assert.match(workflow, /all and only the files in that batch/);
-  assert.match(workflow, /MAX_CONCURRENT_REVIEW_SUBAGENTS = 3/);
-  assert.match(workflow, /groups of at most MAX_CONCURRENT_REVIEW_SUBAGENTS/);
-  assert.match(workflow, /no more than three review subagents at once/);
-  assert.match(workflow, /never invoke one subagent per file/);
-  assert.match(workflow, /After all batch reviews are complete, synthesize/);
-  assert.match(workflow, /synthesis must combine batch findings and must not schedule another per-file review/);
 
   assert.doesNotMatch(workflow, /Review each changed file in a separate subagent/);
   assert.doesNotMatch(workflow, /Do not run file-review subagents in parallel or combine multiple files/);
+  assert.doesNotMatch(workflow, /MAX_ROUND_LINES/);
+  assert.doesNotMatch(workflow, /MAX_CONCURRENT_REVIEW_SUBAGENTS/);
+  assert.doesNotMatch(workflow, /Use the Task tool/);
 });
