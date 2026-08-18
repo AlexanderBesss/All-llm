@@ -1,0 +1,30 @@
+.\bin\llama-server.exe `
+  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
+  --host 0.0.0.0 `
+  --port 8080 `
+  --gpu-layers all `
+  --fit on `
+  --kv-unified `
+  --parallel 1 `
+  --cache-ram 0 `
+  --ctx-size 110000 `
+  --cache-type-k kvarn4 `
+  --cache-type-v kvarn4 `
+  --kv-tail-tokens 1024 `
+  --flash-attn on `
+  --batch-size 2048 `
+  --ubatch-size 1024 `
+  --no-mmap `
+  --mlock `
+  --jinja `
+  --temp 1.0 `
+  --top-p 0.95 `
+  --top-k 20 `
+  --min-p 0.0 `
+  --repeat-penalty 1.0 `
+  --presence-penalty 0.0 `
+  --metrics `
+  --slots `
+  --perf `
+  --reasoning on
+pause

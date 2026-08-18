@@ -48,8 +48,8 @@
                 "apiKey": "docker"
             },
             "models": {
-                "unsloth/Qwen3.8-27B-UD-Q5_K_XL": {
-                    "name": "Qwen3.8-27B-UD-Q5_K_XL",
+                "unsloth/Qwen3.8-27B-UD-Q4_K_XL": {
+                    "name": "Qwen3.8-27B-UD-Q4_K_XL",
                     "repeat_penalty": 1.0,
                     "temp": 1.0,
                     "min_probability": 0,
@@ -57,8 +57,8 @@
                     "presence_penalty": 0.0,
                     "top_p": 0.95,
                     "limit": {
-                        "context": 96000,
-                        "output": 32768
+                        "context": 180000,
+                        "output": 65300
                     },
                     "cost": {
                         "input": 0.00000005,
