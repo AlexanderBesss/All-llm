@@ -6,6 +6,11 @@ namespace TtsReader.Services;
 
 public interface ILocalProcessSpeechRunner
 {
+    /// <summary>
+    /// Runs once per playback start (not per chunk) so slow dependency setup
+    /// never repeats for every synthesized chunk.
+    /// </summary>
+    Task PrepareAsync(BackendDefinition backend, CancellationToken cancellationToken);
     Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath, double playbackRate, CancellationToken cancellationToken);
 }
 
@@ -17,6 +22,9 @@ public interface IWaveAudioPlayer
 
 public sealed class PiperProcessRunner : ILocalProcessSpeechRunner
 {
+    public Task PrepareAsync(BackendDefinition backend, CancellationToken cancellationToken) =>
+        Task.CompletedTask;
+
     public async Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath,
         double playbackRate, CancellationToken cancellationToken)
     {
@@ -46,15 +54,8 @@ public sealed class PiperProcessRunner : ILocalProcessSpeechRunner
         return startInfo;
     }
 
-    public static void Validate(BackendDefinition backend)
-    {
-        if (string.IsNullOrWhiteSpace(backend.ExecutablePath) || !File.Exists(backend.ExecutablePath))
-            throw new FileNotFoundException("The configured Piper executable was not found.", backend.ExecutablePath);
-        if (string.IsNullOrWhiteSpace(backend.ModelPath) || !File.Exists(backend.ModelPath))
-            throw new FileNotFoundException("The configured Piper ONNX model was not found.", backend.ModelPath);
-        if (!File.Exists(backend.ModelPath + ".json"))
-            throw new FileNotFoundException("The Piper model configuration (.onnx.json) was not found.", backend.ModelPath + ".json");
-    }
+    public static void Validate(BackendDefinition backend) =>
+        BackendValidation.ThrowIfNotConfigured(backend);
 }
 
 public sealed class WaveAudioPlayer : IWaveAudioPlayer

@@ -1,25 +1,23 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using TtsReader.Models;
 
 namespace TtsReader.Services;
 
-public sealed record LlmDownloadProgress(double Percent, string Status);
-
-public interface ILlmBackendDownloader
+public sealed record LlmDownloadProgress(double Percent, string Status)
 {
-    Task DownloadAsync(
-        BackendDefinition backend,
-        IProgress<LlmDownloadProgress> progress,
-        CancellationToken cancellationToken);
+    private sealed class Noop : IProgress<LlmDownloadProgress>
+    {
+        public void Report(LlmDownloadProgress value) { }
+    }
+
+    public static readonly IProgress<LlmDownloadProgress> NoopProgress = new Noop();
 }
 
 public sealed class LlmBackendDownloader : ILlmBackendDownloader
 {
     private const string PythonVersion = "3.11.9";
-    private static readonly HttpClient HttpClient = CreateHttpClient();
     private const string ModelDownloadScript = """
 import sys
 from huggingface_hub import snapshot_download
@@ -97,12 +95,7 @@ snapshot_download(repo_id=sys.argv[1])
             return backend.ExecutablePath.Trim();
 
         var environmentName = backend.Engine == SpeechEngines.Chatterbox ? "chatterbox" : "qwen3-tts";
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "TtsReader",
-            environmentName,
-            "Scripts",
-            "python.exe");
+        return TtsReaderPaths.VenvPythonPath(environmentName);
     }
 
     private static string? GetVenvRoot(string pythonPath)
@@ -118,7 +111,7 @@ snapshot_download(repo_id=sys.argv[1])
         IProgress<LlmDownloadProgress> progress,
         CancellationToken cancellationToken)
     {
-        var bundledPythonPath = GetBundledPythonPath();
+        var bundledPythonPath = TtsReaderPaths.PythonRuntimePath;
         if (File.Exists(bundledPythonPath) && await CanRunPythonAsync(bundledPythonPath, cancellationToken))
         {
             progress.Report(new LlmDownloadProgress(15, "Using the app's Python runtime."));
@@ -139,16 +132,14 @@ snapshot_download(repo_id=sys.argv[1])
         IProgress<LlmDownloadProgress> progress,
         CancellationToken cancellationToken)
     {
-        var runtimeRoot = GetBundledPythonRoot();
-        var pythonPath = GetBundledPythonPath();
-        var downloadsRoot = Path.Combine(GetAppDataRoot(), "downloads");
-        var installerPath = Path.Combine(downloadsRoot, GetPythonInstallerFileName());
+        var runtimeRoot = TtsReaderPaths.PythonRuntimeRoot;
+        var pythonPath = TtsReaderPaths.PythonRuntimePath;
+        var installerPath = Path.Combine(TtsReaderPaths.DownloadsRoot, GetPythonInstallerFileName());
 
-        Directory.CreateDirectory(downloadsRoot);
+        Directory.CreateDirectory(TtsReaderPaths.DownloadsRoot);
         if (!File.Exists(installerPath))
         {
-            progress.Report(new LlmDownloadProgress(0, "Downloading the private Python runtime…"));
-            await DownloadFileAsync(
+            await HttpFileDownloader.DownloadFileAsync(
                 GetPythonInstallerUrl(),
                 installerPath,
                 0,
@@ -165,6 +156,7 @@ snapshot_download(repo_id=sys.argv[1])
         if (!File.Exists(pythonPath))
             throw new InvalidOperationException("Python was installed but its interpreter could not be found.");
 
+        HttpFileDownloader.TryDelete(installerPath);
         progress.Report(new LlmDownloadProgress(15, "Private Python runtime ready."));
         return pythonPath;
     }
@@ -229,7 +221,7 @@ snapshot_download(repo_id=sys.argv[1])
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
+            ProcessHelpers.TryKill(process);
             throw;
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
@@ -239,65 +231,6 @@ snapshot_download(repo_id=sys.argv[1])
         catch (Exception)
         {
             return false;
-        }
-    }
-
-    private static async Task DownloadFileAsync(
-        string url,
-        string destinationPath,
-        double startPercent,
-        double endPercent,
-        string stage,
-        IProgress<LlmDownloadProgress> progress,
-        CancellationToken cancellationToken)
-    {
-        var temporaryPath = destinationPath + ".partial";
-        try
-        {
-            using var response = await HttpClient.GetAsync(
-                url,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
-            await using (var output = new FileStream(
-                temporaryPath,
-                FileMode.Create,
-                FileAccess.Write,
-                FileShare.None,
-                64 * 1024,
-                useAsync: true))
-            {
-                var totalBytes = response.Content.Headers.ContentLength;
-                var downloadedBytes = 0L;
-                var buffer = new byte[64 * 1024];
-                var lastPercent = startPercent;
-                int bytesRead;
-                while ((bytesRead = await input.ReadAsync(buffer, cancellationToken)) > 0)
-                {
-                    await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-                    downloadedBytes += bytesRead;
-                    var percent = totalBytes is > 0
-                        ? startPercent + (downloadedBytes / (double)totalBytes.Value * (endPercent - startPercent))
-                        : Math.Min(endPercent - 0.25, lastPercent + 0.25);
-                    if (percent >= lastPercent + 0.25 || downloadedBytes == totalBytes)
-                    {
-                        lastPercent = percent;
-                        progress.Report(new LlmDownloadProgress(
-                            percent,
-                            $"{stage}: {FormatBytes(downloadedBytes)}"));
-                    }
-                }
-            }
-
-            File.Move(temporaryPath, destinationPath, true);
-            progress.Report(new LlmDownloadProgress(endPercent, $"{stage} complete."));
-        }
-        catch
-        {
-            TryDelete(temporaryPath);
-            throw;
         }
     }
 
@@ -343,7 +276,7 @@ snapshot_download(repo_id=sys.argv[1])
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
+            ProcessHelpers.TryKill(process);
             throw;
         }
 
@@ -352,20 +285,6 @@ snapshot_download(repo_id=sys.argv[1])
 
         progress.Report(new LlmDownloadProgress(15, "Private Python runtime installed."));
     }
-
-    private static HttpClient CreateHttpClient()
-    {
-        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("TtsReader", "1.0"));
-        return client;
-    }
-
-    private static string GetAppDataRoot() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader");
-
-    private static string GetBundledPythonRoot() => Path.Combine(GetAppDataRoot(), "python-runtime");
-
-    private static string GetBundledPythonPath() => Path.Combine(GetBundledPythonRoot(), "python.exe");
 
     private static string GetPythonInstallerUrl() =>
         $"https://www.python.org/ftp/python/{PythonVersion}/{GetPythonInstallerFileName()}";
@@ -378,20 +297,6 @@ snapshot_download(repo_id=sys.argv[1])
             Architecture.Arm64 => $"python-{PythonVersion}-arm64.exe",
             _ => throw new PlatformNotSupportedException("This Windows architecture is not supported by the Python runtime downloader.")
         };
-
-    private static string FormatBytes(long bytes) =>
-        $"{bytes / (1024d * 1024d):0.0} MB";
-
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-                File.Delete(path);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-    }
 
     private static IReadOnlyList<string> PackageArguments(BackendDefinition backend) =>
         backend.Engine == SpeechEngines.Chatterbox
@@ -438,7 +343,7 @@ snapshot_download(repo_id=sys.argv[1])
         }
         catch (OperationCanceledException)
         {
-            TryKill(process);
+            ProcessHelpers.TryKill(process);
             try { await Task.WhenAll(outputTask, errorTask); } catch { }
             throw;
         }
@@ -486,7 +391,7 @@ snapshot_download(repo_id=sys.argv[1])
         return double.TryParse(
                 text[(start + 1)..percentIndex],
                 NumberStyles.Float,
-                CultureInfo.InvariantCulture,
+                System.Globalization.CultureInfo.InvariantCulture,
                 out var value)
             ? Math.Clamp(value, 0, 100)
             : null;
@@ -494,15 +399,12 @@ snapshot_download(repo_id=sys.argv[1])
 
     private static string TrimStatus(string text) =>
         text.Length <= 120 ? text : text[^120..];
+}
 
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(true);
-        }
-        catch (InvalidOperationException) { }
-        catch (System.ComponentModel.Win32Exception) { }
-    }
+public interface ILlmBackendDownloader
+{
+    Task DownloadAsync(
+        BackendDefinition backend,
+        IProgress<LlmDownloadProgress> progress,
+        CancellationToken cancellationToken);
 }

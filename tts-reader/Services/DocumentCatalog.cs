@@ -4,22 +4,22 @@ namespace TtsReader.Services;
 
 public sealed class DocumentCatalog : IDocumentCatalog
 {
-    public static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".pdf"
-    };
-
-    public DocumentNode Build(string rootPath)
+    public DocumentNode Build(string rootPath, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(rootPath))
             throw new DirectoryNotFoundException($"The folder does not exist: {rootPath}");
 
+        cancellationToken.ThrowIfCancellationRequested();
         var directory = new DirectoryInfo(rootPath);
-        return BuildDirectory(directory, isRoot: true);
+        return BuildDirectory(directory, isRoot: true, cancellationToken);
     }
 
-    private static DocumentNode BuildDirectory(DirectoryInfo directory, bool isRoot = false)
+    private static DocumentNode BuildDirectory(
+        DirectoryInfo directory,
+        bool isRoot,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var node = new DocumentNode
         {
             Name = isRoot ? directory.FullName : directory.Name,
@@ -31,9 +31,10 @@ public sealed class DocumentCatalog : IDocumentCatalog
         {
             foreach (var childDirectory in directory.EnumerateDirectories().OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    var child = BuildDirectory(childDirectory);
+                    var child = BuildDirectory(childDirectory, isRoot: false, cancellationToken);
                     if (child.Children.Count > 0)
                         node.Children.Add(child);
                 }
@@ -48,9 +49,10 @@ public sealed class DocumentCatalog : IDocumentCatalog
             }
 
             foreach (var file in directory.EnumerateFiles()
-                         .Where(f => SupportedExtensions.Contains(f.Extension))
+                          .Where(f => DocumentFormats.SupportedExtensions.Contains(f.Extension))
                          .OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 node.Children.Add(new DocumentNode { Name = file.Name, FullPath = file.FullName, IsFolder = false });
             }
         }

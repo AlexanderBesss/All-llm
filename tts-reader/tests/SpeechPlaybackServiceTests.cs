@@ -42,6 +42,23 @@ public sealed class SpeechPlaybackServiceTests
     }
 
     [Fact]
+    public void SplitIntoChunks_HardCutsTextWithoutWhitespace()
+    {
+        var chunks = SpeechPlaybackService.SplitIntoChunks("abcdefghijk", 4);
+
+        Assert.Equal(
+            [("abcd", 0), ("efgh", 4), ("ijk", 8)],
+            chunks.Select(chunk => (chunk.Text, chunk.Offset)).ToList());
+    }
+
+    [Fact]
+    public void SplitIntoChunks_KeepsShortTextWholeAndDropsWhitespaceOnlyText()
+    {
+        Assert.Single(SpeechPlaybackService.SplitIntoChunks("hello", 500));
+        Assert.Empty(SpeechPlaybackService.SplitIntoChunks("   \n\t  ", 500));
+    }
+
+    [Fact]
     public async Task Speak_WithPiperBackend_UsesNeuralRunnerAndReportsCompletion()
     {
         var root = Path.Combine(Path.GetTempPath(), $"tts-reader-piper-{Guid.NewGuid():N}");
@@ -106,6 +123,46 @@ public sealed class SpeechPlaybackServiceTests
             Assert.Single(llm.Calls);
             Assert.Equal("hello from chatterbox.", llm.Calls[0].Text);
             Assert.Equal(1, player.PlayCount);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Speak_WithLocalBackend_RaisesSynthesizingStatusAndPreparesOnce()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"tts-reader-status-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var executable = Path.Combine(root, "piper.exe");
+            var model = Path.Combine(root, "voice.onnx");
+            File.WriteAllText(executable, "test");
+            File.WriteAllText(model, "test");
+            File.WriteAllText(model + ".json", "{}");
+            var runner = new FakeLocalProcessRunner();
+            var player = new FakeWavePlayer();
+            using var service = new SpeechPlaybackService(piperRunner: runner, audioPlayer: player);
+            var statuses = new List<string>();
+            var ended = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            service.PlaybackStatus += (_, status) => statuses.Add(status);
+            service.PlaybackEnded += (_, status) => ended.TrySetResult(status);
+            var backend = new BackendDefinition
+            {
+                Id = "piper", Name = "Piper", Kind = "Piper", Engine = SpeechEngines.Piper,
+                ExecutablePath = executable, ModelPath = model
+            };
+            var text = string.Concat(Enumerable.Repeat(new string('a', 200) + ". ", 3));
+
+            service.Speak(text, 0, backend, 1.0);
+            await ended.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.True(runner.Calls.Count >= 2);
+            Assert.Equal(1, runner.PrepareCalls);
+            Assert.Equal(runner.Calls.Count, statuses.Count);
+            Assert.StartsWith("Synthesizing chunk 1 of " + runner.Calls.Count, statuses[0]);
         }
         finally
         {
@@ -206,6 +263,12 @@ public sealed class SpeechPlaybackServiceTests
     private sealed class FakeLocalProcessRunner : ILocalProcessSpeechRunner
     {
         public List<(string Text, double Rate)> Calls { get; } = [];
+        public int PrepareCalls { get; private set; }
+        public Task PrepareAsync(BackendDefinition backend, CancellationToken cancellationToken)
+        {
+            PrepareCalls++;
+            return Task.CompletedTask;
+        }
         public Task SynthesizeAsync(BackendDefinition backend, string text, string outputPath,
             double playbackRate, CancellationToken cancellationToken)
         {

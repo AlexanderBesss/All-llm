@@ -34,7 +34,7 @@ public partial class MainWindow : Window, IMainViewInteractions
         DataContext = ViewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         ApplyRenderedDocument(ViewModel.RenderedDocument);
-        ViewModel.RestoreLastSession();
+        _ = ViewModel.RestoreLastSessionAsync();
     }
 
     public string? ChooseFolder()
@@ -223,14 +223,33 @@ public partial class MainWindow : Window, IMainViewInteractions
         return null;
     }
 
+    private int _restoreAttempts;
+    private DocumentNode? _restoreTarget;
+
+    private const int MaxRestoreAttempts = 100;
+
     private void SelectRestoredDocument()
     {
-        if (ViewModel.SelectedDocument is null)
+        var target = ViewModel.SelectedDocument;
+        if (target is null)
+            return;
+
+        if (!ReferenceEquals(_restoreTarget, target))
+        {
+            _restoreTarget = target;
+            _restoreAttempts = 0;
+        }
+
+        if (++_restoreAttempts > MaxRestoreAttempts)
             return;
 
         DocumentTree.UpdateLayout();
-        if (SelectTreeItem(DocumentTree, ViewModel.SelectedDocument))
+        if (SelectTreeItem(DocumentTree, target))
+        {
+            _restoreTarget = null;
+            _restoreAttempts = 0;
             return;
+        }
 
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SelectRestoredDocument));
     }

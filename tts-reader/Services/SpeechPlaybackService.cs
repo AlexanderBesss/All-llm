@@ -16,6 +16,7 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
 
     public event EventHandler<string>? PlaybackEnded;
     public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
+    public event EventHandler<string>? PlaybackStatus;
 
     public SpeechPlaybackService(
         ILocalProcessSpeechRunner? piperRunner = null,
@@ -105,13 +106,18 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         double playbackRate, int generation, CancellationToken token)
     {
         var runner = backend.Engine == SpeechEngines.Piper ? _piperRunner : _llmRunner;
-        var tempDirectory = Path.Combine(Path.GetTempPath(), "TtsReader", Guid.NewGuid().ToString("N"));
+        var tempDirectory = Path.Combine(TtsReaderPaths.TempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDirectory);
         try
         {
-            foreach (var chunk in SplitIntoChunks(text))
+            await runner.PrepareAsync(backend, token);
+            var chunks = SplitIntoChunks(text);
+            for (var index = 0; index < chunks.Count; index++)
             {
                 token.ThrowIfCancellationRequested();
+                var chunk = chunks[index];
+                if (IsCurrent(generation))
+                    PlaybackStatus?.Invoke(this, $"Synthesizing chunk {index + 1} of {chunks.Count}…");
                 var outputPath = Path.Combine(tempDirectory, "speech.wav");
                 await runner.SynthesizeAsync(backend, chunk.Text, outputPath, playbackRate, token);
                 PlaybackProgress?.Invoke(this,
