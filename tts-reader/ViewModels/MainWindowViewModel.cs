@@ -7,6 +7,7 @@ namespace TtsReader.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModel, IDisposable
 {
+    private const int PlaybackProgressDispatchMilliseconds = 150;
     private readonly IDocumentCatalog _catalog;
     private readonly IDocumentTextExtractor _extractor;
     private readonly ISettingsStore _settingsStore;
@@ -426,9 +427,12 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private void SpeechPlaybackProgress(object? sender, SpeechProgressEventArgs args)
     {
         // Windows speech can report progress much faster than the document
-        // view can repaint. Keep only the newest event and update the UI at a
-        // bounded rate so speech and the Stop button remain responsive.
-        if (_synchronizationContext is null || SynchronizationContext.Current == _synchronizationContext)
+        // view can repaint. Even when System.Speech raises the event on the
+        // WPF context, do not take the fast path: updating a complex Markdown
+        // FlowDocument performs expensive caret/selection work on that same
+        // dispatcher and can make the window appear frozen. Keep only the
+        // newest event and update the UI at a bounded rate.
+        if (_synchronizationContext is null)
         {
             ApplySpeechPlaybackProgress(args);
             return;
@@ -447,7 +451,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private async Task DispatchPendingProgressAsync()
     {
-        await Task.Delay(50).ConfigureAwait(false);
+        await Task.Delay(PlaybackProgressDispatchMilliseconds).ConfigureAwait(false);
 
         SpeechProgressEventArgs? progress;
         lock (_progressGate)
@@ -463,7 +467,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private void ApplySpeechPlaybackProgress(SpeechProgressEventArgs args)
     {
-        if (!IsPlaying)
+        if (_disposed || !IsPlaying)
             return;
 
         var bounded = Math.Clamp(args.CharacterIndex, 0, _renderedText.Length);

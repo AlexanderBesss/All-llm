@@ -1,13 +1,13 @@
 using System.Speech.Synthesis;
+using System.Collections.Concurrent;
 using TtsReader.Models;
 
 namespace TtsReader.Services;
 
 public sealed class SpeechPlaybackService : ISpeechPlaybackService
 {
-    private SpeechSynthesizer? _synthesizer;
     private readonly object _gate = new();
-    private int _activeCaretIndex;
+    private readonly WindowsSpeechWorker _windowsSpeech;
     private readonly ILocalProcessSpeechRunner _piperRunner;
     private readonly ILocalProcessSpeechRunner _llmRunner;
     private readonly IWaveAudioPlayer _audioPlayer;
@@ -26,31 +26,21 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         _piperRunner = piperRunner ?? new PiperProcessRunner();
         _llmRunner = llmRunner ?? new LlmTtsProcessRunner();
         _audioPlayer = audioPlayer ?? new WaveAudioPlayer();
-    }
-
-    private SpeechSynthesizer EnsureSynthesizer()
-    {
-        if (_synthesizer is not null)
-            return _synthesizer;
-        _synthesizer = new SpeechSynthesizer();
-        _synthesizer.SetOutputToDefaultAudioDevice();
-        _synthesizer.SpeakProgress += (_, args) =>
-        {
-            int characterIndex;
-            lock (_gate)
-                characterIndex = _activeCaretIndex + args.CharacterPosition;
-
-            PlaybackProgress?.Invoke(this,
-                new SpeechProgressEventArgs(characterIndex, args.CharacterCount));
-        };
-        _synthesizer.SpeakCompleted += (_, args) =>
-        {
-            if (!args.Cancelled && args.Error is null)
-                PlaybackEnded?.Invoke(this, "Playback finished.");
-            else if (args.Error is not null)
-                PlaybackEnded?.Invoke(this, $"Playback failed: {args.Error.Message}");
-        };
-        return _synthesizer;
+        _windowsSpeech = new WindowsSpeechWorker(
+            (generation, characterIndex, characterCount) =>
+            {
+                if (IsCurrent(generation))
+                    PlaybackProgress?.Invoke(this,
+                        new SpeechProgressEventArgs(characterIndex, characterCount));
+            },
+            (generation, error) =>
+            {
+                if (!IsCurrent(generation))
+                    return;
+                PlaybackEnded?.Invoke(this, error is null
+                    ? "Playback finished."
+                    : $"Playback failed: {error.Message}");
+            });
     }
 
     public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate)
@@ -65,18 +55,17 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         if (backend.Engine != SpeechEngines.Windows)
             throw new NotSupportedException($"Unknown speech engine '{backend.Engine}'.");
 
+        int generation;
         lock (_gate)
         {
             CancelProcess();
-            var synthesizer = EnsureSynthesizer();
-            synthesizer.SpeakAsyncCancelAll();
-            _activeCaretIndex = caretIndex;
-            synthesizer.Rate = MapPlaybackRate(playbackRate);
-            synthesizer.SelectVoice(string.IsNullOrWhiteSpace(backend.VoiceName)
-                ? synthesizer.Voice.Name
-                : backend.VoiceName);
-            synthesizer.SpeakAsync(remaining);
+            generation = ++_playbackGeneration;
         }
+        // SpeechSynthesizer can spend seconds parsing a long document before
+        // SpeakAsync returns. Its COM/SAPI calls must never run on the WPF
+        // dispatcher, including cancellation and voice selection.
+        _windowsSpeech.Speak(remaining, caretIndex, backend.VoiceName,
+            MapPlaybackRate(playbackRate), generation);
     }
 
     private void StartLocalProcess(string remaining, int caretIndex, BackendDefinition backend, double playbackRate)
@@ -92,14 +81,19 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
         int generation;
         lock (_gate)
         {
-            _synthesizer?.SpeakAsyncCancelAll();
             CancelProcess();
             _processCancellation = new CancellationTokenSource();
             token = _processCancellation.Token;
             generation = ++_playbackGeneration;
         }
+        _windowsSpeech.Stop(generation);
 
-        _ = RunLocalProcessAsync(remaining, caretIndex, backend, playbackRate, generation, token);
+        // Async methods run synchronously until their first incomplete await.
+        // Piper's Process.Start and model initialization happen before that
+        // boundary and used to execute directly on the WPF dispatcher. Put the
+        // complete local-engine pipeline on a worker thread.
+        _ = Task.Run(() => RunLocalProcessAsync(
+            remaining, caretIndex, backend, playbackRate, generation, token));
     }
 
     private async Task RunLocalProcessAsync(string text, int caretIndex, BackendDefinition backend,
@@ -202,16 +196,136 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
 
     public void Stop()
     {
+        int generation;
         lock (_gate)
         {
-            _synthesizer?.SpeakAsyncCancelAll();
             CancelProcess();
+            generation = _playbackGeneration;
         }
+        _windowsSpeech.Stop(generation);
     }
 
     public void Dispose()
     {
         Stop();
-        _synthesizer?.Dispose();
+        _windowsSpeech.Dispose();
+    }
+}
+
+/// <summary>
+/// Owns System.Speech on a dedicated STA thread. No SAPI operation is allowed
+/// to execute on (or synchronously block) the WPF dispatcher.
+/// </summary>
+internal sealed class WindowsSpeechWorker : IDisposable
+{
+    private readonly BlockingCollection<Action> _commands = new();
+    private readonly Action<int, int, int> _progress;
+    private readonly Action<int, Exception?> _completed;
+    private readonly Thread _thread;
+    private readonly Dictionary<Prompt, (int Generation, int CaretIndex)> _promptContexts = [];
+    private SpeechSynthesizer? _synthesizer;
+    private bool _disposed;
+
+    public WindowsSpeechWorker(
+        Action<int, int, int> progress,
+        Action<int, Exception?> completed)
+    {
+        _progress = progress;
+        _completed = completed;
+        _thread = new Thread(Run)
+        {
+            IsBackground = true,
+            Name = "TTS Reader Windows speech"
+        };
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
+    }
+
+    public void Speak(string text, int caretIndex, string? voiceName, int rate, int generation) =>
+        Enqueue(() =>
+        {
+            var synthesizer = EnsureSynthesizer();
+            synthesizer.SpeakAsyncCancelAll();
+            synthesizer.Rate = rate;
+            if (!string.IsNullOrWhiteSpace(voiceName))
+                synthesizer.SelectVoice(voiceName);
+            var prompt = new Prompt(text);
+            _promptContexts[prompt] = (generation, caretIndex);
+            synthesizer.SpeakAsync(prompt);
+        }, generation);
+
+    public void Stop(int generation) => Enqueue(() =>
+    {
+        _synthesizer?.SpeakAsyncCancelAll();
+    }, generation);
+
+    private SpeechSynthesizer EnsureSynthesizer()
+    {
+        if (_synthesizer is not null)
+            return _synthesizer;
+
+        _synthesizer = new SpeechSynthesizer();
+        _synthesizer.SetOutputToDefaultAudioDevice();
+        _synthesizer.SpeakProgress += (_, args) =>
+        {
+            if (_promptContexts.TryGetValue(args.Prompt, out var context))
+                _progress(context.Generation,
+                    context.CaretIndex + args.CharacterPosition, args.CharacterCount);
+        };
+        _synthesizer.SpeakCompleted += (_, args) =>
+        {
+            if (!_promptContexts.Remove(args.Prompt, out var context) || args.Cancelled)
+                return;
+            _completed(context.Generation, args.Error);
+        };
+        return _synthesizer;
+    }
+
+    private void Enqueue(Action action, int generation)
+    {
+        if (_disposed)
+            return;
+        try
+        {
+            _commands.Add(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception exception)
+                {
+                    _completed(generation, exception);
+                }
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            // Disposal completed the queue between the check and Add.
+        }
+    }
+
+    private void Run()
+    {
+        foreach (var command in _commands.GetConsumingEnumerable())
+            command();
+
+        try
+        {
+            _synthesizer?.SpeakAsyncCancelAll();
+            _synthesizer?.Dispose();
+        }
+        catch
+        {
+            // The application is already shutting down.
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        _commands.CompleteAdding();
     }
 }

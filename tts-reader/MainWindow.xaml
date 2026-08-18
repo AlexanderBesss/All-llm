@@ -176,6 +176,7 @@
                          SelectionBrush="{StaticResource SelectionBackground}"
                          SelectionTextBrush="{StaticResource TextPrimary}"
                          SelectionOpacity="0.9"
+                         IsInactiveSelectionHighlightEnabled="True"
                          PreviewMouseLeftButtonDown="DocumentText_PreviewMouseLeftButtonDown"
                          PreviewMouseMove="DocumentText_PreviewMouseMove"
                          PreviewMouseLeftButtonUp="DocumentText_PreviewMouseLeftButtonUp"

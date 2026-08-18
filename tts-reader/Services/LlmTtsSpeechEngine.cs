@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.ComponentModel;
 using TtsReader.Models;
 
 namespace TtsReader.Services;
@@ -15,6 +16,15 @@ public static class LocalProcessTts
         using var process = new Process { StartInfo = startInfo };
         if (!process.Start())
             throw new InvalidOperationException($"{engineLabel} could not be started.");
+
+        // Neural inference can use every available CPU core. Keep the desktop
+        // UI and audio thread responsive while the next chunk is generated.
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (InvalidOperationException) { }
+        catch (Win32Exception) { }
 
         try
         {

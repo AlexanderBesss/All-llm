@@ -94,7 +94,7 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public void MainViewModel_TracksSpeechProgressAsCaretPosition()
+    public async Task MainViewModel_TracksSpeechProgressAsCaretPosition()
     {
         var speech = new FakeSpeech();
         using var viewModel = new MainWindowViewModel(
@@ -104,7 +104,15 @@ public sealed class ViewModelTests
         viewModel.SetRenderedText("read me");
 
         viewModel.PlayCommand.Execute(null);
+        var progressApplied = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.PlaybackIndex) &&
+                viewModel.PlaybackIndex == 4)
+                progressApplied.TrySetResult(true);
+        };
         speech.ReportProgress(4, 2);
+        await progressApplied.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(4, viewModel.PlaybackIndex);
         Assert.Equal(2, viewModel.PlaybackCharacterCount);
