@@ -1,6 +1,5 @@
 & (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
   -m "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q4_K_XL.gguf" `
-  --mmproj "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf" `
   --port 8080 `
   --host 0.0.0.0 `
   --gpu-layers all `
