@@ -29,7 +29,7 @@
             <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="CornerRadius" Value="8"/>
         </Style>
 
         <Style x:Key="EyebrowTextStyle" TargetType="{x:Type TextBlock}">
@@ -216,7 +216,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="4">
+                                CornerRadius="6">
                             <ContentPresenter Content="{TemplateBinding Content}"
                                               ContentTemplate="{TemplateBinding ContentTemplate}"
                                               Margin="{TemplateBinding Padding}"
@@ -293,7 +293,7 @@
                                 <Border Background="{StaticResource PanelRaised}"
                                         BorderBrush="{StaticResource BorderStrong}"
                                         BorderThickness="1"
-                                        CornerRadius="7"
+                                        CornerRadius="8"
                                         Padding="4">
                                     <ScrollViewer MaxHeight="280"
                                                   HorizontalScrollBarVisibility="Disabled"
@@ -401,7 +401,7 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="5"
+                                    CornerRadius="6"
                                     Padding="{TemplateBinding Padding}">
                                 <ContentPresenter x:Name="PART_Header"
                                                   ContentSource="Header"

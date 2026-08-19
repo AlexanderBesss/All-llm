@@ -33,7 +33,7 @@
         </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -41,114 +41,121 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0">
-            <TextBlock Style="{StaticResource EyebrowTextStyle}" Text="SPEECH"/>
-            <TextBlock Style="{StaticResource TitleTextStyle}" Text="Speech settings"/>
-            <TextBlock Style="{StaticResource CaptionTextStyle}"
-                       Margin="0,4,0,0"
-                       Text="Choose a local speech backend and keep its source settings ready for playback."/>
-        </StackPanel>
+        <Border Grid.Row="0"
+                Style="{StaticResource SurfaceCardStyle}"
+                Padding="14,12">
+            <StackPanel>
+                <TextBlock Style="{StaticResource EyebrowTextStyle}" Text="SPEECH"/>
+                <TextBlock Style="{StaticResource TitleTextStyle}" Text="Speech settings"/>
+                <TextBlock Style="{StaticResource CaptionTextStyle}"
+                           Margin="0,4,0,0"
+                           Text="Choose a local speech backend and keep its source settings ready for playback."/>
+            </StackPanel>
+        </Border>
 
-        <Grid Grid.Row="1" Margin="0,18,0,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <Grid Grid.Row="0" Margin="0,0,0,8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel>
-                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Available backends"/>
-                    <TextBlock Style="{StaticResource CaptionTextStyle}"
-                               Margin="0,2,0,0"
-                               Text="Select one to inspect its availability and local paths."/>
-                </StackPanel>
-                <TextBlock Grid.Column="1"
-                           Foreground="{StaticResource Accent}"
-                           FontSize="12"
-                           VerticalAlignment="Center"
-                           Text="{Binding SelectedBackend.Name}"
-                           TextTrimming="CharacterEllipsis"
-                           MaxWidth="220"/>
-            </Grid>
+        <Border Grid.Row="1"
+                Style="{StaticResource SurfaceCardStyle}"
+                Padding="14"
+                Margin="0,14,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" Text="Available backends"/>
+                        <TextBlock Style="{StaticResource CaptionTextStyle}"
+                                   Margin="0,2,0,0"
+                                   Text="Select one to inspect its availability and local paths."/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1"
+                               Foreground="{StaticResource Accent}"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               Text="{Binding SelectedBackend.Name}"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="220"/>
+                </Grid>
 
-            <ListBox Grid.Row="1"
-                     ItemsSource="{Binding Backends}"
-                     SelectedItem="{Binding SelectedBackend, Mode=TwoWay}"
-                     Background="{StaticResource PanelBackground}"
-                     Foreground="{StaticResource TextPrimary}"
-                     BorderBrush="{StaticResource BorderBrush}">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Grid MinHeight="56">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Name}"
-                                           Foreground="{StaticResource TextPrimary}"
-                                           FontWeight="SemiBold"
-                                           FontSize="13"
-                                           TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{Binding Kind}"
-                                           Style="{StaticResource CaptionTextStyle}"
-                                           Margin="0,2,0,0"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1"
-                                        Margin="12,0"
-                                        VerticalAlignment="Center"
-                                        MinWidth="120">
-                                <StackPanel Orientation="Horizontal">
-                                    <Border Background="{StaticResource AccentSoft}"
-                                            BorderBrush="{StaticResource Accent}"
-                                            BorderThickness="1"
-                                            CornerRadius="4"
-                                            Padding="7,3"
-                                            Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <TextBlock Text="ACTIVE"
-                                                   Foreground="{StaticResource AccentHover}"
-                                                   FontSize="10"
-                                                   FontWeight="SemiBold"/>
-                                    </Border>
-                                    <TextBlock Text="{Binding Availability}"
-                                               Style="{StaticResource AvailabilityTextStyle}"
-                                               VerticalAlignment="Center"
-                                               Margin="10,0,0,0"/>
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding Backends}"
+                         SelectedItem="{Binding SelectedBackend, Mode=TwoWay}"
+                         Background="Transparent"
+                         BorderThickness="0">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid MinHeight="56">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}"
+                                               Foreground="{StaticResource TextPrimary}"
+                                               FontWeight="SemiBold"
+                                               FontSize="13"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Kind}"
+                                               Style="{StaticResource CaptionTextStyle}"
+                                               Margin="0,2,0,0"/>
                                 </StackPanel>
-                                <TextBlock Text="{Binding DownloadStatus}"
-                                           Style="{StaticResource CaptionTextStyle}"
-                                           FontSize="11"
-                                           TextTrimming="CharacterEllipsis"
-                                           MaxWidth="220"/>
-                                <ProgressBar Height="6"
-                                             Width="120"
-                                             Margin="0,4,0,0"
-                                             Minimum="0"
-                                             Maximum="100"
-                                             Value="{Binding DownloadProgress}"
-                                             Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                            </StackPanel>
-                            <Button Grid.Column="2"
-                                    Content="Download"
-                                    Padding="10,6"
-                                    ToolTip="Download this speech backend"
-                                    Visibility="{Binding ShowDownload, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                    Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
-                                    CommandParameter="{Binding}"/>
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Grid>
+                                <StackPanel Grid.Column="1"
+                                            Margin="12,0"
+                                            VerticalAlignment="Center"
+                                            MinWidth="120">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border Background="{StaticResource AccentSoft}"
+                                                BorderBrush="{StaticResource Accent}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="7,3"
+                                                Visibility="{Binding IsActive, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <TextBlock Text="ACTIVE"
+                                                       Foreground="{StaticResource AccentHover}"
+                                                       FontSize="10"
+                                                       FontWeight="SemiBold"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding Availability}"
+                                                   Style="{StaticResource AvailabilityTextStyle}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="10,0,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding DownloadStatus}"
+                                               Style="{StaticResource CaptionTextStyle}"
+                                               FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="220"/>
+                                    <ProgressBar Height="6"
+                                                 Width="120"
+                                                 Margin="0,4,0,0"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Value="{Binding DownloadProgress}"
+                                                 Visibility="{Binding IsDownloading, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                </StackPanel>
+                                <Button Grid.Column="2"
+                                        Content="Download"
+                                        ToolTip="Download this speech backend"
+                                        Visibility="{Binding ShowDownload, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                        CommandParameter="{Binding}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
 
         <Border Grid.Row="2"
                 Style="{StaticResource SurfaceCardStyle}"
                 Padding="14"
-                Margin="0,12,0,0">
+                Margin="0,14,0,0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -275,18 +282,14 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="3" Margin="0,12,0,0">
+        <Grid Grid.Row="3" Margin="0,14,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Border Grid.Column="0"
-                    Background="{StaticResource InputBackground}"
-                    BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="6"
-                    Padding="10,8"
-                    MinHeight="38">
+                    Style="{StaticResource SurfaceCardStyle}"
+                    Padding="12,8">
                 <TextBlock Foreground="{StaticResource TextSecondary}"
                            FontSize="12"
                            TextWrapping="Wrap"

@@ -243,6 +243,23 @@ public sealed class SpeechPlaybackServiceTests
     }
 
     [Fact]
+    public void QwenWorkerScript_IsValidJsonProtocolAndMaterializes()
+    {
+        var worker = TtsBridgeScripts.Qwen3TtsWorker;
+
+        Assert.Contains("def emit(obj):", worker);
+        Assert.Contains("sys.stdout.write(json.dumps(obj) + \"\\n\")", worker);
+        Assert.Contains("qwen3 worker: ready device=", worker);
+        Assert.Contains("if line == \"quit\":", worker);
+        Assert.Contains("{\"ok\": False,", worker);
+        Assert.Contains("sf.write(request[\"output\"], wav, sr)", worker);
+
+        var path = TtsBridgeScripts.EnsureWorker();
+        Assert.True(File.Exists(path));
+        Assert.Equal(worker, File.ReadAllText(path));
+    }
+
+    [Fact]
     public void PiperCommand_UsesArgumentListWithoutShellAndMapsSpeedToLengthScale()
     {
         var backend = new BackendDefinition

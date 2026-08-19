@@ -111,7 +111,9 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
                 token.ThrowIfCancellationRequested();
                 var chunk = chunks[index];
                 if (IsCurrent(generation))
-                    PlaybackStatus?.Invoke(this, $"Synthesizing chunk {index + 1} of {chunks.Count}…");
+                    PlaybackStatus?.Invoke(this, index == 0
+                        ? $"Synthesizing chunk {index + 1} of {chunks.Count}… first audio can take a while on the LLM engine"
+                        : $"Synthesizing chunk {index + 1} of {chunks.Count}…");
                 var outputPath = Path.Combine(tempDirectory, "speech.wav");
                 await runner.SynthesizeAsync(backend, chunk.Text, outputPath, playbackRate, token);
                 PlaybackProgress?.Invoke(this,
@@ -208,6 +210,8 @@ public sealed class SpeechPlaybackService : ISpeechPlaybackService
     public void Dispose()
     {
         Stop();
+        (_piperRunner as IDisposable)?.Dispose();
+        (_llmRunner as IDisposable)?.Dispose();
         _windowsSpeech.Dispose();
     }
 }

@@ -17,6 +17,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private ReaderSettings _settings;
     private DocumentNode? _selectedDocument;
     private RenderedDocument _renderedDocument = new(string.Empty, null, false);
+    private bool _showReadingPlaceholder = true;
     private string _renderedText = string.Empty;
     private string _status = "Choose a folder to begin.";
     private string _backendStatus = string.Empty;
@@ -49,7 +50,18 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     public RenderedDocument RenderedDocument
     {
         get => _renderedDocument;
-        private set => SetProperty(ref _renderedDocument, value);
+        private set
+        {
+            if (!SetProperty(ref _renderedDocument, value))
+                return;
+            ShowReadingPlaceholder = string.IsNullOrEmpty(value.Text);
+        }
+    }
+
+    public bool ShowReadingPlaceholder
+    {
+        get => _showReadingPlaceholder;
+        private set => SetProperty(ref _showReadingPlaceholder, value);
     }
 
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
@@ -210,7 +222,11 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
             {
                 var selected = FindDocument(root, selectedFilePath);
                 if (selected is not null)
+                {
+                    if (ReferenceEquals(_folderLoadCancellation, folderCancellation))
+                        _folderLoadCancellation = null;
                     SelectedDocument = selected;
+                }
                 else
                     Status += $" Saved file was not found: {selectedFilePath}";
             }

@@ -18,9 +18,13 @@ The application keeps `System.Speech` as the default. Piper becomes available on
 
 User feedback requested the more expressive options. Chatterbox and Qwen3-TTS were added as opt-in backends alongside Piper rather than replacing it: they remain disabled until the user creates a venv and points Settings at its `python.exe` plus a model (Hugging Face repo id or local folder). Each upstream package exposes a Python API without a text-to-WAV CLI, so TTS Reader writes a small bridge script and runs it via the venv interpreter as a separate local process with bounded text arguments, the same lifecycle, cancellation, and temporary-WAV behavior as Piper. First run downloads weights from Hugging Face; afterwards the engines run offline. GPU (CUDA `bfloat16`) is recommended but CPU (`float32`) is supported via device auto-detection.
 
+## Addendum: resident Qwen3-TTS worker (2026-08-19)
+
+The per-chunk CLI approach made Qwen3-TTS unusable on CPU-only installs (plain PyPI `torch` on Windows is CPU-only) and added an 8–20 s model load to every ~500-character chunk. Two changes: the downloader/README now install the CUDA PyTorch build when `nvidia-smi` is present, and Qwen3-TTS runs in a resident worker process (JSON lines over stdin/stdout, one per app session, restarted on crash, killed on Stop/timeout). The model loads once; cancellation abandons the worker so a fresh Read resumes immediately. Chatterbox keeps the per-invocation bridge.
+
 ## Known tradeoffs
 
-- Starting the CLI for each approximately 500-character chunk adds model-load latency but avoids a persistent local server and keeps setup/debugging simple.
+- Qwen3-TTS keeps one Python worker alive per app session (a few GB of VRAM/CPU memory while running); Chatterbox still starts one process per chunk, which adds model-load latency but keeps its setup simple.
 - Caret highlighting advances per completed Piper chunk; Windows speech retains its word-level progress events.
 - The user chooses a voice suitable for the document language and is responsible for that voice's model license.
 - Initial `pip` and voice installation require internet access. Normal document playback does not.

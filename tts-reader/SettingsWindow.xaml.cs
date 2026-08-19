@@ -20,6 +20,12 @@ public partial class SettingsWindow : Window
 
     private void ViewModel_CloseRequested(object? sender, bool? result) => DialogResult = result;
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        WindowChrome.UseDarkTitleBar(this);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         ViewModel.CloseRequested -= ViewModel_CloseRequested;

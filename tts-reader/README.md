@@ -24,7 +24,7 @@ Image-only PDFs require OCR and are intentionally not supported.
 
 ## Set up LLM speech (Chatterbox or Qwen3-TTS)
 
-The LLM backends run the upstream Python packages in a dedicated virtual environment. They are optional and heavier than Piper (Hugging Face model download on first run, GPU recommended, higher RAM); TTS Reader writes a small bridge script under `%LOCALAPPDATA%\TtsReader\scripts` and invokes the venv's `python.exe` as a separate local process. Text still never leaves the machine.
+The LLM backends run the upstream Python packages in a dedicated virtual environment. They are optional and heavier than Piper (Hugging Face model download on first run, GPU recommended, higher RAM); TTS Reader writes a small bridge script under `%LOCALAPPDATA%\TtsReader\scripts` and invokes the venv's `python.exe` as a separate local process. Text still never leaves the machine. Qwen3-TTS uses a resident worker: one Python process loads the model once per app session and synthesizes each chunk in it, so the multi-second model load does not repeat for every ~500-character chunk. The LLM engine still generates slower than real time, so expect a noticeable wait after clicking Read before the first words arrive; the engine logs its activity under `%LOCALAPPDATA%\TtsReader\logs` if playback fails.
 
 When an LLM backend is unavailable, click its download arrow in Settings. The app downloads the model and dependencies, and if Python is not installed it also installs a private per-user Python runtime under `%LOCALAPPDATA%\TtsReader\python-runtime` without changing PATH or requiring the Microsoft Store alias. On Windows, Qwen3-TTS also gets a private SoX audio dependency under `%LOCALAPPDATA%\TtsReader\sox`. Manual setup is still supported using the commands below.
 
@@ -43,6 +43,14 @@ $qwRoot = Join-Path $env:LOCALAPPDATA 'TtsReader\qwen3-tts'
 py -3 -m venv $qwRoot
 & (Join-Path $qwRoot 'Scripts\python.exe') -m pip install -U transformers accelerate torch soundfile qwen-tts
 ```
+
+On an NVIDIA GPU, install the CUDA build of PyTorch so the model runs on the GPU (plain PyPI `torch` is CPU-only on Windows):
+
+```powershell
+& (Join-Path $qwRoot 'Scripts\python.exe') -m pip install --upgrade "torch" --extra-index-url https://download.pytorch.org/whl/cu130
+```
+
+The in-app downloader does this automatically when `nvidia-smi` is present.
 
 Those default venv locations are detected automatically; otherwise set the Python executable and model path in Settings (a Hugging Face repo id or a local model folder, downloaded on first run). Voice control per engine:
 
