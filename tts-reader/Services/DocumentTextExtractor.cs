@@ -10,18 +10,13 @@ public sealed class DocumentTextExtractor : IDocumentTextExtractor
         if (!File.Exists(path))
             throw new FileNotFoundException("The selected file no longer exists.", path);
 
-        var extension = Path.GetExtension(path);
-        if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
-            extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
-            extension.Equals(".markdown", StringComparison.OrdinalIgnoreCase))
-        {
+        if (DocumentFormats.IsPlainText(path))
             return await File.ReadAllTextAsync(path, cancellationToken);
-        }
 
-        if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        if (DocumentFormats.IsPdf(path))
             return await Task.Run(() => ReadPdf(path, cancellationToken), cancellationToken);
 
-        throw new NotSupportedException($"Files of type '{extension}' are not supported.");
+        throw new NotSupportedException($"Files of type '{Path.GetExtension(path)}' are not supported.");
     }
 
     private static string ReadPdf(string path, CancellationToken cancellationToken)

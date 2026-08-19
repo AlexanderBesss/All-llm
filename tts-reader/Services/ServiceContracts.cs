@@ -4,7 +4,7 @@ namespace TtsReader.Services;
 
 public interface IDocumentCatalog
 {
-    DocumentNode Build(string rootPath);
+    DocumentNode Build(string rootPath, CancellationToken cancellationToken = default);
 }
 
 public interface IDocumentTextExtractor
@@ -23,6 +23,7 @@ public interface ISpeechPlaybackService : IDisposable
 {
     event EventHandler<string>? PlaybackEnded;
     event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
+    event EventHandler<string>? PlaybackStatus;
     void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate);
     void Stop();
 }

@@ -18,7 +18,7 @@ public sealed class ViewModelTests
             new FakeCatalog(root), new FakeExtractor("# Story\nRead this"), store, speech,
             new FakeInteractions());
 
-        viewModel.OpenFolder("library");
+        await viewModel.OpenFolderAsync("library");
         await viewModel.LoadDocumentAsync(file);
         viewModel.SetRenderedText("Story\nRead this");
         viewModel.PlayCommand.Execute(null);
@@ -55,7 +55,7 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public void MainViewModel_RemembersFolderAndSelectedFile()
+    public async Task MainViewModel_RemembersFolderAndSelectedFile()
     {
         var file = new DocumentNode { Name = "story.txt", FullPath = "library\\story.txt", IsFolder = false };
         var root = new DocumentNode { Name = "library", FullPath = "library", IsFolder = true };
@@ -65,7 +65,7 @@ public sealed class ViewModelTests
             new FakeCatalog(root), new FakeExtractor("text"), store, new FakeSpeech(),
             new FakeInteractions());
 
-        viewModel.OpenFolder("library");
+        await viewModel.OpenFolderAsync("library");
         viewModel.SelectedDocument = file;
 
         Assert.NotNull(store.Saved);
@@ -74,7 +74,7 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public void MainViewModel_RestoresLastFolderAndSelectedFile()
+    public async Task MainViewModel_RestoresLastFolderAndSelectedFile()
     {
         var file = new DocumentNode { Name = "story.txt", FullPath = "library\\story.txt", IsFolder = false };
         var root = new DocumentNode { Name = "library", FullPath = "library", IsFolder = true };
@@ -86,7 +86,7 @@ public sealed class ViewModelTests
             new FakeCatalog(root), new FakeExtractor("text"), new FakeStore(settings), new FakeSpeech(),
             new FakeInteractions());
 
-        viewModel.RestoreLastSession();
+        await viewModel.RestoreLastSessionAsync();
 
         Assert.Same(file, viewModel.SelectedDocument);
         Assert.Equal("library", viewModel.Settings.LastFolderPath);
@@ -94,7 +94,7 @@ public sealed class ViewModelTests
     }
 
     [Fact]
-    public void MainViewModel_TracksSpeechProgressAsCaretPosition()
+    public async Task MainViewModel_TracksSpeechProgressAsCaretPosition()
     {
         var speech = new FakeSpeech();
         using var viewModel = new MainWindowViewModel(
@@ -104,11 +104,38 @@ public sealed class ViewModelTests
         viewModel.SetRenderedText("read me");
 
         viewModel.PlayCommand.Execute(null);
+        var progressApplied = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.PlaybackIndex) &&
+                viewModel.PlaybackIndex == 4)
+                progressApplied.TrySetResult(true);
+        };
         speech.ReportProgress(4, 2);
+        await progressApplied.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
         Assert.Equal(4, viewModel.PlaybackIndex);
         Assert.Equal(2, viewModel.PlaybackCharacterCount);
         Assert.Equal(4, viewModel.CaretIndex);
+    }
+
+    [Fact]
+    public void MainViewModel_SurfacesSynthesizingStatusOnlyWhilePlaying()
+    {
+        var speech = new FakeSpeech();
+        using var viewModel = new MainWindowViewModel(
+            new FakeCatalog(new DocumentNode { Name = "root", IsFolder = true }),
+            new FakeExtractor("text"), new FakeStore(SettingsStore.CreateDefaults()), speech,
+            new FakeInteractions());
+        viewModel.SetRenderedText("read me");
+        viewModel.PlayCommand.Execute(null);
+
+        speech.RaiseStatus("Synthesizing chunk 1 of 2…");
+        Assert.Equal("Synthesizing chunk 1 of 2…", viewModel.Status);
+
+        viewModel.StopCommand.Execute(null);
+        speech.RaiseStatus("Synthesizing chunk 2 of 2…");
+        Assert.Contains("stopped", viewModel.Status, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -166,6 +193,32 @@ public sealed class ViewModelTests
 
         Assert.False(viewModel.IsLoading);
         Assert.Contains("canceled", viewModel.Status, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MainViewModel_DoesNotApplyDocumentSelectedDuringFolderScan()
+    {
+        var oldFile = new DocumentNode { Name = "old.txt", FullPath = "old.txt", IsFolder = false };
+        var newRoot = new DocumentNode { Name = "new", FullPath = "new", IsFolder = true };
+        var catalog = new CoordinatedCatalog(newRoot);
+        var extractor = new DeferredExtractor();
+        using var viewModel = new MainWindowViewModel(
+            catalog, extractor, new FakeStore(SettingsStore.CreateDefaults()), new FakeSpeech(),
+            new FakeInteractions());
+
+        var folderLoad = viewModel.OpenFolderAsync("new");
+        await catalog.ScanStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var documentLoad = viewModel.LoadDocumentAsync(oldFile);
+
+        catalog.AllowScan();
+        await folderLoad;
+        extractor.Complete("stale document");
+        await documentLoad;
+
+        Assert.Same(newRoot, Assert.Single(viewModel.Documents));
+        Assert.False(extractor.WasCalled);
+        Assert.Null(viewModel.RenderedDocument.SourcePath);
+        Assert.Empty(viewModel.RenderedDocument.Text);
     }
 
     [Fact]
@@ -231,7 +284,24 @@ public sealed class ViewModelTests
 
     private sealed class FakeCatalog(DocumentNode root) : IDocumentCatalog
     {
-        public DocumentNode Build(string rootPath) => root;
+        public DocumentNode Build(string rootPath, CancellationToken cancellationToken = default) => root;
+    }
+
+    private sealed class CoordinatedCatalog(DocumentNode root) : IDocumentCatalog
+    {
+        public TaskCompletionSource<bool> ScanStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _allowScan =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public DocumentNode Build(string rootPath, CancellationToken cancellationToken = default)
+        {
+            ScanStarted.TrySetResult(true);
+            _allowScan.Task.Wait(cancellationToken);
+            return root;
+        }
+
+        public void AllowScan() => _allowScan.TrySetResult(true);
     }
 
     private sealed class FakeExtractor(string text) : IDocumentTextExtractor
@@ -246,6 +316,21 @@ public sealed class ViewModelTests
             await Task.Delay(Timeout.Infinite, cancellationToken);
             return string.Empty;
         }
+    }
+
+    private sealed class DeferredExtractor : IDocumentTextExtractor
+    {
+        private readonly TaskCompletionSource<string> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool WasCalled { get; private set; }
+
+        public Task<string> ReadAsync(string path, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            return _completion.Task;
+        }
+
+        public void Complete(string text) => _completion.TrySetResult(text);
     }
 
     private sealed class FakeStore : ISettingsStore
@@ -300,13 +385,15 @@ public sealed class ViewModelTests
         public int StopCount { get; private set; }
         public event EventHandler<string>? PlaybackEnded;
         public event EventHandler<SpeechProgressEventArgs>? PlaybackProgress;
+        public event EventHandler<string>? PlaybackStatus;
         public void Speak(string text, int caretIndex, BackendDefinition backend, double playbackRate) =>
             Calls.Add((text, caretIndex, backend, playbackRate));
         public void Stop() => StopCount++;
         public void Dispose() { }
-        public void Complete(string status) => PlaybackEnded?.Invoke(this, status);
-        public void ReportProgress(int characterIndex, int characterCount) =>
-            PlaybackProgress?.Invoke(this, new SpeechProgressEventArgs(characterIndex, characterCount));
+    public void Complete(string status) => PlaybackEnded?.Invoke(this, status);
+    public void ReportProgress(int characterIndex, int characterCount) =>
+        PlaybackProgress?.Invoke(this, new SpeechProgressEventArgs(characterIndex, characterCount));
+    public void RaiseStatus(string status) => PlaybackStatus?.Invoke(this, status);
     }
 
     private sealed class FakeInteractions : IMainViewInteractions

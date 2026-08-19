@@ -21,6 +21,9 @@ public partial class MainWindow : Window, IMainViewInteractions
     private bool _textClickCandidate;
     private int _documentTextLength;
     private int _documentSymbolCount;
+    private TextPointer? _lastMappedTextPointer;
+    private int _lastMappedTextOffset;
+    private Paragraph? _lastPlaybackParagraph;
 
     public MainWindowViewModel ViewModel { get; }
 
@@ -34,7 +37,7 @@ public partial class MainWindow : Window, IMainViewInteractions
         DataContext = ViewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         ApplyRenderedDocument(ViewModel.RenderedDocument);
-        ViewModel.RestoreLastSession();
+        _ = ViewModel.RestoreLastSessionAsync();
     }
 
     public string? ChooseFolder()
@@ -119,6 +122,9 @@ public partial class MainWindow : Window, IMainViewInteractions
             _documentTextLength = documentText.Length;
             _documentSymbolCount = DocumentText.Document.ContentStart.GetOffsetToPosition(
                 DocumentText.Document.ContentEnd);
+            _lastMappedTextPointer = DocumentText.Document.ContentStart;
+            _lastMappedTextOffset = 0;
+            _lastPlaybackParagraph = null;
             ViewModel.SetRenderedText(documentText);
             if (!string.IsNullOrWhiteSpace(rendered.Text))
                 DocumentText.Focus();
@@ -139,9 +145,6 @@ public partial class MainWindow : Window, IMainViewInteractions
 
     private void ApplyPlaybackMarker()
     {
-        var scrollViewer = FindScrollViewer(DocumentText);
-        var horizontalOffset = scrollViewer?.HorizontalOffset;
-        var verticalOffset = scrollViewer?.VerticalOffset;
         _suppressCaretRestart = true;
         try
         {
@@ -155,20 +158,19 @@ public partial class MainWindow : Window, IMainViewInteractions
             {
                 var end = GetTextPointerAtOffset(index + Math.Max(1, ViewModel.PlaybackCharacterCount));
                 DocumentText.Selection.Select(start, end);
+                var paragraph = start.Paragraph;
+                if (paragraph is not null && !ReferenceEquals(paragraph, _lastPlaybackParagraph))
+                {
+                    _lastPlaybackParagraph = paragraph;
+                    paragraph.BringIntoView();
+                }
             }
             else
             {
+                _lastPlaybackParagraph = null;
                 DocumentText.Selection.Select(start, start);
             }
 
-            // Moving the caret/selection can make WPF bring the current speech
-            // position into view. Restore the user's viewport after updating
-            // the marker so playback never hijacks scrolling.
-            if (scrollViewer is not null && horizontalOffset is not null && verticalOffset is not null)
-            {
-                scrollViewer.ScrollToHorizontalOffset(horizontalOffset.Value);
-                scrollViewer.ScrollToVerticalOffset(verticalOffset.Value);
-            }
         }
         finally
         {
@@ -181,6 +183,32 @@ public partial class MainWindow : Window, IMainViewInteractions
         var contentStart = DocumentText.Document.ContentStart;
         var contentEnd = DocumentText.Document.ContentEnd;
         var bounded = Math.Clamp(offset, 0, _documentTextLength);
+
+        // Playback progress is normally monotonic. Walk forward from the last
+        // mapped pointer instead of repeatedly measuring a TextRange from the
+        // beginning of a large FlowDocument. The latter is quadratic in the
+        // document size when called for every speech progress update.
+        if (_lastMappedTextPointer is not null && bounded >= _lastMappedTextOffset)
+        {
+            var pointer = _lastMappedTextPointer;
+            var textOffset = _lastMappedTextOffset;
+            while (textOffset < bounded && pointer.CompareTo(contentEnd) < 0)
+            {
+                var next = pointer.GetPositionAtOffset(1, LogicalDirection.Forward) ?? contentEnd;
+                if (next.CompareTo(pointer) <= 0)
+                    break;
+
+                textOffset += new TextRange(pointer, next).Text.Length;
+                pointer = next;
+            }
+
+            if (textOffset >= bounded || pointer.CompareTo(contentEnd) >= 0)
+            {
+                _lastMappedTextPointer = pointer;
+                _lastMappedTextOffset = textOffset;
+                return pointer;
+            }
+        }
 
         // TextPointer offsets use WPF's symbol space, which includes element
         // boundaries for paragraphs, runs, tables, etc. The caret and speech
@@ -204,33 +232,39 @@ public partial class MainWindow : Window, IMainViewInteractions
                 high = middle;
         }
 
-        return contentStart.GetPositionAtOffset(low, LogicalDirection.Forward) ?? contentEnd;
+        var mapped = contentStart.GetPositionAtOffset(low, LogicalDirection.Forward) ?? contentEnd;
+        _lastMappedTextPointer = mapped;
+        _lastMappedTextOffset = new TextRange(contentStart, mapped).Text.Length;
+        return mapped;
     }
 
-    private static ScrollViewer? FindScrollViewer(DependencyObject root)
-    {
-        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
-        {
-            var child = VisualTreeHelper.GetChild(root, index);
-            if (child is ScrollViewer scrollViewer)
-                return scrollViewer;
+    private int _restoreAttempts;
+    private DocumentNode? _restoreTarget;
 
-            var descendant = FindScrollViewer(child);
-            if (descendant is not null)
-                return descendant;
-        }
-
-        return null;
-    }
+    private const int MaxRestoreAttempts = 100;
 
     private void SelectRestoredDocument()
     {
-        if (ViewModel.SelectedDocument is null)
+        var target = ViewModel.SelectedDocument;
+        if (target is null)
+            return;
+
+        if (!ReferenceEquals(_restoreTarget, target))
+        {
+            _restoreTarget = target;
+            _restoreAttempts = 0;
+        }
+
+        if (++_restoreAttempts > MaxRestoreAttempts)
             return;
 
         DocumentTree.UpdateLayout();
-        if (SelectTreeItem(DocumentTree, ViewModel.SelectedDocument))
+        if (SelectTreeItem(DocumentTree, target))
+        {
+            _restoreTarget = null;
+            _restoreAttempts = 0;
             return;
+        }
 
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(SelectRestoredDocument));
     }

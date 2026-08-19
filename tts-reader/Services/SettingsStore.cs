@@ -11,8 +11,7 @@ public sealed class SettingsStore : ISettingsStore
 
     public SettingsStore(string? dataDirectory = null)
     {
-        _root = dataDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader");
+        _root = dataDirectory ?? TtsReaderPaths.AppDataRoot;
         SettingsPath = Path.Combine(_root, "settings.json");
     }
 
@@ -46,49 +45,26 @@ public sealed class SettingsStore : ISettingsStore
         var directory = Path.GetDirectoryName(SettingsPath)!;
         Directory.CreateDirectory(directory);
         var temporaryPath = SettingsPath + ".tmp";
-        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
-        File.Move(temporaryPath, SettingsPath, true);
+        try
+        {
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(settings, JsonOptions));
+            File.Move(temporaryPath, SettingsPath, overwrite: true);
+        }
+        catch
+        {
+            HttpFileDownloader.TryDelete(temporaryPath);
+            throw;
+        }
     }
 
-    public bool IsAvailable(BackendDefinition backend) => backend.Engine switch
-    {
-        SpeechEngines.Windows => backend.BuiltIn,
-        SpeechEngines.Piper => File.Exists(backend.ExecutablePath) &&
-                               File.Exists(backend.ModelPath) &&
-                               File.Exists(backend.ModelPath + ".json"),
-        SpeechEngines.Chatterbox or SpeechEngines.Qwen3Tts => IsLlmAvailable(backend),
-        _ => false
-    };
-
-    private static bool IsLlmAvailable(BackendDefinition backend)
-    {
-        if (string.IsNullOrWhiteSpace(backend.ExecutablePath) || !File.Exists(backend.ExecutablePath))
-            return false;
-        var model = backend.ModelPath?.Trim() ?? string.Empty;
-        if (model.Length == 0)
-            return false;
-        if (backend.Engine == SpeechEngines.Qwen3Tts && string.IsNullOrWhiteSpace(backend.VoiceName))
-            return false;
-        if (SpeechEngines.IsQwenVoiceClone(backend) &&
-            (string.IsNullOrWhiteSpace(backend.Instruct) || !File.Exists(backend.VoiceName)))
-            return false;
-        if (SpeechEngines.IsChatterboxReferenceRequired(backend) &&
-            (string.IsNullOrWhiteSpace(backend.VoiceName) || !File.Exists(backend.VoiceName)))
-            return false;
-        if (backend.Engine == SpeechEngines.Chatterbox &&
-            !string.IsNullOrWhiteSpace(backend.VoiceName) && !File.Exists(backend.VoiceName))
-            return false;
-        if (Directory.Exists(model) || File.Exists(model))
-            return true;
-        if (Path.IsPathRooted(model) || model.Contains('\\'))
-            return false;
-        return true;
-    }
+    public bool IsAvailable(BackendDefinition backend) =>
+        SpeechEngines.IsLocalProcessEngine(backend.Engine) || backend.Engine == SpeechEngines.Windows
+            ? BackendValidation.IsConfigured(backend)
+            : false;
 
     public static ReaderSettings CreateDefaults(string? dataDirectory = null)
     {
-        var baseDirectory = dataDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader");
+        var baseDirectory = dataDirectory ?? TtsReaderPaths.AppDataRoot;
         return new ReaderSettings
         {
             ActiveBackendId = "windows-default",

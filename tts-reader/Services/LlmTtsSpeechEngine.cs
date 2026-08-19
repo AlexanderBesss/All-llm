@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.ComponentModel;
 using TtsReader.Models;
 
 namespace TtsReader.Services;
@@ -16,6 +17,15 @@ public static class LocalProcessTts
         if (!process.Start())
             throw new InvalidOperationException($"{engineLabel} could not be started.");
 
+        // Neural inference can use every available CPU core. Keep the desktop
+        // UI and audio thread responsive while the next chunk is generated.
+        try
+        {
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (InvalidOperationException) { }
+        catch (Win32Exception) { }
+
         try
         {
             var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -28,8 +38,7 @@ public static class LocalProcessTts
         }
         catch (OperationCanceledException)
         {
-            if (!process.HasExited)
-                process.Kill(true);
+            ProcessHelpers.TryKill(process);
             throw;
         }
     }
@@ -37,6 +46,9 @@ public static class LocalProcessTts
 
 public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
 {
+    private static string? _soxDirectory;
+    private static readonly object SoxDirectoryGate = new();
+
     public async Task SynthesizeAsync(
         BackendDefinition backend,
         string text,
@@ -44,41 +56,21 @@ public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
         double playbackRate,
         CancellationToken cancellationToken)
     {
-        Validate(backend);
-        if (backend.Engine == SpeechEngines.Qwen3Tts)
-            await LlmRuntimeDependencies.EnsureSoxAsync(null, 0, 1, cancellationToken);
+        BackendValidation.ThrowIfNotConfigured(backend);
         var startInfo = CreateStartInfo(backend, text, outputPath, playbackRate);
         await LocalProcessTts.SynthesizeAsync(
             SpeechEngines.DisplayName(backend.Engine), startInfo, outputPath, cancellationToken);
     }
 
-    public static void Validate(BackendDefinition backend)
+    public async Task PrepareAsync(BackendDefinition backend, CancellationToken cancellationToken)
     {
-        var label = SpeechEngines.DisplayName(backend.Engine);
-        if (string.IsNullOrWhiteSpace(backend.ExecutablePath))
-            throw new InvalidDataException($"The {label} Python executable is not configured.");
-        if (!File.Exists(backend.ExecutablePath))
-            throw new InvalidDataException(
-                $"The {label} Python executable was not found at '{backend.ExecutablePath}'. " +
-                "Create the virtual environment and install the TTS package first (see the README).");
-        if (string.IsNullOrWhiteSpace(backend.ModelPath))
-            throw new InvalidDataException($"The {label} model is not configured.");
-        if (backend.Engine == SpeechEngines.Qwen3Tts && string.IsNullOrWhiteSpace(backend.VoiceName))
-            throw new InvalidDataException(
-                "Qwen3-TTS needs a speaker name, a voice description, or a reference .wav path in the Voice field.");
-        if (SpeechEngines.IsQwenVoiceClone(backend))
-        {
-            if (string.IsNullOrWhiteSpace(backend.VoiceName) || !File.Exists(backend.VoiceName))
-                throw new InvalidDataException("Qwen3-TTS voice clone needs an existing reference .wav path in the Voice field.");
-            if (string.IsNullOrWhiteSpace(backend.Instruct))
-                throw new InvalidDataException("Qwen3-TTS voice clone needs the reference transcript in the Instruction field.");
-        }
-        if (backend.Engine == SpeechEngines.Chatterbox &&
-            (!string.IsNullOrWhiteSpace(backend.VoiceName) && !File.Exists(backend.VoiceName)))
-            throw new InvalidDataException("The Chatterbox reference voice clip was not found.");
-        if (SpeechEngines.IsChatterboxReferenceRequired(backend) && string.IsNullOrWhiteSpace(backend.VoiceName))
-            throw new InvalidDataException("Chatterbox Turbo and Nano need an existing reference .wav path in the Voice field.");
+        if (backend.Engine == SpeechEngines.Qwen3Tts)
+            await LlmRuntimeDependencies.EnsureSoxAsync(null, 0, 1, cancellationToken);
+        TtsBridgeScripts.Ensure(backend);
     }
+
+    public static void Validate(BackendDefinition backend) =>
+        BackendValidation.ThrowIfNotConfigured(backend);
 
     public static ProcessStartInfo CreateStartInfo(
         BackendDefinition backend,
@@ -97,7 +89,7 @@ public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        if (backend.Engine == SpeechEngines.Qwen3Tts && LlmRuntimeDependencies.FindSoxDirectory() is { } soxDirectory)
+        if (backend.Engine == SpeechEngines.Qwen3Tts && FindSoxDirectoryCached() is { } soxDirectory)
         {
             var inheritedPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
             startInfo.Environment["PATH"] = soxDirectory + Path.PathSeparator + inheritedPath;
@@ -118,26 +110,22 @@ public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
             AddIfPresent(startInfo, "--language", backend.Language);
             AddIfPresent(startInfo, "--ref-audio", backend.VoiceName);
         }
+        else if (SpeechEngines.IsQwenVoiceClone(backend))
+        {
+            AddIfPresent(startInfo, "--ref-audio", backend.VoiceName);
+            AddIfPresent(startInfo, "--ref-text", backend.Instruct);
+            AddIfPresent(startInfo, "--language", backend.Language);
+        }
+        else if (SpeechEngines.IsQwenVoiceDesign(backend))
+        {
+            AddIfPresent(startInfo, "--language", backend.Language);
+            AddIfPresent(startInfo, "--instruct", backend.VoiceName);
+        }
         else
         {
-            var variant = SpeechEngines.NormalizeVariant(backend);
-            if (variant.Contains("clone"))
-            {
-                AddIfPresent(startInfo, "--ref-audio", backend.VoiceName);
-                AddIfPresent(startInfo, "--ref-text", backend.Instruct);
-                AddIfPresent(startInfo, "--language", backend.Language);
-            }
-            else if (variant.Contains("design"))
-            {
-                AddIfPresent(startInfo, "--language", backend.Language);
-                AddIfPresent(startInfo, "--instruct", backend.VoiceName);
-            }
-            else
-            {
-                AddIfPresent(startInfo, "--speaker", backend.VoiceName);
-                AddIfPresent(startInfo, "--language", backend.Language);
-                AddIfPresent(startInfo, "--instruct", backend.Instruct);
-            }
+            AddIfPresent(startInfo, "--speaker", backend.VoiceName);
+            AddIfPresent(startInfo, "--language", backend.Language);
+            AddIfPresent(startInfo, "--instruct", backend.Instruct);
         }
         startInfo.ArgumentList.Add("--");
         startInfo.ArgumentList.Add(text);
@@ -161,6 +149,19 @@ public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
                 : model;
     }
 
+    private static string? FindSoxDirectoryCached()
+    {
+        lock (SoxDirectoryGate)
+        {
+            if (_soxDirectory is not null)
+                return _soxDirectory;
+            var directory = LlmRuntimeDependencies.FindSoxDirectory();
+            if (directory is not null)
+                _soxDirectory = directory;
+            return directory;
+        }
+    }
+
     private static void AddIfPresent(ProcessStartInfo startInfo, string flag, string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
@@ -171,8 +172,10 @@ public sealed class LlmTtsProcessRunner : ILocalProcessSpeechRunner
 
 public static class TtsBridgeScripts
 {
-    public static string ScriptsRoot { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TtsReader", "scripts");
+    private static readonly Dictionary<string, string> EnsuredPaths = new(StringComparer.Ordinal);
+    private static readonly object EnsureGate = new();
+
+    public static string ScriptsRoot => TtsReaderPaths.ScriptsRoot;
 
     public static string PathFor(BackendDefinition backend) =>
         backend.Engine == SpeechEngines.Chatterbox
@@ -184,12 +187,19 @@ public static class TtsBridgeScripts
 
     public static string Ensure(BackendDefinition backend)
     {
-        var path = PathFor(backend);
-        Directory.CreateDirectory(ScriptsRoot);
-        var content = ContentFor(backend);
-        if (!File.Exists(path) || !string.Equals(File.ReadAllText(path), content, StringComparison.Ordinal))
-            File.WriteAllText(path, content);
-        return path;
+        lock (EnsureGate)
+        {
+            var key = backend.Engine;
+            if (EnsuredPaths.TryGetValue(key, out var cached))
+                return cached;
+            var path = PathFor(backend);
+            Directory.CreateDirectory(ScriptsRoot);
+            var content = ContentFor(backend);
+            if (!File.Exists(path) || !string.Equals(File.ReadAllText(path), content, StringComparison.Ordinal))
+                File.WriteAllText(path, content);
+            EnsuredPaths[key] = path;
+            return path;
+        }
     }
 
     public const string ChatterboxBridge = """

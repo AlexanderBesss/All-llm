@@ -159,7 +159,7 @@ public sealed class SettingsWindowViewModel : ViewModel, IDisposable
     {
         _store = store;
         _downloader = downloader ?? new LlmBackendDownloader();
-        _editingSettings = CloneSettings(settings);
+        _editingSettings = settings.Clone();
         _activeId = _editingSettings.ActiveBackendId;
         Backends = new ObservableCollection<BackendRowViewModel>(_editingSettings.Backends.Select(backend =>
             new BackendRowViewModel(backend, backend.Id == _activeId, store.IsAvailable(backend))));
@@ -260,7 +260,7 @@ public sealed class SettingsWindowViewModel : ViewModel, IDisposable
         try
         {
             _store.Save(_editingSettings);
-            ResultSettings = CloneSettings(_editingSettings);
+            ResultSettings = _editingSettings.Clone();
             CloseRequested?.Invoke(this, true);
         }
         catch (Exception exception)
@@ -309,15 +309,6 @@ public sealed class SettingsWindowViewModel : ViewModel, IDisposable
         ActivateCommand?.RaiseCanExecuteChanged();
         SaveCommand?.RaiseCanExecuteChanged();
     }
-
-    private static ReaderSettings CloneSettings(ReaderSettings settings) => new()
-    {
-        ActiveBackendId = settings.ActiveBackendId,
-        Backends = settings.Backends.Select(backend => backend.Clone()).ToList(),
-        PlaybackRate = settings.PlaybackRate,
-        LastFolderPath = settings.LastFolderPath,
-        LastSelectedFilePath = settings.LastSelectedFilePath
-    };
 
     public void Dispose()
     {

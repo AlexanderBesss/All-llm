@@ -138,6 +138,63 @@ public sealed class SettingsAndDownloadTests : IDisposable
     }
 
     [Fact]
+    public void Load_ReturnsSafeDefaultsWhenTheSavedFileIsCorrupted()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(Path.Combine(_root, "settings.json"), "{ this is not valid json");
+        var store = new SettingsStore(_root);
+
+        var loaded = store.Load();
+
+        Assert.Equal("windows-default", loaded.ActiveBackendId);
+        Assert.Equal(4, loaded.Backends.Count);
+    }
+
+    [Fact]
+    public void Validation_ReportsTheSpecificMissingConfiguration()
+    {
+        var executable = Path.Combine(_root, "piper.exe");
+        var model = Path.Combine(_root, "voice.onnx");
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(executable, "exe");
+        File.WriteAllText(model, "model");
+
+        var piper = new BackendDefinition
+        {
+            Id = "piper", Name = "Piper", Kind = "Piper", Engine = SpeechEngines.Piper,
+            ExecutablePath = executable, ModelPath = model
+        };
+        Assert.Contains(".onnx.json", BackendValidation.GetErrorMessage(piper));
+
+        File.WriteAllText(model + ".json", "{}");
+        Assert.Null(BackendValidation.GetErrorMessage(piper));
+
+        var llm = new BackendDefinition
+        {
+            Id = "llm", Name = "LLM", Kind = "LLM", Engine = SpeechEngines.Qwen3Tts,
+            ExecutablePath = Path.Combine(_root, "python.exe"), ModelPath = "org/model"
+        };
+        Assert.Contains("Python executable was not found", BackendValidation.GetErrorMessage(llm));
+
+        File.WriteAllText(llm.ExecutablePath, "python");
+        Assert.Contains("speaker name", BackendValidation.GetErrorMessage(llm));
+
+        llm.VoiceName = "Ryan";
+        Assert.Null(BackendValidation.GetErrorMessage(llm));
+
+        llm.Variant = "voice-clone";
+        Assert.Contains("reference .wav", BackendValidation.GetErrorMessage(llm));
+
+        var reference = Path.Combine(_root, "reference.wav");
+        File.WriteAllText(reference, "wav");
+        llm.VoiceName = reference;
+        Assert.Contains("reference transcript", BackendValidation.GetErrorMessage(llm));
+
+        llm.Instruct = "Transcript.";
+        Assert.Null(BackendValidation.GetErrorMessage(llm));
+    }
+
+    [Fact]
     public void IsAvailable_RejectsUnsupportedEngine()
     {
         var store = new SettingsStore(Path.Combine(_root, "data"));

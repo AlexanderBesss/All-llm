@@ -7,6 +7,7 @@ namespace TtsReader.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModel, IDisposable
 {
+    private const int PlaybackProgressDispatchMilliseconds = 150;
     private readonly IDocumentCatalog _catalog;
     private readonly IDocumentTextExtractor _extractor;
     private readonly ISettingsStore _settingsStore;
@@ -29,6 +30,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
     private SpeechProgressEventArgs? _pendingProgress;
     private bool _progressDispatchScheduled;
     private CancellationTokenSource? _loadCancellation;
+    private CancellationTokenSource? _folderLoadCancellation;
+    private int _folderLoadGeneration;
     private bool _disposed;
 
     public ObservableCollection<DocumentNode> Documents { get; } = [];
@@ -105,9 +108,9 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         get => _playbackCharacterCount;
         private set => SetProperty(ref _playbackCharacterCount, value);
     }
-    public ReaderSettings Settings => CloneSettings(_settings);
+    public ReaderSettings Settings => _settings.Clone();
 
-    public RelayCommand OpenFolderCommand { get; }
+    public AsyncRelayCommand OpenFolderCommand { get; }
     public AsyncRelayCommand SelectDocumentCommand { get; }
     public RelayCommand PlayCommand { get; }
     public RelayCommand StopCommand { get; }
@@ -132,7 +135,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         _playbackRate = NormalizePlaybackRate(_settings.PlaybackRate);
         _settings.PlaybackRate = _playbackRate;
 
-        OpenFolderCommand = new RelayCommand(_ => OpenFolder());
+        OpenFolderCommand = new AsyncRelayCommand(_ => PickAndOpenFolderAsync());
         SelectDocumentCommand = new AsyncRelayCommand(
             parameter => LoadDocumentAsync((DocumentNode)parameter!),
             parameter => parameter is DocumentNode { IsFolder: false, FullPath: not null },
@@ -144,27 +147,47 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
         _speech.PlaybackEnded += SpeechPlaybackEnded;
         _speech.PlaybackProgress += SpeechPlaybackProgress;
+        _speech.PlaybackStatus += SpeechPlaybackStatus;
         RefreshBackendStatus();
     }
 
-    public void OpenFolder(string folderPath)
-        => OpenFolderCore(folderPath, null, restoringSession: false);
+    public Task OpenFolderAsync(string folderPath)
+        => _disposed
+            ? Task.CompletedTask
+            : OpenFolderCoreAsync(folderPath, null, restoringSession: false);
 
-    public void RestoreLastSession()
+    public async Task RestoreLastSessionAsync()
     {
-        if (string.IsNullOrWhiteSpace(_settings.LastFolderPath))
+        if (_disposed || string.IsNullOrWhiteSpace(_settings.LastFolderPath))
             return;
 
-        OpenFolderCore(_settings.LastFolderPath, _settings.LastSelectedFilePath, restoringSession: true);
+        await OpenFolderCoreAsync(
+            _settings.LastFolderPath, _settings.LastSelectedFilePath, restoringSession: true);
     }
 
-    private void OpenFolderCore(string folderPath, string? selectedFilePath, bool restoringSession)
+    private async Task OpenFolderCoreAsync(string folderPath, string? selectedFilePath, bool restoringSession)
     {
+        if (_disposed)
+            return;
+
         StopPlayback("Playback stopped.");
         DetachAndCancelLoad();
+        var folderCancellation = new CancellationTokenSource();
+        var previousFolderCancellation = _folderLoadCancellation;
+        _folderLoadCancellation = folderCancellation;
+        var folderGeneration = ++_folderLoadGeneration;
+        previousFolderCancellation?.Cancel();
         try
         {
-            var root = _catalog.Build(folderPath);
+            // Directory walks can be slow on large libraries; keep the UI thread free.
+            var root = await Task.Run(
+                () => _catalog.Build(folderPath, folderCancellation.Token),
+                folderCancellation.Token);
+            folderCancellation.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(_folderLoadCancellation, folderCancellation) ||
+                folderGeneration != _folderLoadGeneration)
+                return;
+
             Documents.Clear();
             Documents.Add(root);
             SelectedDocument = null;
@@ -192,17 +215,30 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
                     Status += $" Saved file was not found: {selectedFilePath}";
             }
         }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(_folderLoadCancellation, folderCancellation) && !_disposed)
+                Status = "Folder loading was canceled.";
+        }
         catch (Exception exception)
         {
-            Status = $"Could not open the folder: {exception.Message}";
+            if (ReferenceEquals(_folderLoadCancellation, folderCancellation))
+                Status = $"Could not open the folder: {exception.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_folderLoadCancellation, folderCancellation))
+                _folderLoadCancellation = null;
+            folderCancellation.Dispose();
         }
     }
 
     public async Task LoadDocumentAsync(DocumentNode file)
     {
-        if (file.IsFolder || file.FullPath is null)
+        if (_disposed || _folderLoadCancellation is not null || file.IsFolder || file.FullPath is null)
             return;
 
+        var folderGeneration = _folderLoadGeneration;
         StopPlayback("Playback stopped.");
         _settings.LastSelectedFilePath = file.FullPath;
         TrySaveSettings();
@@ -216,6 +252,8 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         {
             var text = await _extractor.ReadAsync(file.FullPath, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
+            if (folderGeneration != _folderLoadGeneration)
+                return;
             var markdown = IsMarkdown(file.FullPath);
             _renderedText = text;
             RenderedDocument = new RenderedDocument(text, file.FullPath, markdown);
@@ -275,13 +313,13 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         CancelCurrentLoad(setStatus: true);
     }
 
-    private void OpenFolder()
+    private async Task PickAndOpenFolderAsync()
     {
         try
         {
             var folder = _interactions.ChooseFolder();
             if (!string.IsNullOrWhiteSpace(folder))
-                OpenFolder(folder);
+                await OpenFolderAsync(folder);
         }
         catch (Exception exception)
         {
@@ -347,10 +385,10 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         StopPlayback("Playback stopped while settings are open.");
         try
         {
-            var result = _interactions.EditSettings(CloneSettings(_settings));
+            var result = _interactions.EditSettings(_settings.Clone());
             if (result is null)
                 return;
-            _settings = CloneSettings(result);
+            _settings = result.Clone();
             RefreshBackendStatus();
             Status = "Speech settings saved.";
         }
@@ -380,12 +418,21 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         Status = status;
     });
 
+    private void SpeechPlaybackStatus(object? sender, string status) => RunOnContext(() =>
+    {
+        if (IsPlaying)
+            Status = status;
+    });
+
     private void SpeechPlaybackProgress(object? sender, SpeechProgressEventArgs args)
     {
         // Windows speech can report progress much faster than the document
-        // view can repaint. Keep only the newest event and update the UI at a
-        // bounded rate so speech and the Stop button remain responsive.
-        if (_synchronizationContext is null || SynchronizationContext.Current == _synchronizationContext)
+        // view can repaint. Even when System.Speech raises the event on the
+        // WPF context, do not take the fast path: updating a complex Markdown
+        // FlowDocument performs expensive caret/selection work on that same
+        // dispatcher and can make the window appear frozen. Keep only the
+        // newest event and update the UI at a bounded rate.
+        if (_synchronizationContext is null)
         {
             ApplySpeechPlaybackProgress(args);
             return;
@@ -404,7 +451,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private async Task DispatchPendingProgressAsync()
     {
-        await Task.Delay(50).ConfigureAwait(false);
+        await Task.Delay(PlaybackProgressDispatchMilliseconds).ConfigureAwait(false);
 
         SpeechProgressEventArgs? progress;
         lock (_progressGate)
@@ -420,7 +467,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
 
     private void ApplySpeechPlaybackProgress(SpeechProgressEventArgs args)
     {
-        if (!IsPlaying)
+        if (_disposed || !IsPlaying)
             return;
 
         var bounded = Math.Clamp(args.CharacterIndex, 0, _renderedText.Length);
@@ -460,18 +507,7 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         cancellation?.Cancel();
     }
 
-    private static bool IsMarkdown(string path) =>
-        Path.GetExtension(path).Equals(".md", StringComparison.OrdinalIgnoreCase) ||
-        Path.GetExtension(path).Equals(".markdown", StringComparison.OrdinalIgnoreCase);
-
-    private static ReaderSettings CloneSettings(ReaderSettings settings) => new()
-    {
-        ActiveBackendId = settings.ActiveBackendId,
-        Backends = settings.Backends.Select(backend => backend.Clone()).ToList(),
-        PlaybackRate = settings.PlaybackRate,
-        LastFolderPath = settings.LastFolderPath,
-        LastSelectedFilePath = settings.LastSelectedFilePath
-    };
+    private static bool IsMarkdown(string path) => DocumentFormats.IsMarkdown(path);
 
     private static double NormalizePlaybackRate(double value) =>
         AvailablePlaybackSpeeds.Any(option => option.Multiplier == value) ? value : 1.0;
@@ -510,7 +546,12 @@ public sealed class MainWindowViewModel : ViewModel, IDisposable
         _disposed = true;
         _speech.PlaybackEnded -= SpeechPlaybackEnded;
         _speech.PlaybackProgress -= SpeechPlaybackProgress;
+        _speech.PlaybackStatus -= SpeechPlaybackStatus;
         DetachAndCancelLoad();
+        var folderCancellation = _folderLoadCancellation;
+        _folderLoadCancellation = null;
+        _folderLoadGeneration++;
+        folderCancellation?.Cancel();
         _speech.Dispose();
     }
 }
