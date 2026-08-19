@@ -56,14 +56,6 @@
                     "top_k": 20,
                     "presence_penalty": 0.0,
                     "top_p": 0.95,
-                    "limit": {
-                        "context": 180000,
-                        "output": 65300
-                    },
-                    "cost": {
-                        "input": 0.00000005,
-                        "output": 0.00000027
-                    },
                     "modalities": {
                         "input": [
                             "text",
