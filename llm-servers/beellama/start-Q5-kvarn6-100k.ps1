@@ -5,11 +5,14 @@
   --gpu-layers all `
   --fit on `
   --kv-unified `
+  --spec-type draft-mtp,ngram-mod `
+  --spec-ngram-mod-n-max 2 `
+  --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 110000 `
-  --cache-type-k kvarn4 `
-  --cache-type-v kvarn4 `
+  --ctx-size 100000 `
+  --cache-type-k kvarn6 `
+  --cache-type-v kvarn6 `
   --kv-tail-tokens 1024 `
   --flash-attn on `
   --batch-size 2048 `
