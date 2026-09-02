@@ -1,8 +1,6 @@
 .\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
-  --spec-draft-model "..\..\models\Anbeeld\Qwen3.6-27B-DFlash-GGUF\Qwen3.6-27B-DFlash-Q5_K_M.gguf" `
-  --mmproj "..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf" `
-  --spec-dflash-cross-ctx 1024 `
+  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q4_K_XL.gguf" `
+  --spec-draft-model "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-DFlash2-Q8_0.gguf" `
   --no-mmproj-offload `
   --kv-unified `
   --host 0.0.0.0 `
@@ -10,15 +8,16 @@
   --gpu-layers all `
   --fit on `
   --spec-draft-ngl all `
-  --spec-type dflash `
+  --spec-type draft-dflash `
+  --spec-draft-n-max 7 `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 110000 `
-  --cache-type-k q5_1 `
-  --cache-type-v q4_0 `
+  --ctx-size 120000 `
+  --cache-type-k kvarn4 `
+  --cache-type-v kvarn4 `
   --flash-attn on `
-  --batch-size 2048 `
-  --ubatch-size 1024 `
+  --batch-size 1024 `
+  --ubatch-size 512 `
   --no-mmap `
   --mlock `
   --jinja `

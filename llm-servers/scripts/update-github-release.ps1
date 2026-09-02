@@ -4,6 +4,7 @@
 .DESCRIPTION
     Dot-source this file, then call Update-GitHubRelease with your config.
     Ex: . ../../scripts/update-github-release.ps1
+    Pass -IncludePrereleases to track prerelease/preview builds as well.
 #>
 
 function Remove-PathQuietly {
@@ -57,7 +58,8 @@ function Update-GitHubRelease {
         [string]$TempZip,
         [string]$TempDir,
         [string]$UserAgent,
-        [scriptblock]$TestInstalled  # must accept [string]$Path and return bool
+        [scriptblock]$TestInstalled,  # must accept [string]$Path and return bool
+        [switch]$IncludePrereleases   # when set, picks the newest non-draft release including prereleases
     )
 
     $ErrorOccurred = $false
@@ -76,11 +78,20 @@ function Update-GitHubRelease {
     # ---------- STEP 1: Fetch latest release ----------
     Write-Host '[1/5] Fetching latest release from GitHub...' -ForegroundColor Cyan
 
-    $ApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
     $Headers = @{ 'User-Agent' = $UserAgent }
 
     try {
-        $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -ErrorAction Stop
+        if ($IncludePrereleases) {
+            # /releases/latest skips prereleases, so list releases and pick
+            # the newest non-draft one (GitHub returns newest first).
+            $ApiUrl   = "https://api.github.com/repos/$RepoOwner/$RepoName/releases?per_page=30"
+            $Releases = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -ErrorAction Stop
+            $Release  = @($Releases) | Where-Object { -not $_.draft } | Select-Object -First 1
+            if (-not $Release) { throw "No non-draft releases found" }
+        } else {
+            $ApiUrl  = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+            $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -ErrorAction Stop
+        }
     } catch {
         Write-Host "ERROR: Failed to fetch release info: $_" -ForegroundColor Red
         $ErrorOccurred = $true
@@ -101,7 +112,11 @@ function Update-GitHubRelease {
     } else {
         Write-Host "       Current version: not installed" -ForegroundColor Yellow
     }
-    Write-Host "       Latest release : $TagName" -ForegroundColor Green
+    if ($Release.prerelease) {
+        Write-Host "       Latest release : $TagName (prerelease)" -ForegroundColor Green
+    } else {
+        Write-Host "       Latest release : $TagName" -ForegroundColor Green
+    }
 
     # ---------- CHECK: Already up to date? ----------
     $CurrentVersionMarker = Join-Path $InstallDir "VERSION-$TagName"
