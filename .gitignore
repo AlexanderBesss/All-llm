@@ -8,10 +8,6 @@ obj/
 publish/
 tests/bin/
 tests/obj/
-/tts-reader/bin/
-/tts-reader/obj/
-/tts-reader/tests/bin/
-/tts-reader/tests/obj/
 /models/**/*.gguf
 /models
 /open-webui-data/
