@@ -21,6 +21,8 @@ public static class TtsReaderPaths
 
     public static string TempRoot => Path.Combine(Path.GetTempPath(), "TtsReader");
 
+    public static string LogsRoot => Path.Combine(AppDataRoot, "logs");
+
     public static string VenvPythonPath(string environmentName) =>
         Path.Combine(AppDataRoot, environmentName, "Scripts", "python.exe");
 

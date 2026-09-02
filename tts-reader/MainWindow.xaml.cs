@@ -295,6 +295,12 @@ public partial class MainWindow : Window, IMainViewInteractions
         return false;
     }
 
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        WindowChrome.UseDarkTitleBar(this);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;

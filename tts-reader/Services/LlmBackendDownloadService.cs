@@ -298,10 +298,47 @@ snapshot_download(repo_id=sys.argv[1])
             _ => throw new PlatformNotSupportedException("This Windows architecture is not supported by the Python runtime downloader.")
         };
 
-    private static IReadOnlyList<string> PackageArguments(BackendDefinition backend) =>
-        backend.Engine == SpeechEngines.Chatterbox
-            ? ["-m", "pip", "install", "--upgrade", "chatterbox-tts"]
-            : ["-m", "pip", "install", "--upgrade", "transformers", "accelerate", "torch", "soundfile", "qwen-tts"];
+    private const string CudaIndexUrl = "https://download.pytorch.org/whl/cu130";
+
+    private static IReadOnlyList<string> PackageArguments(BackendDefinition backend)
+    {
+        if (backend.Engine == SpeechEngines.Chatterbox)
+            return ["-m", "pip", "install", "--upgrade", "chatterbox-tts"];
+
+        var arguments = new List<string>
+        {
+            "-m", "pip", "install", "--upgrade", "transformers", "accelerate", "torch", "soundfile", "qwen-tts"
+        };
+        if (HasNvidiaGpu())
+            arguments.AddRange(["--extra-index-url", CudaIndexUrl]);
+        return arguments;
+    }
+
+    private static bool HasNvidiaGpu()
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo("nvidia-smi", "--version")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using var process = Process.Start(startInfo);
+            if (process is null)
+                return false;
+            string? output = process.StandardOutput.ReadToEnd();
+            process.StandardError.ReadToEnd();
+            return process.WaitForExit(10000) && process.ExitCode == 0
+                && output is not null
+                && output.Contains("nvidia", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private static bool IsRepositoryReference(string model) =>
         !Directory.Exists(model) &&

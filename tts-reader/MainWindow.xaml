@@ -17,7 +17,8 @@
             <TextBlock Text="{Binding Name}"
                        Foreground="{StaticResource TextPrimary}"
                        TextTrimming="CharacterEllipsis"
-                       ToolTip="{Binding FullPath}"/>
+                       ToolTip="{Binding FullPath}"
+                       AutomationProperties.Name="{Binding Name}"/>
         </HierarchicalDataTemplate>
     </Window.Resources>
 
@@ -160,28 +161,37 @@
                           ShowsPreview="False"
                           ToolTip="Drag to resize the document list"/>
 
-            <RichTextBox x:Name="DocumentText"
-                         Grid.Column="2"
-                         IsReadOnly="True"
-                         AcceptsTab="True"
-                         VerticalScrollBarVisibility="Auto"
-                         HorizontalScrollBarVisibility="Auto"
-                         FontFamily="Segoe UI"
-                         FontSize="16"
-                         Padding="0"
-                         Background="{StaticResource ReaderBackground}"
-                         BorderBrush="{StaticResource BorderBrush}"
-                         BorderThickness="1"
-                         CaretBrush="{StaticResource Accent}"
-                         SelectionBrush="{StaticResource SelectionBackground}"
-                         SelectionTextBrush="{StaticResource TextPrimary}"
-                         SelectionOpacity="0.9"
-                         IsInactiveSelectionHighlightEnabled="True"
-                         PreviewMouseLeftButtonDown="DocumentText_PreviewMouseLeftButtonDown"
-                         PreviewMouseMove="DocumentText_PreviewMouseMove"
-                         PreviewMouseLeftButtonUp="DocumentText_PreviewMouseLeftButtonUp"
-                         SelectionChanged="DocumentText_SelectionChanged"
-                         AutomationProperties.Name="Rendered document"/>
+            <Grid Grid.Column="2">
+                <RichTextBox x:Name="DocumentText"
+                             IsReadOnly="True"
+                             AcceptsTab="True"
+                             VerticalScrollBarVisibility="Auto"
+                             HorizontalScrollBarVisibility="Auto"
+                             FontFamily="Segoe UI"
+                             FontSize="16"
+                             Padding="0"
+                             Background="{StaticResource ReaderBackground}"
+                             BorderBrush="{StaticResource BorderBrush}"
+                             BorderThickness="1"
+                             CaretBrush="{StaticResource Accent}"
+                             SelectionBrush="{StaticResource SelectionBackground}"
+                             SelectionTextBrush="{StaticResource TextPrimary}"
+                             SelectionOpacity="0.9"
+                             IsInactiveSelectionHighlightEnabled="True"
+                             PreviewMouseLeftButtonDown="DocumentText_PreviewMouseLeftButtonDown"
+                             PreviewMouseMove="DocumentText_PreviewMouseMove"
+                             PreviewMouseLeftButtonUp="DocumentText_PreviewMouseLeftButtonUp"
+                             SelectionChanged="DocumentText_SelectionChanged"
+                             AutomationProperties.Name="Rendered document"/>
+                <TextBlock Text="Open a folder, then choose a document to read it aloud."
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="13"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           IsHitTestVisible="False"
+                           Visibility="{Binding ShowReadingPlaceholder, Converter={StaticResource BooleanToVisibilityConverter}}"
+                           AutomationProperties.Name="Reading surface empty state"/>
+            </Grid>
         </Grid>
 
         <Border Grid.Row="2"
@@ -198,8 +208,8 @@
                          Width="8"
                          Height="8"
                          Fill="{StaticResource Accent}"
-                         VerticalAlignment="Top"
-                         Margin="0,5,9,0"/>
+                         VerticalAlignment="Center"
+                         Margin="0,0,9,0"/>
                 <TextBlock Grid.Column="1"
                            Foreground="{StaticResource TextSecondary}"
                            FontSize="12"
