@@ -1,0 +1,40 @@
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\bin\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q4_K_XL.gguf'
+$draftModel = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-DFlash2-Q8_0.gguf'
+
+& $exe `
+  -m $model `
+  --spec-draft-model $draftModel `
+  --no-mmproj-offload `
+  --kv-unified `
+  --host 0.0.0.0 `
+  --port 8080 `
+  --gpu-layers all `
+  --fit on `
+  --spec-draft-ngl all `
+  --spec-type draft-dflash `
+  --spec-draft-n-max 7 `
+  --parallel 1 `
+  --cache-ram 0 `
+  --ctx-size 120000 `
+  --cache-type-k kvarn4 `
+  --cache-type-v kvarn4 `
+  --flash-attn on `
+  --batch-size 1024 `
+  --ubatch-size 512 `
+  --no-mmap `
+  --mlock `
+  --jinja `
+  --temp 1.0 `
+  --top-p 0.95 `
+  --top-k 20 `
+  --min-p 0.0 `
+  --repeat-penalty 1.0 `
+  --presence-penalty 0.0 `
+  --chat-template-kwargs '{\"preserve_thinking\":true}' `
+  --metrics `
+  --slots `
+  --perf `
+  --reasoning on
+pause

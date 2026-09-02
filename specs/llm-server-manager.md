@@ -44,7 +44,7 @@ The Windows LLM server start scripts are scattered next to the binaries they lau
 
 - [x] `llm-servers/beellama/scripts/` contains the 6 beellama start scripts; `llm-servers/llama/windows/scripts/` contains the 9 llama start scripts; `llm-servers/llama/windows/NPU/scripts/` contains `start-npu.ps1`.
 - [x] A moved start script executed from an arbitrary working directory (e.g. repository root) launches the correct binary and model.
-- [x] The application lists 6 options on the beellama tab and 11 on the llama.cpp tab (9 GPU scripts with `start-gemma.ps1` expanded to 2 modes, plus NPU).
+- [x] The application lists 7 options on the beellama tab and 11 on the llama.cpp tab (9 GPU scripts with `start-gemma.ps1` expanded to 2 modes, plus NPU).
 - [x] Start opens a console window running the server, the option shows running status, and Stop terminates the process tree and frees the port.
 - [x] The per-tab Update buttons run the correct updater scripts.
 - [x] `whisper-note/start-gemma-e2b.ps1` and the README reference the new script locations; no references to the old script paths remain.
@@ -81,7 +81,7 @@ The Windows LLM server start scripts are scattered next to the binaries they lau
 ## Implementation notes
 
 ### Script reorganization
-- 16 start scripts moved with `git mv` (rename history preserved) into `llm-servers/beellama/scripts/` (6), `llm-servers/llama/windows/scripts/` (9), and `llm-servers/llama/windows/NPU/scripts/` (1).
+- 16 existing start scripts moved with `git mv` (rename history preserved) into `llm-servers/beellama/scripts/` (6), `llm-servers/llama/windows/scripts/` (9), and `llm-servers/llama/windows/NPU/scripts/` (1); the incoming `start-dflash2.ps1` is also kept in `llm-servers/beellama/scripts/`.
 - Every moved script now derives its binary and model paths from `$PSScriptRoot` (`$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path`, etc.) instead of CWD-relative paths; trailing `pause` kept. `start-embedding.ps1`'s log now writes to a fixed path in the scripts folder (gitignored via `*.log`).
 - Argument fidelity verified mechanically: per-file comparison of all flag/value lines against `git show HEAD:<old path>` — the only differences are the intended literal-path→variable substitutions.
 - `whisper-note/start-gemma-e2b.ps1` (deprecated shim) and the root `README.md` updated to the new locations.
