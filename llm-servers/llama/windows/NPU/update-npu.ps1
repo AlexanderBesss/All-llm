@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    Update llama.cpp OpenVINO binaries for Intel NPU from the latest GitHub release.
+    Update llama.cpp OpenVINO binaries for Intel NPU from the latest GitHub preview release.
 .DESCRIPTION
-    Fetches the latest release from ggml-org/llama.cpp, downloads the
+    Fetches the latest pre-release from ggml-org/llama.cpp that contains the
+    requested binary asset, downloads the
     Windows x64 (OpenVINO) zip, extracts it, and overwrites conflicting
     files in llama/windows/llama-ov.
     Place this script inside llama/windows/NPU and run it.
@@ -23,6 +24,7 @@ Update-GitHubRelease `
     -TempZip      (Join-Path $env:TEMP 'llama-npu-latest.zip') `
     -TempDir      (Join-Path $env:TEMP "llama-npu-$(Get-Date -Format 'yyyyMMddHHmmss')") `
     -UserAgent    'llama-npu-updater-pwsh' `
+    -ReleaseChannel 'Prerelease' `
     -TestInstalled { param([string]$Path)
         (Test-Path (Join-Path $Path 'llama-server.exe')) -or
         (Test-Path (Join-Path $Path 'llama-cli.exe'))

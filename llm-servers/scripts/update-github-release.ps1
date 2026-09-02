@@ -47,6 +47,40 @@ function Get-CurrentVersion {
     return $null
 }
 
+function Get-GitHubRelease {
+    param(
+        [string]$RepoOwner,
+        [string]$RepoName,
+        [string]$AssetPattern,
+        [hashtable]$Headers,
+        [ValidateSet('Latest', 'Prerelease')]
+        [string]$ReleaseChannel = 'Latest'
+    )
+
+    $BaseApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases"
+
+    if ($ReleaseChannel -eq 'Latest') {
+        return Invoke-RestMethod -Uri "$BaseApiUrl/latest" -Headers $Headers -ErrorAction Stop
+    }
+
+    # GitHub's /releases/latest endpoint excludes pre-releases. Search the
+    # release feed instead and skip previews whose requested asset is not ready.
+    $Releases = Invoke-RestMethod -Uri "$BaseApiUrl`?per_page=100" -Headers $Headers -ErrorAction Stop
+    $Release = $Releases |
+        Where-Object {
+            $_.prerelease -and
+            @($_.assets | Where-Object { $_.name -match $AssetPattern }).Count -gt 0
+        } |
+        Sort-Object { [DateTimeOffset]$_.published_at } -Descending |
+        Select-Object -First 1
+
+    if (-not $Release) {
+        throw "No pre-release with an asset matching '$AssetPattern' was found among the 100 most recent releases."
+    }
+
+    return $Release
+}
+
 function Update-GitHubRelease {
     param(
         [string]$Title,
@@ -57,6 +91,8 @@ function Update-GitHubRelease {
         [string]$TempZip,
         [string]$TempDir,
         [string]$UserAgent,
+        [ValidateSet('Latest', 'Prerelease')]
+        [string]$ReleaseChannel = 'Latest',
         [scriptblock]$TestInstalled  # must accept [string]$Path and return bool
     )
 
@@ -76,11 +112,15 @@ function Update-GitHubRelease {
     # ---------- STEP 1: Fetch latest release ----------
     Write-Host '[1/5] Fetching latest release from GitHub...' -ForegroundColor Cyan
 
-    $ApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
     $Headers = @{ 'User-Agent' = $UserAgent }
 
     try {
-        $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers -ErrorAction Stop
+        $Release = Get-GitHubRelease `
+            -RepoOwner $RepoOwner `
+            -RepoName $RepoName `
+            -AssetPattern $AssetPattern `
+            -Headers $Headers `
+            -ReleaseChannel $ReleaseChannel
     } catch {
         Write-Host "ERROR: Failed to fetch release info: $_" -ForegroundColor Red
         $ErrorOccurred = $true
@@ -101,7 +141,8 @@ function Update-GitHubRelease {
     } else {
         Write-Host "       Current version: not installed" -ForegroundColor Yellow
     }
-    Write-Host "       Latest release : $TagName" -ForegroundColor Green
+    $ReleaseLabel = if ($ReleaseChannel -eq 'Prerelease') { 'Latest preview' } else { 'Latest release' }
+    Write-Host "       $($ReleaseLabel.PadRight(15)): $TagName" -ForegroundColor Green
 
     # ---------- CHECK: Already up to date? ----------
     $CurrentVersionMarker = Join-Path $InstallDir "VERSION-$TagName"
