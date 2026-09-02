@@ -23,7 +23,7 @@ Update-GitHubRelease `
     -TempZip      (Join-Path $env:TEMP 'beellama-update-latest.zip') `
     -TempDir      (Join-Path $env:TEMP "beellama-update-$(Get-Date -Format 'yyyyMMddHHmmss')") `
     -UserAgent    'beellama-updater-pwsh' `
-    -IncludePrereleases `
+    -ReleaseChannel 'Prerelease' `
     -TestInstalled { param([string]$Path)
         (Test-Path (Join-Path $Path 'llama-server.exe')) -or
         (Test-Path (Join-Path $Path 'llama-cli.exe')) -or
