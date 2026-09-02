@@ -1,5 +1,9 @@
-.\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\bin\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+
+& $exe `
+  -m $model `
   --host 0.0.0.0 `
   --port 8080 `
   --gpu-layers all `

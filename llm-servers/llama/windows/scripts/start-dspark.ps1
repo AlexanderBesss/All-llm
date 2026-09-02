@@ -1,8 +1,10 @@
-$mainModel = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-Q2_g64.gguf"
-$mmproj = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-mmproj-BF16.gguf"
-$draftModel = "..\..\..\models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-dspark-Q4_1.gguf"
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\llama\llama-server.exe'
+$mainModel = Join-Path $root 'models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-Q2_g64.gguf'
+$mmproj = Join-Path $root 'models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-mmproj-BF16.gguf'
+$draftModel = Join-Path $root 'models\prism-ml\Ternary-Bonsai-27B-gguf\Ternary-Bonsai-27B-dspark-Q4_1.gguf'
 
-& (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
+& $exe `
     -m $mainModel `
     --mmproj $mmproj `
     --no-mmproj-offload `

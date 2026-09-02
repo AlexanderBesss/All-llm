@@ -3,9 +3,10 @@ param(
     [string]$Mode = 'e2b'
 )
 
-$exe = Join-Path $PSScriptRoot 'llama\llama-server.exe'
-$model = "..\..\..\models\lmstudio-community\gemma-4-E2B-it-GGUF\gemma-4-E2B-it-Q4_K_M.gguf"
-$mmproj = "..\..\..\models\lmstudio-community\gemma-4-E2B-it-GGUF\mmproj-gemma-4-E2B-it-BF16.gguf"
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\llama\llama-server.exe'
+$model = Join-Path $root 'models\lmstudio-community\gemma-4-E2B-it-GGUF\gemma-4-E2B-it-Q4_K_M.gguf'
+$mmproj = Join-Path $root 'models\lmstudio-community\gemma-4-E2B-it-GGUF\mmproj-gemma-4-E2B-it-BF16.gguf'
 
 switch ($Mode) {
     'default' {

@@ -1,7 +1,13 @@
-.\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
-  --spec-draft-model "..\..\models\Anbeeld\Qwen3.6-27B-DFlash-GGUF\Qwen3.6-27B-DFlash-Q5_K_M.gguf" `
-  --mmproj "..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf" `
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\bin\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+$draftModel = Join-Path $root 'models\Anbeeld\Qwen3.6-27B-DFlash-GGUF\Qwen3.6-27B-DFlash-Q5_K_M.gguf'
+$mmproj = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf'
+
+& $exe `
+  -m $model `
+  --spec-draft-model $draftModel `
+  --mmproj $mmproj `
   --spec-dflash-cross-ctx 1024 `
   --no-mmproj-offload `
   --kv-unified `

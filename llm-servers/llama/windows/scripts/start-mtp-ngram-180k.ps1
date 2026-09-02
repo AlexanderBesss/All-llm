@@ -1,33 +1,33 @@
-.\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
-  --host 0.0.0.0 `
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\llama\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q4_K_XL.gguf'
+
+& $exe `
+  -m $model `
   --port 8080 `
+  --host 0.0.0.0 `
   --gpu-layers all `
-  --fit on `
   --kv-unified `
   --spec-type draft-mtp,ngram-mod `
   --spec-ngram-mod-n-max 2 `
   --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 145000 `
-  --cache-type-k kvarn4 `
-  --cache-type-v kvarn4 `
-  --kv-tail-tokens 1024 `
+  --ctx-size 180000 `
+  --cache-type-k q4_0 `
+  --cache-type-v q4_0 `
   --flash-attn on `
   --batch-size 2048 `
   --ubatch-size 1024 `
   --no-mmap `
-  --mlock `
   --jinja `
   --temp 1.0 `
   --top-p 0.95 `
   --top-k 20 `
   --min-p 0.0 `
   --repeat-penalty 1.0 `
-  --presence-penalty 0.0 `
   --metrics `
   --slots `
   --perf `
-  --reasoning on
+  --presence-penalty 0.0
 pause

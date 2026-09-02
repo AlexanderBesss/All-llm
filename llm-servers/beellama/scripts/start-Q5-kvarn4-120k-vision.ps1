@@ -1,6 +1,11 @@
-.\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
-  --mmproj "..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf" `
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\bin\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+$mmproj = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf'
+
+& $exe `
+  -m $model `
+  --mmproj $mmproj `
   --no-mmproj-offload `
   --host 0.0.0.0 `
   --port 8080 `

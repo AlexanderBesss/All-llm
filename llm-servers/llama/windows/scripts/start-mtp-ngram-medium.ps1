@@ -1,7 +1,11 @@
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\llama\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+
 $env:LLAMA_ARG_CHAT_TEMPLATE_KWARGS = '{"reasoning_effort":"medium"}'
 
-& (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
-  -m "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf" `
+& $exe `
+  -m $model `
   --port 8080 `
   --host 0.0.0.0 `
   --gpu-layers all `

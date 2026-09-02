@@ -1,7 +1,7 @@
 # --- Prerequisites (one-time setup) ---
 # 1. Install Intel NPU driver:
 #    https://www.intel.com/content/www/us/en/download/770895/intel-npu-driver-for-windows.html
-# 2. Run .\update-npu.ps1 to download OpenVINO binaries (includes bundled OpenVINO runtime)
+# 2. Run ..\update-npu.ps1 to download OpenVINO binaries (includes bundled OpenVINO runtime)
 
 # --- OpenVINO environment ---
 # Source system OpenVINO if installed (optional; prebuilt binaries bundle runtime)
@@ -16,14 +16,14 @@ $env:GGML_OPENVINO_PREFILL_CHUNK_SIZE = "512"
 # NPU does not support stateful execution
 $env:GGML_OPENVINO_STATEFUL_EXECUTION = "0"
 
-# --- Model paths ---
-$mainModel = "..\..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf"
-$draftModel = "..\..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf"
+# --- Paths ---
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..\..')).Path
+$Binary = Join-Path $PSScriptRoot '..\llama-ov\llama-server.exe'
+$mainModel = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+$draftModel = Join-Path $root 'models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf'
 
-# --- Binary ---
-$Binary = Join-Path $PSScriptRoot 'llama-ov\llama-server.exe'
 if (-not (Test-Path $Binary)) {
-    Write-Error "llama-server.exe not found in llama-ov\. Run .\update-npu.ps1 first."
+    Write-Error "llama-server.exe not found in ..\llama-ov\. Run ..\update-npu.ps1 first."
     pause
     exit 1
 }

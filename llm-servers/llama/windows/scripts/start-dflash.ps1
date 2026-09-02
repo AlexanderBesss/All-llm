@@ -1,8 +1,9 @@
-$mainModel = "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf"
-$mmproj = "..\..\..\models\unsloth\Qwen3.8-27B-GGUF\mmproj-F16.gguf"
-$draftModel = "..\..\..\models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf"
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\llama\llama-server.exe'
+$mainModel = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+$draftModel = Join-Path $root 'models\Alittlehammmer\Qwen3.6-27B-DFlash-GGUF-llama.cpp\Qwen3.6-27B-DFlash-Q5_K.gguf'
 
-& (Join-Path $PSScriptRoot 'llama\llama-server.exe') `
+& $exe `
     -m $mainModel `
     --spec-draft-model $draftModel `
     --no-mmproj-offload `

@@ -1,5 +1,9 @@
-.\bin\llama-server.exe `
-  -m "..\..\models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q4_K_XL.gguf" `
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$exe = Join-Path $PSScriptRoot '..\bin\llama-server.exe'
+$model = Join-Path $root 'models\unsloth\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-Q5_K_XL.gguf'
+
+& $exe `
+  -m $model `
   --host 0.0.0.0 `
   --port 8080 `
   --gpu-layers all `
@@ -10,7 +14,7 @@
   --gpu-layers-draft all `
   --parallel 1 `
   --cache-ram 0 `
-  --ctx-size 200000 `
+  --ctx-size 145000 `
   --cache-type-k kvarn4 `
   --cache-type-v kvarn4 `
   --kv-tail-tokens 1024 `
