@@ -1,0 +1,130 @@
+{
+  "summary": "The most serious path is not a single memory bug but repeated trust-boundary failures: unpinned remote execution primitives, workflow secrets passed to mutable external actions, and release/install flows that execute or overwrite code without integrity validation. These can chain from repository/PR-level influence to host code execution, secret theft, and malicious release artifacts, especially on developer or CI hosts. Several findings are strong standalone availability/exfiltration issues (unauthenticated local/remote LLM and Whisper endpoints), and the factory/OpenCode/Jira MCP configuration provides useful pre-authentication-adjacent prompt-injection and supply-chain footholds.",
+  "ranked_findings": [
+    {
+      "index": 2,
+      "severity": "critical",
+      "exploitability_notes": "Likely CVSS 9.x-class because config-controlled repoPath is emitted into an elevated PowerShell one-liner with no escaping and no pre-validation in the Install path. The primitive is direct elevated command execution, not merely a local config issue, and the shared repo makes the source writable by PR-level actors. This is the clearest remote-to-local RCE primitive and should be ranked first."
+    },
+    {
+      "index": 3,
+      "severity": "critical",
+      "exploitability_notes": "Likely CVSS 9.x-class because tag-triggered builds can publish arbitrary unverified commits as release artifacts with no provenance, signing, branch reachability, or environment gate. The primitive is malicious release artifact production and distribution, a high-impact supply-chain result. It is especially dangerous when combined with unsigned release consumption."
+    },
+    {
+      "index": 4,
+      "severity": "critical",
+      "exploitability_notes": "Likely CVSS 8.8-9.4-class depending on scoring of privilege and interaction: unversioned npx -y mcp-remote@latest is fetched and executed automatically during Jira factory runs, with the full process environment inherited. This gives npm-registry or MCP-endpoint compromise a direct local RCE primitive and a convenient path to steal local secrets. It is a high-value chain node because it can be triggered through normal Jira workflow operations."
+    },
+    {
+      "index": 0,
+      "severity": "high",
+      "exploitability_notes": "Likely CVSS 7-8-class: @latest external GitHub Action receives OPENAI_API_KEY, OPENAI_BASE_URL, and GITHUB_TOKEN, with scoped but meaningful issues/PR write permissions. The main primitive is supply-chain action compromise leading to secret access and repository manipulation. It is less immediate than direct PowerShell or npm RCE, but very dangerous in AI review workflows and a strong chain starter."
+    },
+    {
+      "index": 1,
+      "severity": "medium",
+      "exploitability_notes": "Likely CVSS 5-7-class: config-controlled stateDir and repoPath allow arbitrary directory creation, factory.db overwrite, and DDL against an attacker-named pre-existing database, plus git operations against any local repo. The immediate primitive is state corruption and arbitrary file/directory manipulation, which is more useful as a staging or persistence primitive than as a standalone RCE path unless paired with another code-execution bug."
+    },
+    {
+      "index": 8,
+      "severity": "high",
+      "exploitability_notes": "Likely CVSS 7-8-class: unverified GitHub release download and archive extraction overwrite local llama.cpp binaries, which are later executed by start scripts. The primitive is remote code substitution leading to local code execution when the server starts. It is a strong standalone host-compromise path and also a natural follow-on to malicious release or tag workflows."
+    },
+    {
+      "index": 9,
+      "severity": "high",
+      "exploitability_notes": "Likely CVSS 7-8-class: vLLM --trust-remote-code executes model-repository-provided Python code with no pin, signature, hash, or review gate. The primitive is remote code execution from the model supply chain. It is highly exploitable in this environment because the same repo automates local model deployment and execution."
+    },
+    {
+      "index": 6,
+      "severity": "high",
+      "severity_note": "Likely CVSS 7-8-class: a writable settings.json repoRoot redirects script scanning to an attacker-controlled directory, and Start executes the resulting PowerShell script with bypassed execution policy. The primitive is local process execution once an attacker can modify the app directory or shared install location. It is a strong local-to-RCE bridge on Windows hosts.",
+      "exploitability_notes": "Likely CVSS 7-8-class: a writable settings.json repoRoot redirects script scanning to an attacker-controlled directory, and Start executes the resulting PowerShell script with bypassed execution policy. The primitive is local process execution once an attacker can modify the app directory or shared install location. It is a strong local-to-RCE bridge on Windows hosts."
+    },
+    {
+      "index": 10,
+      "severity": "high",
+      "exploitability_notes": "Likely CVSS 7-8-class: an unauthenticated TCP transcription server can be triggered by any reachable host, allowing free inference use, transcript exfiltration, and remote state mutation when remote settings are enabled. The primitive is data theft, denial of service, and limited local configuration tampering. It is not by itself a code-execution bug, but it is a strong lateral foothold and data-leak amplifier."
+    },
+    {
+      "index": 7,
+      "severity": "medium",
+      "exploitability_notes": "Likely CVSS 4-6-class: llama-server is bound to all interfaces with no authentication, leaking prompts/model state and enabling inference DoS. The primitive is confidentiality/availability impact rather than direct code execution. It is valuable in chains because it can expose local inference traffic, model names, or prompt data to adjacent actors."
+    },
+    {
+      "index": 5,
+      "severity": "medium",
+      "exploitability_notes": "Likely CVSS 4-6-class: a wildcard Jira MCP permission allows the OpenCode agent to call any jira_* tool beyond the factory’s intended set if prompt injection succeeds. The primitive is unauthorized Jira mutation and data exposure, not host RCE. It is important as an integrity/authorization defect and as a chain node for Atlassian-side impact."
+    },
+    {
+      "index": 11,
+      "severity": "medium",
+      "exploitability_notes": "Likely CVSS 4-6-class: the factory test workflow lacks a permissions block, so GITHUB_TOKEN inherits repository defaults. If those defaults are broad, lifecycle scripts or test code can become a path to repository write. The primitive is privilege overreach and potential CI-to-repo escalation, but it depends on the repo’s default token configuration."
+    }
+  ],
+  "chains": [
+    {
+      "title": "PR-influenced config -> elevated PowerShell RCE",
+      "steps": [2, 1],
+      "severity": "critical",
+      "blocked_by_controls": [
+        "no effective escaping or validation in install path",
+        "shared repo makes config writable by PR authors"
+      ],
+      "narrative": "Finding 2 is the primary chain: a PR-modifiable config path flows into an unescaped elevated PowerShell command, giving direct host code execution. Finding 1 reinforces the same trust model by showing that other config values can be used to direct state and repo operations to attacker-chosen locations, enabling staging, persistence, or follow-on file operations after or before the elevated command runs."
+    },
+    {
+      "title": "Tag release -> malicious artifact -> local RCE on client",
+      "steps": [3, 8, 9],
+      "severity": "critical",
+      "blocked_by_controls": [
+        "no release signing",
+        "no provenance or branch-reachability validation",
+        "no binary/model integrity validation"
+      ],
+      "narrative": "Finding 3 allows publishing arbitrary unverified commits as official releases. Finding 8 shows the same kind of trust gap in the local update path: unverified GitHub release binaries can overwrite local llama.cpp code that is later executed. Finding 9 adds a model-side RCE vector via untrusted remote code. Together these form a supply-chain chain from repository/tag influence to malicious or compromised local inference binaries and executed model code."
+    },
+    {
+      "title": "Factory Jira run -> npm MCP RCE -> local secret access",
+      "steps": [4, 5],
+      "severity": "critical",
+      "blocked_by_controls": [
+        "no version pin on mcp-remote",
+        "no sandboxing of MCP child process",
+        "full process environment inherited"
+      ],
+      "narrative": "Finding 4 is the critical chain node: during normal Jira factory operation, the system spawns npx -y mcp-remote@latest with the full environment, allowing npm or MCP-endpoint compromise to become local RCE and secret theft. Finding 5 is a secondary chain node: once an actor can influence Jira issue content or MCP tool selection, the wildcard jira_* permission lets a prompt-injected agent reach broader Jira mutation capabilities. Combined, the factory gives a remote/Jira-adjacent attacker a route into local code execution and Atlassian-side manipulation."
+    },
+    {
+      "title": "AI review action compromise -> repo manipulation -> downstream release impact",
+      "steps": [0, 11, 3],
+      "severity": "high",
+      "blocked_by_controls": [
+        "scoped GITHUB_TOKEN in ai-review.yml",
+        "persist-credentials false"
+      ],
+      "narrative": "Finding 0 passes secrets and a GITHUB_TOKEN with issues/PR write to an unpinned external action, making the AI review path a supply-chain foothold. Finding 11 shows adjacent workflow token over-permissioning, increasing the chance that a compromised dependency or test script can act against the repository. If that foothold is used to modify workflow, config, or tag-eligible code, Finding 3 can turn the result into malicious release artifacts. The controls reduce the blast radius, but they do not stop action compromise or broad workflow influence."
+    },
+    {
+      "title": "Local foothold -> Whisper settings redirect -> script execution",
+      "steps": [6, 10, 7],
+      "severity": "high",
+      "blocked_by_controls": [
+        "no strong isolation of app directory",
+        "no authentication on local/remote inference and transcription endpoints"
+      ],
+      "narrative": "Findings 10 and 7 give an adjacent-network or local attacker free access to transcription/inference services, enabling data leakage and possible local reconnaissance or disruption. Finding 6 then becomes the execution bridge if the attacker can write or influence the Whisper/LlmServerManager settings directory: a malicious repoRoot redirects the app to an attacker-controlled script that runs with PowerShell execution policy bypass. The chain is strongest on shared or poorly isolated developer hosts."
+    },
+    {
+      "title": "Jira prompt injection -> broad MCP mutation -> state corruption",
+      "steps": [5, 1],
+      "severity": "medium",
+      "blocked_by_controls": [
+        "prompt-level untrusted-input warning",
+        "schema validation after tool execution"
+      ],
+      "narrative": "Finding 5 allows a sufficiently persuasive Jira prompt injection to cause the OpenCode agent to call unintended jira_* tools because permissions are wildcarded. Finding 1 can then be used to corrupt or redirect factory state via config-controlled database and repo paths, turning remote Jira influence into local state tampering or follow-on factory misbehavior. This is less severe than the host RCE chains, but it is a credible multi-step integrity chain."
+    }
+  ]
+}
