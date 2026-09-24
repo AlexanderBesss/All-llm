@@ -1,5 +1,7 @@
 /llm-servers/llama/windows/llama/
 /llm-servers/llama/windows/NPU/llama-ov/
+/llm-servers/llama/windows/vulkan/*
+!/llm-servers/llama/windows/vulkan/*.ps1
 /llm-servers/llama/windows/*.log
 /llm-servers/beellama/bin/
 /llm-servers/beellama/*.log
