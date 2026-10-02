@@ -9,6 +9,8 @@
     All output is also saved to update-vulkan.log beside this script.
 #>
 
+param([switch]$NonInteractive)
+
 $LogFile = Join-Path $PSScriptRoot 'update-vulkan.log'
 try { Start-Transcript -Path $LogFile -Append } catch {}
 
@@ -24,6 +26,7 @@ Update-GitHubRelease `
     -TempDir      (Join-Path $env:TEMP "llama-vulkan-$(Get-Date -Format 'yyyyMMddHHmmss')") `
     -UserAgent    'llama-vulkan-updater-pwsh' `
     -ReleaseChannel 'Prerelease' `
+    -NonInteractive:$NonInteractive `
     -TestInstalled { param([string]$Path)
         (Test-Path (Join-Path $Path 'llama-server.exe')) -or
         (Test-Path (Join-Path $Path 'llama-cli.exe'))

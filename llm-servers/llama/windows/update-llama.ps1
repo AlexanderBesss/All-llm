@@ -10,6 +10,8 @@
     All output is also saved to update-llama.log beside this script.
 #>
 
+param([switch]$NonInteractive)
+
 $LogFile = Join-Path $PSScriptRoot 'update-llama.log'
 try { Start-Transcript -Path $LogFile -Append } catch {}
 
@@ -25,6 +27,7 @@ Update-GitHubRelease `
     -TempDir      (Join-Path $env:TEMP "llama-update-$(Get-Date -Format 'yyyyMMddHHmmss')") `
     -UserAgent    'llama-updater-pwsh' `
     -ReleaseChannel 'Prerelease' `
+    -NonInteractive:$NonInteractive `
     -TestInstalled { param([string]$Path)
         (Test-Path (Join-Path $Path 'llama-server.exe')) -or
         (Test-Path (Join-Path $Path 'llama-cli.exe')) -or

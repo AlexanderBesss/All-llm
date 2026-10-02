@@ -34,6 +34,13 @@ function Remove-PathQuietly {
     }
 }
 
+function Complete-Update {
+    param([bool]$Prompt)
+
+    Stop-Transcript -ErrorAction SilentlyContinue
+    if ($Prompt) { Read-Host 'Press Enter to exit' }
+}
+
 function Get-CurrentVersion {
     param([string]$Path)
 
@@ -93,8 +100,11 @@ function Update-GitHubRelease {
         [string]$UserAgent,
         [ValidateSet('Latest', 'Prerelease')]
         [string]$ReleaseChannel = 'Latest',
-        [scriptblock]$TestInstalled  # must accept [string]$Path and return bool
+        [scriptblock]$TestInstalled,  # must accept [string]$Path and return bool
+        [switch]$NonInteractive      # set by callers that automate the update (no pause, real exit codes)
     )
+
+    $Prompt = -not $NonInteractive
 
     $ErrorOccurred = $false
 
@@ -128,9 +138,8 @@ function Update-GitHubRelease {
 
     if ($ErrorOccurred) {
         Write-Host ""
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Read-Host 'Press Enter to exit'
-        exit
+        Complete-Update -Prompt $Prompt
+        exit 1
     }
 
     $TagName = $Release.tag_name
@@ -150,9 +159,8 @@ function Update-GitHubRelease {
         Write-Host ""
         Write-Host "Already on $TagName -- nothing to do." -ForegroundColor Yellow
         Write-Host ""
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Read-Host 'Press Enter to exit'
-        exit
+        Complete-Update -Prompt $Prompt
+        exit 0
     }
 
     # ---------- STEP 2: Find the right asset ----------
@@ -164,9 +172,8 @@ function Update-GitHubRelease {
         Write-Host "Available assets:" -ForegroundColor Yellow
         $Release.assets | ForEach-Object { Write-Host "  - $($_.name)" -ForegroundColor Yellow }
         Write-Host ""
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Read-Host 'Press Enter to exit'
-        exit
+        Complete-Update -Prompt $Prompt
+        exit 1
     }
 
     $DownloadUrl = $Asset.browser_download_url
@@ -184,9 +191,8 @@ function Update-GitHubRelease {
     } catch {
         Write-Host "ERROR: Download failed: $_" -ForegroundColor Red
         Write-Host ""
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Read-Host 'Press Enter to exit'
-        exit
+        Complete-Update -Prompt $Prompt
+        exit 1
     }
 
     # ---------- STEP 4: Extract ----------
@@ -208,9 +214,8 @@ function Update-GitHubRelease {
     } catch {
         Write-Host "ERROR: Extraction failed: $_" -ForegroundColor Red
         Write-Host ""
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Read-Host 'Press Enter to exit'
-        exit
+        Complete-Update -Prompt $Prompt
+        exit 1
     }
 
     # ---------- STEP 5: Merge files ----------
@@ -267,8 +272,8 @@ function Update-GitHubRelease {
     Write-Host ''
     Write-Host 'Done!' -ForegroundColor Green
 
-    # ---------- ALWAYS PAUSE AT THE END ----------
+    # ---------- PAUSE AT THE END (interactive runs only) ----------
     Write-Host ''
-    Stop-Transcript -ErrorAction SilentlyContinue
-    Read-Host 'Press Enter to exit'
+    Complete-Update -Prompt $Prompt
+    exit 0
 }
