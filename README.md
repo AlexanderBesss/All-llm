@@ -7,6 +7,7 @@ All scripts use full GPU offload (`--gpu-layers all` + `--fit on`), quantized KV
 - **llm-servers/beellama/** — beellama.cpp (llama.cpp fork) binaries; start scripts in `scripts/`
 - **llm-server-manager/** — WPF app to browse and start the Windows LLM server scripts
 - **llm-servers/llama/** — llama.cpp server scripts (Linux/Windows); Windows start scripts in `llama/windows/scripts/`
+- **llm-servers/llama/windows/glm5next/** — Unsloth llama.cpp build with `glm5next` (GLM-5.3-Flash) support; install with `update-glm5next.ps1`. The official ggml-org builds cannot load GLM-5.3-Flash
 - **llm-servers/scripts/** — shared PowerShell modules
 - **models/** — GGUF model files
 - **pi/** — [pi](https://github.com/earendil-works/pi) coding agent extensions
