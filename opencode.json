@@ -38,8 +38,9 @@
     "formatter": true,
     "compaction": {
         "auto": true,
-        "prune": true,
-        "reserved": 20000,
-        "preserve_recent_tokens": 12000
+        "buffer": 20000,
+        "keep": {
+            "tokens": 12000
+        }
     }
 }
